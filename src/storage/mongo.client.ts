@@ -1,4 +1,4 @@
-import { MongoClient, Db, Collection } from 'mongodb';
+import { MongoClient, Db, Collection, ServerApiVersion } from 'mongodb';
 import { logger } from '../utils/logger.js';
 
 let client: MongoClient | null = null;
@@ -12,7 +12,16 @@ export async function connectMongo(): Promise<Db> {
 
   const dbName = process.env['MONGO_DB_NAME'] ?? 'genlea';
 
+  const isAtlas = uri.startsWith('mongodb+srv://');
+
   client = new MongoClient(uri, {
+    ...(isAtlas && {
+      serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+      },
+    }),
     maxPoolSize: 10,
     minPoolSize: 2,
     serverSelectionTimeoutMS: 10000,
@@ -20,8 +29,11 @@ export async function connectMongo(): Promise<Db> {
   });
 
   await client.connect();
-  db = client.db(dbName);
 
+  // Verify connection with a ping (same as Atlas quickstart recommends)
+  await client.db('admin').command({ ping: 1 });
+
+  db = client.db(dbName);
   logger.info({ dbName }, 'MongoDB connected');
   return db;
 }
@@ -46,8 +58,8 @@ export async function closeMongo(): Promise<void> {
 
 // Collection name constants
 export const COLLECTIONS = {
-  COMPANIES: 'companies',
-  CONTACTS: 'contacts',
-  JOBS: 'jobs',
+  COMPANIES:   'companies',
+  CONTACTS:    'contacts',
+  JOBS:        'jobs',
   SCRAPE_LOGS: 'scrape_logs',
 } as const;
