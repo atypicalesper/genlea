@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { logger } from '../utils/logger.js';
+import { groq, GROQ_MODEL } from '../ai/groq.client.js';
 
 export interface NameOriginResult {
   name: string;
@@ -14,78 +15,170 @@ export interface RatioResult {
   reliable: boolean; // true if sample >= MIN_SAMPLE
 }
 
-const MIN_SAMPLE = parseInt(process.env['INDIAN_RATIO_MIN_SAMPLE'] ?? '10');
+type NameInput = { firstName?: string; lastName?: string; fullName?: string };
+
+const MIN_SAMPLE    = parseInt(process.env['INDIAN_RATIO_MIN_SAMPLE'] ?? '10');
 const ETHNICOLR_URL = process.env['ETHNICOLR_URL'] ?? 'http://localhost:5050';
 const MIN_CONFIDENCE = 0.65;
 
+// Groq batch size — keep prompts short to stay within token limits
+const GROQ_BATCH_SIZE = 50;
+
+// ── Groq classification ────────────────────────────────────────────────────────
+
+async function classifyWithGroq(names: NameInput[]): Promise<RatioResult> {
+  const nameStrings = names.map(n =>
+    (n.fullName ?? `${n.firstName ?? ''} ${n.lastName ?? ''}`).trim()
+  );
+
+  let indianCount = 0;
+  const totalCount = nameStrings.length;
+
+  // Process in batches
+  for (let i = 0; i < nameStrings.length; i += GROQ_BATCH_SIZE) {
+    const batch = nameStrings.slice(i, i + GROQ_BATCH_SIZE);
+    const numbered = batch.map((name, idx) => `${i + idx + 1}. ${name}`).join('\n');
+
+    const response = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      temperature: 0,
+      max_tokens: 512,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a name-origin classifier. Given a list of names, determine which are of Indian/South-Asian origin. ' +
+            'Respond ONLY with a JSON object: { "results": [ { "index": 1, "isIndian": true/false, "confidence": 0.0-1.0 }, ... ] }. ' +
+            'Use confidence >= 0.65 threshold. Include every name in the list.',
+        },
+        {
+          role: 'user',
+          content: `Classify these names:\n${numbered}`,
+        },
+      ],
+    });
+
+    const raw = response.choices[0]?.message?.content ?? '{}';
+    const parsed = JSON.parse(raw) as {
+      results: Array<{ index: number; isIndian: boolean; confidence: number }>;
+    };
+
+    for (const r of parsed.results ?? []) {
+      if (r.isIndian && r.confidence >= MIN_CONFIDENCE) {
+        indianCount++;
+      }
+    }
+  }
+
+  return {
+    indianCount,
+    totalCount,
+    ratio: totalCount > 0 ? parseFloat((indianCount / totalCount).toFixed(4)) : 0,
+    reliable: totalCount >= MIN_SAMPLE,
+  };
+}
+
+// ── Python microservice fallback ───────────────────────────────────────────────
+
+async function classifyWithPython(names: NameInput[]): Promise<RatioResult> {
+  const response = await axios.post<{
+    results: NameOriginResult[];
+    indian_count: number;
+    total_count: number;
+    ratio: number;
+  }>(
+    `${ETHNICOLR_URL}/classify/batch`,
+    {
+      names: names.map(n => ({
+        first_name: n.firstName,
+        last_name:  n.lastName,
+        full_name:  n.fullName,
+      })),
+      min_confidence: MIN_CONFIDENCE,
+    },
+    { timeout: 15000 }
+  );
+
+  const { indian_count, total_count, ratio } = response.data;
+  return {
+    indianCount: indian_count,
+    totalCount:  total_count,
+    ratio:       parseFloat(ratio.toFixed(4)),
+    reliable:    total_count >= MIN_SAMPLE,
+  };
+}
+
+// ── Regex last-resort fallback ─────────────────────────────────────────────────
+
+function classifyWithRegex(names: NameInput[]): RatioResult {
+  const indianPattern = /\b(raj|ram|rav|pri|pra|san|sur|vik|vis|ash|amu|anv|dev|gan|har|jay|kal|man|nav|nih|nim|om|parag|roh|sar|shi|shan|sri|sub|suj|sun|tan|ume|uday|vij|vip|yog)\w*/i;
+  const indianSurnamePattern = /\b(sharma|patel|gupta|singh|kumar|nair|rao|reddy|iyer|mehta|jain|shah|verma|mishra|kapoor|malhotra|chopra|agarwal|pillai|krishna|venkat|rajan)\b/i;
+
+  let indianCount = 0;
+  for (const n of names) {
+    const fullName = n.fullName ?? `${n.firstName ?? ''} ${n.lastName ?? ''}`.trim();
+    if (indianPattern.test(fullName) || indianSurnamePattern.test(fullName)) {
+      indianCount++;
+    }
+  }
+
+  const totalCount = names.length;
+  return {
+    indianCount,
+    totalCount,
+    ratio: totalCount > 0 ? parseFloat((indianCount / totalCount).toFixed(4)) : 0,
+    reliable: totalCount >= MIN_SAMPLE,
+  };
+}
+
+// ── Public analyzer ────────────────────────────────────────────────────────────
+
 export const indianRatioAnalyzer = {
-  /**
-   * Classify a batch of employee names and return the Indian dev ratio.
-   * Calls the name-origin microservice at services/name-origin/
-   */
-  async analyzeNames(names: Array<{ firstName?: string; lastName?: string; fullName?: string }>): Promise<RatioResult> {
+  async analyzeNames(names: NameInput[]): Promise<RatioResult> {
     if (names.length === 0) {
       return { indianCount: 0, totalCount: 0, ratio: 0, reliable: false };
     }
 
-    try {
-      const response = await axios.post<{
-        results: NameOriginResult[];
-        indian_count: number;
-        total_count: number;
-        ratio: number;
-      }>(
-        `${ETHNICOLR_URL}/classify/batch`,
-        {
-          names: names.map(n => ({
-            first_name: n.firstName,
-            last_name: n.lastName,
-            full_name: n.fullName,
-          })),
-          min_confidence: MIN_CONFIDENCE,
-        },
-        { timeout: 15000 }
-      );
-
-      const { indian_count, total_count, ratio } = response.data;
-
-      return {
-        indianCount: indian_count,
-        totalCount: total_count,
-        ratio: parseFloat(ratio.toFixed(4)),
-        reliable: total_count >= MIN_SAMPLE,
-      };
-    } catch (err) {
-      logger.warn({ err }, 'Name origin service unavailable — using fallback');
-      return this.fallbackAnalysis(names);
-    }
-  },
-
-  /** Fallback: simple regex-based South Asian name detection */
-  fallbackAnalysis(names: Array<{ firstName?: string; lastName?: string; fullName?: string }>): RatioResult {
-    // Common South Asian syllable patterns in names
-    const indianPattern = /\b(raj|ram|rav|pri|pra|san|sur|vik|vis|ash|amu|anv|dev|gan|har|jay|kal|man|nav|nih|nim|om|parag|roh|sar|shi|shan|sri|sub|suj|sun|tan|ume|uday|vij|vip|yog)\w*/i;
-    const indianSurnamePattern = /\b(sharma|patel|gupta|singh|kumar|nair|rao|reddy|iyer|mehta|jain|shah|verma|mishra|kapoor|malhotra|chopra|agarwal|pillai|krishna|venkat|rajan)\b/i;
-
-    let indianCount = 0;
-    for (const n of names) {
-      const fullName = n.fullName ?? `${n.firstName ?? ''} ${n.lastName ?? ''}`.trim();
-      if (indianPattern.test(fullName) || indianSurnamePattern.test(fullName)) {
-        indianCount++;
+    // 1. Groq (primary — fast, no infra needed)
+    if (process.env['GROQ_API_KEY']) {
+      try {
+        const result = await classifyWithGroq(names);
+        logger.info(
+          { provider: 'groq', total: result.totalCount, indian: result.indianCount },
+          '[dev-origin] Groq classification complete'
+        );
+        return result;
+      } catch (err) {
+        logger.warn({ err }, '[dev-origin] Groq failed — falling back to Python service');
       }
     }
 
-    const totalCount = names.length;
-    return {
-      indianCount,
-      totalCount,
-      ratio: totalCount > 0 ? parseFloat((indianCount / totalCount).toFixed(4)) : 0,
-      reliable: totalCount >= MIN_SAMPLE,
-    };
+    // 2. Python microservice (secondary)
+    try {
+      const result = await classifyWithPython(names);
+      logger.info(
+        { provider: 'ethnicolr', total: result.totalCount, indian: result.indianCount },
+        '[dev-origin] Python service classification complete'
+      );
+      return result;
+    } catch (err) {
+      logger.warn({ err }, '[dev-origin] Python service unavailable — using regex fallback');
+    }
+
+    // 3. Regex (last resort)
+    const result = classifyWithRegex(names);
+    logger.info(
+      { provider: 'regex', total: result.totalCount, indian: result.indianCount },
+      '[dev-origin] Regex fallback classification complete'
+    );
+    return result;
   },
 
-  /** Check if the name origin service is reachable */
+  fallbackAnalysis: classifyWithRegex,
+
   async isServiceAvailable(): Promise<boolean> {
+    if (process.env['GROQ_API_KEY']) return true;
     try {
       const res = await axios.get(`${ETHNICOLR_URL}/health`, { timeout: 3000 });
       return res.status === 200;

@@ -46,22 +46,6 @@ services:
     networks:
       - genlea-net
 
-  # Optional: Bull Board (queue dashboard) — http://localhost:3002
-  # Port changed from 3001 → 3002 (3001 commonly used by other dev servers)
-  bull-board:
-    image: deadly0/bull-board:latest
-    platform: linux/amd64        # this image is amd64-only, Docker will emulate on ARM
-    container_name: genlea-bullboard
-    restart: unless-stopped
-    ports:
-      - "3002:3000"
-    environment:
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-    depends_on:
-      - redis
-    networks:
-      - genlea-net
 
 volumes:
   mongo_data:

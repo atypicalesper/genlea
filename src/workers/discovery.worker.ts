@@ -12,6 +12,7 @@ import { crunchbaseScraper } from '../scrapers/crunchbase.scraper.js';
 import { wellfoundScraper } from '../scrapers/wellfound.scraper.js';
 import { indeedScraper } from '../scrapers/indeed.scraper.js';
 import { zoomInfoScraper } from '../scrapers/zoominfo.scraper.js';
+import { glassdoorScraper } from '../scrapers/glassdoor.scraper.js';
 import { deduplicateCompanies } from '../enrichment/deduplicator.js';
 import { logger } from '../utils/logger.js';
 import { generateRunId } from '../utils/random.js';
@@ -23,6 +24,7 @@ const SCRAPERS = {
   wellfound:  wellfoundScraper,
   indeed:     indeedScraper,
   zoominfo:   zoomInfoScraper,
+  glassdoor:  glassdoorScraper,
 };
 
 async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {

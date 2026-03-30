@@ -13,9 +13,9 @@ const connection: ConnectionOptions = {
 
 // ── Queue Names ───────────────────────────────────────────────────────────────
 export const QUEUE_NAMES = {
-  DISCOVERY: 'genlea:discovery',
-  ENRICHMENT: 'genlea:enrichment',
-  SCORING: 'genlea:scoring',
+  DISCOVERY: 'genlea-discovery',
+  ENRICHMENT: 'genlea-enrichment',
+  SCORING: 'genlea-scoring',
 } as const;
 
 // ── Queue Defaults ────────────────────────────────────────────────────────────

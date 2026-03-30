@@ -2,6 +2,7 @@ import 'dotenv-flow/config';
 import { startDiscoveryWorker } from './discovery.worker.js';
 import { startEnrichmentWorker } from './enrichment.worker.js';
 import { startScoringWorker } from './scoring.worker.js';
+import { startScheduler } from '../core/scheduler.js';
 import { logger } from '../utils/logger.js';
 
 async function main() {
@@ -11,7 +12,8 @@ async function main() {
     startEnrichmentWorker(),
     startScoringWorker(),
   ]);
-  logger.info('[workers] All workers running — waiting for jobs');
+  await startScheduler();
+  logger.info('[workers] All workers running — scheduler active');
 }
 
 main().catch(err => {

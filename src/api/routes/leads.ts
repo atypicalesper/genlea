@@ -39,23 +39,6 @@ export async function leadsRoutes(app: FastifyInstance) {
     });
   });
 
-  // GET /api/companies/:id — single company with contacts
-  app.get<{ Params: { id: string } }>('/companies/:id', async (req, reply) => {
-    const { id } = req.params;
-    logger.info({ id }, '[api:leads] GET /companies/:id request');
-
-    const company = await companyRepository.findById(id);
-    if (!company) {
-      logger.warn({ id }, '[api:leads] Company not found');
-      return reply.status(404).send({ success: false, error: 'Company not found' });
-    }
-
-    const contacts = await contactRepository.findByCompanyId(id);
-    logger.info({ id, domain: company.domain, contacts: contacts.length }, '[api:leads] Company found');
-
-    return reply.send({ success: true, data: { company, contacts } });
-  });
-
   // GET /api/stats — dashboard summary counts
   app.get('/stats', async (_req, reply) => {
     logger.info('[api:leads] GET /stats request');

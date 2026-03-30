@@ -1,13 +1,17 @@
 import 'dotenv-flow/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import { createBullBoard } from '@bull-board/api';
+import { BullMQAdapter } from '@bull-board/api/bullMQAdapter.js';
+import { FastifyAdapter } from '@bull-board/fastify';
 import { connectMongo } from '../storage/mongo.client.js';
-import { queueManager } from '../core/queue.manager.js';
+import { discoveryQueue, enrichmentQueue, scoringQueue, queueManager } from '../core/queue.manager.js';
 import { leadsRoutes } from './routes/leads.js';
 import { exportRoutes } from './routes/export.js';
 import { scrapeRoutes } from './routes/scrape.js';
 import { jobsRoutes } from './routes/jobs.js';
 import { companiesRoutes } from './routes/companies.js';
+import { dashboardRoutes } from './dashboard.js';
 import { logger } from '../utils/logger.js';
 
 const server = Fastify({
@@ -19,6 +23,21 @@ async function bootstrap() {
   await connectMongo();
 
   await server.register(cors, { origin: '*' });
+
+  // ── Bull Board (/queues) ───────────────────────────────────────────────────
+  const bullBoardAdapter = new FastifyAdapter();
+  createBullBoard({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    queues: ([
+      new BullMQAdapter(discoveryQueue),
+      new BullMQAdapter(enrichmentQueue),
+      new BullMQAdapter(scoringQueue),
+    ] as any[]),
+    serverAdapter: bullBoardAdapter,
+  });
+  bullBoardAdapter.setBasePath('/queues');
+  await server.register(bullBoardAdapter.registerPlugin(), { basePath: '/queues', prefix: '/queues' });
+  logger.info('[api] Bull Board: http://localhost:4000/queues');
 
   // Health check
   server.get('/health', async () => ({
@@ -32,6 +51,9 @@ async function bootstrap() {
     const stats = await queueManager.getQueueStats();
     return { queues: stats };
   });
+
+  // Dashboard
+  await server.register(dashboardRoutes);
 
   // Feature routes
   await server.register(leadsRoutes,     { prefix: '/api' });
