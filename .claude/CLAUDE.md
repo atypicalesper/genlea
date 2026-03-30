@@ -58,81 +58,31 @@ All files live here. **Never write to tmp or outside this directory.**
 | `src/core/proxy.manager.ts` | ✅ Done | BrightData + file-based proxy rotation, fail tracking |
 | `src/core/session.manager.ts` | ✅ Done | LinkedIn session cookies, daily limits, cooldown, auto-login |
 
-### 🔄 Being Built Now (implementation in progress)
+### 🔄 Being Built Now
+| File | Status | Notes |
+|---|---|---|
+| `src/scrapers/clearbit.scraper.ts` | 🔄 Next | Company enrichment (logo, description, tech) |
+| `src/api/routes/companies.ts` | 🔄 Next | Separate companies route with full detail |
+
+### ✅ Newly Completed (this session)
 | File | Status | Purpose |
 |---|---|---|
-| `src/enrichment/email.verifier.ts` | 🔄 Next | MX + SMTP verify emails |
-| `src/enrichment/deduplicator.ts` | 🔄 Next | Fuzzy dedup across scrapers |
-| `src/enrichment/contact.resolver.ts` | 🔄 Next | Find/verify CEO/HR contacts |
+| `src/enrichment/email.verifier.ts` | ✅ Done | MX + raw SMTP probe, disposable domain check |
+| `src/enrichment/deduplicator.ts` | ✅ Done | Domain-keyed company, email-keyed contact, title-keyed job |
+| `src/enrichment/contact.resolver.ts` | ✅ Done | SMTP verify existing emails + Hunter gap-fill for CEO/HR |
+| `src/scrapers/zoominfo.scraper.ts` | ✅ Done | Playwright login + company/contacts tab (phone numbers) |
+| `src/index.ts` | ✅ Done | Commander CLI (scrape/score/stats/export/login) |
+| `scripts/verify-emails.ts` | ✅ Done | Batch SMTP verify up to 500 pending contacts |
+| `src/workers/enrichment.worker.ts` | ✅ Done | Wired: GitHub → Hunter → contactResolver → originRatio |
+| `services/name-origin/` | ✅ Done | Separate git repo — education-signal Python classifier |
 
-### ✅ Newly Completed
+### ❌ Genuinely Not Yet Started
 | File | Status | Purpose |
 |---|---|---|
-| `src/utils/logger.ts` | ✅ Done | Pino structured logger |
-| `src/utils/random.ts` | ✅ Done | randomInt, delay, normalizeDomain |
-| `src/core/queue.manager.ts` | ✅ Done | BullMQ typed queues |
-| `src/storage/mongo.client.ts` | ✅ Done | MongoDB singleton |
-| `src/storage/repositories/company.repository.ts` | ✅ Done | Companies CRUD + upsert |
-| `src/storage/repositories/contact.repository.ts` | ✅ Done | Contacts CRUD |
-| `src/storage/repositories/job.repository.ts` | ✅ Done | Jobs CRUD |
-| `src/storage/repositories/scrape-log.repository.ts` | ✅ Done | Audit logs |
-| `src/enrichment/normalizer.ts` | ✅ Done | Multi-source merge, tech tag aliasing |
-| `src/enrichment/dev-origin.analyzer.ts` | ✅ Done | Calls name-origin service for ratio |
-| `src/scoring/rules.ts` | ✅ Done | 5 pure rule functions |
-| `src/scoring/scorer.ts` | ✅ Done | Orchestrates scoring, emits log |
-| `src/scrapers/linkedin.scraper.ts` | ✅ Done | Playwright stealth, session-aware |
-| `src/scrapers/apollo.scraper.ts` | ✅ Done | API + Playwright web fallback |
-| `src/scrapers/crunchbase.scraper.ts` | ✅ Done | API + Playwright web fallback |
-| `src/scrapers/hunter.scraper.ts` | ✅ Done | Email pattern + verify API |
-| `src/scrapers/github.scraper.ts` | ✅ Done | Tech stack via GitHub API |
-| `src/scrapers/wellfound.scraper.ts` | ✅ Done | Free Playwright, no auth |
-| `src/workers/discovery.worker.ts` | ✅ Done | Phase 1 BullMQ worker |
-| `src/workers/enrichment.worker.ts` | ✅ Done | Phase 2 BullMQ worker |
-| `src/workers/scoring.worker.ts` | ✅ Done | Phase 3 BullMQ worker |
-| `src/workers/index.ts` | ✅ Done | Starts all workers |
-| `src/api/server.ts` | ✅ Done | Fastify server bootstrap |
-| `src/api/routes/leads.ts` | ✅ Done | GET /api/leads, /stats, /companies/:id |
-| `src/api/routes/export.ts` | ✅ Done | GET /api/export/csv |
-| `src/api/routes/scrape.ts` | ✅ Done | POST /api/scrape |
-| `src/api/routes/jobs.ts` | ✅ Done | GET /api/jobs/status + logs |
-| `scripts/db-init.ts` | ✅ Done | Creates all MongoDB indexes |
-| `scripts/seed-queries.ts` | ✅ Done | Seeds 10 initial scrape jobs |
-| `GETTING_STARTED.md` | ✅ Done | Full step-by-step run guide |
-
-
-### ❌ Not Yet Started
-| File | Status | Purpose |
-|---|---|---|
-| `src/enrichment/normalizer.ts` | ❌ | Merge multi-source raw results |
-| `src/enrichment/deduplicator.ts` | ❌ | Fuzzy dedup by domain |
-| `src/enrichment/indian-ratio.analyzer.ts` | ❌ | NLP name → Indian origin % |
-| `src/enrichment/email.verifier.ts` | ❌ | MX + SMTP + mailcheck.ai |
-| `src/enrichment/contact.resolver.ts` | ❌ | Find/verify CEO/HR contacts |
-| `src/scoring/rules.ts` | ❌ | Pure scoring rule functions |
-| `src/scoring/scorer.ts` | ❌ | Orchestrates 5 scoring signals |
-| `src/scrapers/linkedin.scraper.ts` | ❌ | Main LinkedIn scraper |
-| `src/scrapers/sales-navigator.scraper.ts` | ❌ | Sales Navigator lead lists |
-| `src/scrapers/crunchbase.scraper.ts` | ❌ | Crunchbase API + page |
-| `src/scrapers/apollo.scraper.ts` | ❌ | Apollo.io contact search |
-| `src/scrapers/hunter.scraper.ts` | ❌ | Hunter.io email discovery |
-| `src/scrapers/github.scraper.ts` | ❌ | GitHub org tech stack |
-| `src/scrapers/zoominfo.scraper.ts` | ❌ | ZoomInfo contacts |
-| `src/scrapers/wellfound.scraper.ts` | ❌ | Wellfound job listings |
-| `src/scrapers/clearbit.scraper.ts` | ❌ | Company enrichment API |
-| `src/workers/discovery.worker.ts` | ❌ | BullMQ discovery phase |
-| `src/workers/enrichment.worker.ts` | ❌ | BullMQ enrichment phase |
-| `src/workers/scoring.worker.ts` | ❌ | BullMQ scoring phase |
-| `src/workers/index.ts` | ❌ | Start all workers |
-| `src/api/server.ts` | ❌ | Fastify server |
-| `src/api/routes/leads.ts` | ❌ | GET /leads |
-| `src/api/routes/companies.ts` | ❌ | GET /companies/:id |
-| `src/api/routes/export.ts` | ❌ | GET /export/csv |
-| `src/api/routes/scrape.ts` | ❌ | POST /scrape |
-| `src/api/routes/jobs.ts` | ❌ | GET /jobs/status |
-| `src/index.ts` | ❌ | CLI entry point |
-| `scripts/db-init.ts` | ❌ | Create MongoDB indexes |
-| `scripts/seed-queries.ts` | ❌ | Seed initial scrape queries |
-| `scripts/verify-emails.ts` | ❌ | Batch email verification |
+| `src/scrapers/clearbit.scraper.ts` | ❌ | Logo, domain→company enrichment |
+| `src/api/routes/companies.ts` | ❌ | Separate company detail route |
+| `src/scrapers/indeed.scraper.ts` | ❌ | Free job scraping from Indeed |
+| `scripts/rescore-all.ts` | ❌ | Re-run scoring on all existing companies |
 
 ---
 
