@@ -47,8 +47,14 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
 
     const available = await scraper.isAvailable();
     if (!available) {
-      logger.warn({ source, runId }, '[discovery.worker] Scraper not available — skipping');
-      throw new Error(`Scraper ${source} is not available (missing credentials?)`);
+      logger.warn({ source, runId }, '[discovery.worker] Scraper not available — skipping gracefully');
+      await scrapeLogRepository.complete(logId, {
+        status: 'skipped' as any,
+        companiesFound: 0, contactsFound: 0, jobsFound: 0,
+        errors: [`Scraper ${source} unavailable — missing credentials`],
+        durationMs: Date.now() - startedAt.getTime(),
+      }).catch(() => {});
+      return; // complete job without retry
     }
 
     // ── Run scraper ─────────────────────────────────────────────────────────

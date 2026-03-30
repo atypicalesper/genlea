@@ -28,7 +28,7 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
 
     let contactsFound = 0;
 
-    // ── 1. GitHub — tech stack + dev count ─────────────────────────────────────
+    // ── 1. GitHub — tech stack + contributor names ──────────────────────────────
     logger.debug({ domain }, '[enrichment.worker] GitHub enrichment');
     const githubResult = await githubScraper.enrichOrg(domain);
     if (githubResult?.company) {
@@ -39,6 +39,24 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       );
     } else {
       logger.debug({ domain }, '[enrichment.worker] No GitHub org found');
+    }
+
+    // Save GitHub contributor names as contacts (used for origin ratio)
+    if (githubResult?.contacts?.length) {
+      for (const contact of githubResult.contacts) {
+        if (!contact.fullName) continue;
+        await contactRepository.upsert({
+          ...contact,
+          companyId,
+          fullName: contact.fullName,
+          role: contact.role ?? 'Unknown',
+        }).catch(() => {}); // ignore dupes
+      }
+      logger.info(
+        { domain, count: githubResult.contacts.length },
+        '[enrichment.worker] GitHub contributor names saved'
+      );
+      contactsFound += githubResult.contacts.length;
     }
 
     // ── 2. Hunter — email pattern discovery ────────────────────────────────────

@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import {
-  Scraper, ScrapeQuery, RawResult, RawCompany,
+  Scraper, ScrapeQuery, RawResult, RawCompany, RawContact,
 } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { chunkArray } from '../utils/random.js';
@@ -49,13 +49,13 @@ export class GitHubScraper implements Scraper {
     logger.info({ domain, orgName }, '[github] GitHub org found — fetching repos');
 
     try {
-      const [techStack, devCount] = await Promise.all([
+      const [techStack, { count: devCount, contacts }] = await Promise.all([
         this.getOrgTechStack(orgName),
-        this.getOrgDevCount(orgName),
+        this.getOrgContributors(orgName),
       ]);
 
       logger.info(
-        { domain, orgName, techStack, devCount },
+        { domain, orgName, techStack, devCount, contactsWithNames: contacts.length },
         '[github] Org enrichment complete'
       );
 
@@ -69,6 +69,7 @@ export class GitHubScraper implements Scraper {
       return {
         source: 'github',
         company: rawCompany,
+        contacts,
         scrapedAt: new Date(),
       };
     } catch (err) {
@@ -148,13 +149,21 @@ export class GitHubScraper implements Scraper {
     return tags;
   }
 
-  /** Count unique contributors across recent repos as proxy for dev team size */
-  private async getOrgDevCount(orgName: string): Promise<number | null> {
+  /**
+   * Fetch unique contributors across recent repos.
+   * Returns count + real names (fetched from user profiles) for origin ratio analysis.
+   * Caps at 30 profile lookups to stay within rate limits.
+   */
+  private async getOrgContributors(
+    orgName: string,
+  ): Promise<{ count: number | null; contacts: Partial<RawContact>[] }> {
+    const empty = { count: null, contacts: [] };
     try {
-      const res = await this.client.get<Array<{ name: string }>>(
+      const reposRes = await this.client.get<Array<{ name: string }>>(
         `/orgs/${orgName}/repos?sort=pushed&per_page=5`
       );
-      const repos = res.data.slice(0, 3);
+      const repos = reposRes.data.slice(0, 3);
+
       const contributorSets = await Promise.allSettled(
         repos.map(r =>
           this.client.get<Array<{ login: string }>>(
@@ -170,11 +179,39 @@ export class GitHubScraper implements Scraper {
         }
       }
 
-      logger.debug({ orgName, uniqueContributors: logins.size }, '[github:devs] Dev count estimate');
-      return logins.size > 0 ? logins.size : null;
+      const count = logins.size > 0 ? logins.size : null;
+      logger.debug({ orgName, uniqueContributors: logins.size }, '[github:devs] Contributor logins collected');
+
+      // Fetch real names for up to 30 contributors (for origin ratio)
+      const sample = [...logins].slice(0, 30);
+      const profileResults = await Promise.allSettled(
+        sample.map(login => this.client.get<{ login: string; name: string | null; company: string | null }>(
+          `/users/${login}`
+        ))
+      );
+
+      const contacts: Partial<RawContact>[] = [];
+      for (const r of profileResults) {
+        if (r.status !== 'fulfilled') continue;
+        const { login, name } = r.value.data;
+        const displayName = name?.trim() || login.replace(/[-_]/g, ' ');
+        const parts = displayName.split(' ').filter(Boolean);
+        if (parts.length === 0) continue;
+        contacts.push({
+          fullName:      displayName,
+          firstName:     parts[0],
+          lastName:      parts[parts.length - 1],
+          role:          'Unknown',
+          companyDomain: orgName,
+          linkedinUrl:   undefined,
+        });
+      }
+
+      logger.debug({ orgName, profilesFetched: contacts.length }, '[github:devs] Contributor profiles fetched');
+      return { count, contacts };
     } catch (err) {
-      logger.debug({ err, orgName }, '[github:devs] Could not count contributors');
-      return null;
+      logger.debug({ err, orgName }, '[github:devs] Could not fetch contributors');
+      return empty;
     }
   }
 }
