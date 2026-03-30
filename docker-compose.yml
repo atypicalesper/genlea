@@ -3,6 +3,7 @@ version: '3.9'
 services:
   mongo:
     image: mongo:7
+    platform: linux/arm64        # Apple Silicon native — no emulation warning
     container_name: genlea-mongo
     restart: unless-stopped
     ports:
@@ -16,6 +17,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    platform: linux/arm64        # Alpine is multi-arch, but pin for consistency
     container_name: genlea-redis
     restart: unless-stopped
     ports:
@@ -26,9 +28,10 @@ services:
     networks:
       - genlea-net
 
-  # Optional: Mongo Express UI
+  # Optional: Mongo Express UI — http://localhost:8081
   mongo-express:
     image: mongo-express:latest
+    platform: linux/arm64
     container_name: genlea-mongo-express
     restart: unless-stopped
     ports:
@@ -43,13 +46,15 @@ services:
     networks:
       - genlea-net
 
-  # Optional: Bull Board (queue dashboard)
+  # Optional: Bull Board (queue dashboard) — http://localhost:3002
+  # Port changed from 3001 → 3002 (3001 commonly used by other dev servers)
   bull-board:
     image: deadly0/bull-board:latest
+    platform: linux/amd64        # this image is amd64-only, Docker will emulate on ARM
     container_name: genlea-bullboard
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "3002:3000"
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
