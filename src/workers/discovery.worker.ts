@@ -5,7 +5,10 @@ import { createWorker, queueManager, QUEUE_NAMES } from '../core/queue.manager.j
 import { connectMongo } from '../storage/mongo.client.js';
 import { scrapeLogRepository } from '../storage/repositories/scrape-log.repository.js';
 import { companyRepository } from '../storage/repositories/company.repository.js';
+import { contactRepository } from '../storage/repositories/contact.repository.js';
+import { jobRepository } from '../storage/repositories/job.repository.js';
 import { normalizer } from '../enrichment/normalizer.js';
+import { normalizeDomain } from '../utils/random.js';
 import { linkedInScraper } from '../scrapers/linkedin.scraper.js';
 import { apolloScraper } from '../scrapers/apollo.scraper.js';
 import { crunchbaseScraper } from '../scrapers/crunchbase.scraper.js';
@@ -42,6 +45,8 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
 
   const errors: string[] = [];
   let companiesFound = 0;
+  let contactsFound  = 0;
+  let jobsFound      = 0;
 
   try {
     const scraper = SCRAPERS[source as keyof typeof SCRAPERS];
@@ -51,7 +56,7 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
     if (!available) {
       logger.warn({ source, runId }, '[discovery.worker] Scraper not available — skipping gracefully');
       await scrapeLogRepository.complete(logId, {
-        status: 'skipped' as any,
+        status: 'skipped',
         companiesFound: 0, contactsFound: 0, jobsFound: 0,
         errors: [`Scraper ${source} unavailable — missing credentials`],
         durationMs: Date.now() - startedAt.getTime(),
@@ -64,6 +69,17 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
     const rawResults = await scraper.scrape(query);
     logger.info({ source, runId, rawCount: rawResults.length }, '[discovery.worker] Raw results received');
 
+    // ── Build domain → raw results index (for jobs/contacts linkage) ─────────
+    const domainToRaw = new Map<string, typeof rawResults>();
+    for (const result of rawResults) {
+      if (!result.company?.domain) continue;
+      const d = normalizeDomain(result.company.domain);
+      if (!d) continue;
+      const existing = domainToRaw.get(d) ?? [];
+      existing.push(result);
+      domainToRaw.set(d, existing);
+    }
+
     // ── Normalize + Deduplicate ──────────────────────────────────────────────
     const { companies } = normalizer.processResults(rawResults);
     const dedupedCompanies = deduplicateCompanies(companies);
@@ -72,7 +88,7 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
       '[discovery.worker] Normalized + deduped'
     );
 
-    // ── Upsert companies + enqueue enrichment ───────────────────────────────
+    // ── Upsert companies + save jobs/contacts + enqueue enrichment ───────────
     for (const company of dedupedCompanies) {
       if (!company.domain || !company.name) {
         logger.warn({ company }, '[discovery.worker] Skipping company with missing domain/name');
@@ -89,6 +105,35 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
           { domain: saved.domain, id: saved._id },
           '[discovery.worker] Company upserted — queuing enrichment'
         );
+
+        // ── Save contacts & jobs from raw scraper output ────────────────────
+        const rawForDomain = domainToRaw.get(saved.domain) ?? [];
+        for (const raw of rawForDomain) {
+          for (const rawContact of raw.contacts ?? []) {
+            const contact = normalizer.normalizeContact(rawContact, raw.source);
+            if (!contact?.fullName) continue;
+            await contactRepository.upsert({
+              ...contact,
+              companyId: saved._id!,
+              fullName:  contact.fullName,
+              role:      contact.role ?? 'Unknown',
+            }).catch(() => {}); // ignore dupes
+            contactsFound++;
+          }
+
+          for (const rawJob of raw.jobs ?? []) {
+            const j = normalizer.normalizeJob(rawJob, raw.source);
+            if (!j?.title) continue;
+            await jobRepository.upsert({
+              ...j,
+              companyId: saved._id!,
+              title:     j.title,
+            }).catch((err) => {
+              errors.push(`job:${saved.domain}:${err instanceof Error ? err.message : String(err)}`);
+            });
+            jobsFound++;
+          }
+        }
 
         await queueManager.addEnrichmentJob({
           runId,
@@ -107,14 +152,14 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
     await scrapeLogRepository.complete(logId, {
       status: errors.length > 0 ? 'partial' : 'success',
       companiesFound,
-      contactsFound: 0,
-      jobsFound: 0,
+      contactsFound,
+      jobsFound,
       errors,
       durationMs,
     });
 
     logger.info(
-      { runId, source, companiesFound, durationMs, errors: errors.length },
+      { runId, source, companiesFound, contactsFound, jobsFound, durationMs, errors: errors.length },
       '[discovery.worker] Job complete'
     );
 
@@ -123,7 +168,7 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
     errors.push(msg);
     const durationMs = Date.now() - startedAt.getTime();
     await scrapeLogRepository.complete(logId, {
-      status: 'failed', companiesFound, contactsFound: 0, jobsFound: 0, errors, durationMs,
+      status: 'failed', companiesFound, contactsFound, jobsFound, errors, durationMs,
     }).catch(e => logger.error({ e }, '[discovery.worker] Could not write failure log'));
 
     logger.error({ err, runId, source }, '[discovery.worker] Job failed');

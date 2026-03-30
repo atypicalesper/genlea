@@ -11,6 +11,7 @@ import { contactResolver } from '../enrichment/contact.resolver.js';
 import { deduplicateContacts } from '../enrichment/deduplicator.js';
 import { githubScraper } from '../scrapers/github.scraper.js';
 import { hunterScraper } from '../scrapers/hunter.scraper.js';
+import { clearbitScraper } from '../scrapers/clearbit.scraper.js';
 import { logger } from '../utils/logger.js';
 
 async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> {
@@ -59,7 +60,23 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       contactsFound += githubResult.contacts.length;
     }
 
-    // ── 2. Hunter — email pattern discovery ────────────────────────────────────
+    // ── 2. Clearbit — company enrichment (tech, headcount, location) ───────────
+    logger.debug({ domain }, '[enrichment.worker] Clearbit enrichment');
+    const clearbitResult = await clearbitScraper.enrichDomain(domain).catch(err => {
+      logger.warn({ err, domain }, '[enrichment.worker] Clearbit failed — continuing');
+      return null;
+    });
+    if (clearbitResult?.company) {
+      await companyRepository.upsert({ ...clearbitResult.company, domain, name: company.name });
+      logger.info(
+        { domain, employees: clearbitResult.company.employeeCount },
+        '[enrichment.worker] Clearbit data merged'
+      );
+    } else {
+      logger.debug({ domain }, '[enrichment.worker] No Clearbit data');
+    }
+
+    // ── 3. Hunter — email pattern discovery ────────────────────────────────────
     logger.debug({ domain }, '[enrichment.worker] Hunter email discovery');
     const hunterResult = await hunterScraper.enrichDomain(domain);
     if (hunterResult?.contacts?.length) {
@@ -84,13 +101,13 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       logger.debug({ domain }, '[enrichment.worker] No Hunter results');
     }
 
-    // ── 3. Contact Resolver — verify emails + fill missing CEO/HR ──────────────
+    // ── 4. Contact Resolver — verify emails + fill missing CEO/HR ──────────────
     logger.debug({ domain, companyId }, '[enrichment.worker] Contact resolution');
     await contactResolver.resolveForCompany(companyId, domain).catch(err =>
       logger.error({ err, domain, companyId }, '[enrichment.worker] Contact resolution failed — continuing')
     );
 
-    // ── 4. Dev Origin Ratio — analyse employee name list ───────────────────────
+    // ── 5. Dev Origin Ratio — analyse employee name list ───────────────────────
     logger.debug({ domain, companyId }, '[enrichment.worker] Origin ratio analysis');
     const allContacts = await contactRepository.findByCompanyId(companyId);
     const nameList = allContacts
@@ -126,7 +143,7 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       );
     }
 
-    // ── 5. Enqueue scoring ──────────────────────────────────────────────────────
+    // ── 6. Enqueue scoring ──────────────────────────────────────────────────────
     await queueManager.addScoringJob({ runId, companyId });
 
     const durationMs = Date.now() - startedAt;
