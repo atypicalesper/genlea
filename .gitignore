@@ -1,0 +1,40 @@
+# Gitignore for GenLea
+
+# Node
+node_modules/
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Sessions (LinkedIn cookies — sensitive)
+sessions/
+!sessions/.gitkeep
+
+# Proxy lists (sensitive)
+proxies/
+!proxies/.gitkeep
+
+# Logs
+logs/
+*.log
+
+# Exports
+exports/
+!exports/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+.idea/
+
+# Test coverage
+coverage/
+
+# Playwright browser cache
+.playwright/

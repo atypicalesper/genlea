@@ -1,0 +1,67 @@
+version: '3.9'
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: genlea-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: genlea
+    networks:
+      - genlea-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: genlea-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - genlea-net
+
+  # Optional: Mongo Express UI
+  mongo-express:
+    image: mongo-express:latest
+    container_name: genlea-mongo-express
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: genlea_dev
+    depends_on:
+      - mongo
+    networks:
+      - genlea-net
+
+  # Optional: Bull Board (queue dashboard)
+  bull-board:
+    image: deadly0/bull-board:latest
+    container_name: genlea-bullboard
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      - redis
+    networks:
+      - genlea-net
+
+volumes:
+  mongo_data:
+  redis_data:
+
+networks:
+  genlea-net:
+    driver: bridge
