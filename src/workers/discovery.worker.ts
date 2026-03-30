@@ -9,6 +9,10 @@ import { normalizer } from '../enrichment/normalizer.js';
 import { linkedInScraper } from '../scrapers/linkedin.scraper.js';
 import { apolloScraper } from '../scrapers/apollo.scraper.js';
 import { crunchbaseScraper } from '../scrapers/crunchbase.scraper.js';
+import { wellfoundScraper } from '../scrapers/wellfound.scraper.js';
+import { indeedScraper } from '../scrapers/indeed.scraper.js';
+import { zoomInfoScraper } from '../scrapers/zoominfo.scraper.js';
+import { deduplicateCompanies } from '../enrichment/deduplicator.js';
 import { logger } from '../utils/logger.js';
 import { generateRunId } from '../utils/random.js';
 
@@ -16,6 +20,9 @@ const SCRAPERS = {
   linkedin:   linkedInScraper,
   apollo:     apolloScraper,
   crunchbase: crunchbaseScraper,
+  wellfound:  wellfoundScraper,
+  indeed:     indeedScraper,
+  zoominfo:   zoomInfoScraper,
 };
 
 async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
@@ -47,12 +54,16 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
     const rawResults = await scraper.scrape(query);
     logger.info({ source, runId, rawCount: rawResults.length }, '[discovery.worker] Raw results received');
 
-    // ── Normalize ───────────────────────────────────────────────────────────
+    // ── Normalize + Deduplicate ──────────────────────────────────────────────
     const { companies } = normalizer.processResults(rawResults);
-    logger.info({ source, runId, normalized: companies.length }, '[discovery.worker] Normalized companies');
+    const dedupedCompanies = deduplicateCompanies(companies);
+    logger.info(
+      { source, runId, raw: companies.length, deduped: dedupedCompanies.length },
+      '[discovery.worker] Normalized + deduped'
+    );
 
     // ── Upsert companies + enqueue enrichment ───────────────────────────────
-    for (const company of companies) {
+    for (const company of dedupedCompanies) {
       if (!company.domain || !company.name) {
         logger.warn({ company }, '[discovery.worker] Skipping company with missing domain/name');
         continue;

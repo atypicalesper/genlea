@@ -10,11 +10,14 @@ const SEED_QUERIES = [
   { source: 'wellfound', keywords: 'react frontend engineer startup', techStack: ['react', 'nextjs'] },
   { source: 'wellfound', keywords: 'fullstack engineer saas', techStack: ['fullstack', 'nodejs'] },
   { source: 'wellfound', keywords: 'generative ai llm engineer', techStack: ['generative-ai', 'python'] },
-  { source: 'linkedin',   keywords: 'software startup nodejs hiring US', techStack: ['nodejs'] },
-  { source: 'linkedin',   keywords: 'fintech startup react python developer US' },
-  { source: 'linkedin',   keywords: 'saas startup nestjs typescript hiring' },
+  { source: 'indeed',    keywords: 'nodejs software engineer startup US' },
+  { source: 'indeed',    keywords: 'python backend engineer US' },
+  { source: 'indeed',    keywords: 'react fullstack engineer saas US' },
+  { source: 'linkedin',  keywords: 'software startup nodejs hiring US', techStack: ['nodejs'] },
+  { source: 'linkedin',  keywords: 'fintech startup react python developer US' },
+  { source: 'linkedin',  keywords: 'saas startup nestjs typescript hiring' },
   { source: 'crunchbase', keywords: 'software startup nodejs python AI' },
-  { source: 'apollo',     keywords: 'saas fintech software startup', techStack: ['nodejs', 'python'] },
+  { source: 'apollo',    keywords: 'saas fintech software startup', techStack: ['nodejs', 'python'] },
 ];
 
 async function main() {
