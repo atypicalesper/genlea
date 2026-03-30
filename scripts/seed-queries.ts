@@ -30,9 +30,14 @@ const SEED_QUERIES: Array<{ source: ScraperSource; keywords: string; techStack?:
   { source: 'apollo',     keywords: 'seed stage saas startup software engineer US',       techStack: ['nodejs', 'python'] },
   { source: 'apollo',     keywords: 'series a startup tech company US 10 50 employees',   techStack: ['react', 'typescript'] },
   // ── Glassdoor ───────────────────────────────────────────────────────────────
-  { source: 'glassdoor',  keywords: 'software engineer startup seed series a US',         techStack: ['nodejs', 'react', 'python'] },
-  { source: 'glassdoor',  keywords: 'Y Combinator startup software engineer US',          techStack: ['python', 'typescript'] },
-  { source: 'glassdoor',  keywords: 'early stage startup backend engineer nodejs python', techStack: ['nodejs', 'python'] },
+  { source: 'glassdoor',      keywords: 'software engineer startup seed series a US',         techStack: ['nodejs', 'react', 'python'] },
+  { source: 'glassdoor',      keywords: 'Y Combinator startup software engineer US',          techStack: ['python', 'typescript'] },
+  { source: 'glassdoor',      keywords: 'early stage startup backend engineer nodejs python', techStack: ['nodejs', 'python'] },
+  // ── Surely Remote ───────────────────────────────────────────────────────────
+  { source: 'surelyremote',   keywords: 'software engineer startup seed series a',            techStack: ['nodejs', 'react', 'python'] },
+  { source: 'surelyremote',   keywords: 'backend engineer startup nodejs typescript',         techStack: ['nodejs', 'typescript'] },
+  { source: 'surelyremote',   keywords: 'fullstack engineer early stage startup',             techStack: ['react', 'nodejs', 'fullstack'] },
+  { source: 'surelyremote',   keywords: 'generative ai llm engineer startup',                techStack: ['python', 'generative-ai', 'ai'] },
 ];
 
 async function main() {

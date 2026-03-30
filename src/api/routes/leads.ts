@@ -10,16 +10,17 @@ export async function leadsRoutes(app: FastifyInstance) {
   app.get<{ Querystring: LeadFilter }>('/leads', async (req, reply) => {
     const {
       status, minScore, techStack, fundingStage,
-      hqState, page = 1, limit = 50,
+      hqState, source, page = 1, limit = 50,
     } = req.query;
 
     logger.info({ filters: req.query }, '[api:leads] GET /leads request');
 
     const filter: Record<string, unknown> = {};
-    if (status) filter['status'] = status;
-    if (minScore) filter['score'] = { $gte: Number(minScore) };
+    if (status)      filter['status'] = status;
+    if (minScore)    filter['score'] = { $gte: Number(minScore) };
     if (fundingStage) filter['fundingStage'] = fundingStage;
-    if (hqState) filter['hqState'] = hqState;
+    if (hqState)     filter['hqState'] = hqState;
+    if (source)      filter['sources'] = { $in: [source] };
     if (techStack) {
       const tags = Array.isArray(techStack) ? techStack : [techStack];
       filter['techStack'] = { $in: tags };
@@ -42,15 +43,17 @@ export async function leadsRoutes(app: FastifyInstance) {
   // GET /api/stats — dashboard summary counts
   app.get('/stats', async (_req, reply) => {
     logger.info('[api:leads] GET /stats request');
-    const [total, hot, warm, cold] = await Promise.all([
+    const [total, hot, warm, cold, disqualified, pending] = await Promise.all([
       companyRepository.count(),
       companyRepository.count({ status: { $in: ['hot', 'hot_verified'] } }),
       companyRepository.count({ status: 'warm' }),
       companyRepository.count({ status: 'cold' }),
+      companyRepository.count({ status: 'disqualified' }),
+      companyRepository.count({ status: 'pending' }),
     ]);
     return reply.send({
       success: true,
-      data: { total, hot, warm, cold, disqualified: total - hot - warm - cold },
+      data: { total, hot, warm, cold, disqualified, pending },
     });
   });
 }

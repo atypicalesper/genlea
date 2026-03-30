@@ -60,9 +60,13 @@ async function classifyWithGroq(names: NameInput[]): Promise<RatioResult> {
     });
 
     const raw = response.choices[0]?.message?.content ?? '{}';
-    const parsed = JSON.parse(raw) as {
-      results: Array<{ index: number; isIndian: boolean; confidence: number }>;
-    };
+    let parsed: { results?: Array<{ index: number; isIndian: boolean; confidence: number }> };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      logger.warn({ raw: raw.slice(0, 200) }, '[dev-origin] Groq returned invalid JSON — skipping batch');
+      continue;
+    }
 
     for (const r of parsed.results ?? []) {
       if (r.isIndian && r.confidence >= MIN_CONFIDENCE) {
@@ -174,8 +178,6 @@ export const indianRatioAnalyzer = {
     );
     return result;
   },
-
-  fallbackAnalysis: classifyWithRegex,
 
   async isServiceAvailable(): Promise<boolean> {
     if (process.env['GROQ_API_KEY']) return true;

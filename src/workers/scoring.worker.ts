@@ -33,9 +33,6 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
       '[scoring.worker] Scoring inputs loaded'
     );
 
-    // ── Compute days since last job posting ──────────────────────────────────
-    const lastJobDays = await jobRepository.daysSinceLastPosting(companyId);
-
     // ── Score ────────────────────────────────────────────────────────────────
     const { score, status, breakdown } = scoreCompany({ company, contacts, jobs });
 

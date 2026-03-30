@@ -86,7 +86,9 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
 
     // ── 3. Contact Resolver — verify emails + fill missing CEO/HR ──────────────
     logger.debug({ domain, companyId }, '[enrichment.worker] Contact resolution');
-    await contactResolver.resolveForCompany(companyId, domain);
+    await contactResolver.resolveForCompany(companyId, domain).catch(err =>
+      logger.error({ err, domain, companyId }, '[enrichment.worker] Contact resolution failed — continuing')
+    );
 
     // ── 4. Dev Origin Ratio — analyse employee name list ───────────────────────
     logger.debug({ domain, companyId }, '[enrichment.worker] Origin ratio analysis');

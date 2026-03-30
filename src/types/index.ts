@@ -16,7 +16,8 @@ export type ScraperSource =
   | 'glassdoor'
   | 'wellfound'
   | 'clearbit'
-  | 'indeed';
+  | 'indeed'
+  | 'surelyremote';
 
 export type ContactRole = 'CEO' | 'CTO' | 'COO' | 'Founder' | 'HR' | 'Recruiter' | 'Head of Talent' | 'Engineering Manager' | 'Unknown';
 
@@ -34,7 +35,7 @@ export type FundingStage =
 
 export type LeadStatus = 'hot_verified' | 'hot' | 'warm' | 'cold' | 'disqualified' | 'pending';
 
-export type ScrapeJobStatus = 'queued' | 'processing' | 'success' | 'failed' | 'partial';
+export type ScrapeJobStatus = 'queued' | 'processing' | 'success' | 'failed' | 'partial' | 'skipped';
 
 // ── Scraper Interface ─────────────────────────────────────────────────────────
 
@@ -266,6 +267,7 @@ export interface LeadFilter {
   techStack?: string[];
   fundingStage?: FundingStage;
   hqState?: string;
+  source?: ScraperSource;
   page?: number;
   limit?: number;
 }

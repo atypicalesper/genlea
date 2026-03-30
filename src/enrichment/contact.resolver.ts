@@ -105,17 +105,21 @@ export const contactResolver = {
       const found = await hunterScraper.findEmail(contact.firstName, contact.lastName, domain);
 
       if (found && found.confidence >= 0.50) {
+        // Verify before saving
+        const verification = await emailVerifier.verify(found.email).catch(() => null);
+        const verified_now = !!(verification && verification.confidence > 0.6);
         await contactRepository.upsert({
           companyId,
           fullName: contact.fullName,
           role:     contact.role,
           email:    found.email,
-          emailConfidence: found.confidence,
+          emailConfidence: verification ? verification.confidence : found.confidence,
+          emailVerified:   verified_now,
           sources:  ['hunter'],
         });
         enriched++;
         logger.info(
-          { email: found.email, confidence: found.confidence, name: contact.fullName },
+          { email: found.email, confidence: found.confidence, verified: verified_now, name: contact.fullName },
           '[contact.resolver] Email found via Hunter name search'
         );
       }
@@ -125,10 +129,5 @@ export const contactResolver = {
       { domain, companyId, enriched, verified },
       '[contact.resolver] Resolution complete'
     );
-  },
-
-  /** Bulk email verification is handled by scripts/verify-emails.ts */
-  async verifyAllPending(): Promise<void> {
-    logger.info('[contact.resolver] Run: npm run verify-emails for bulk verification');
   },
 };

@@ -9,17 +9,21 @@ import { join } from 'path';
 
 export async function exportRoutes(app: FastifyInstance) {
 
-  // GET /api/export/csv?status=hot
+  // GET /api/export/csv?status=hot&minScore=65  (both optional — omit for all)
   app.get<{ Querystring: { status?: LeadStatus; minScore?: string } }>(
     '/export/csv',
     async (req, reply) => {
-      const status = req.query.status ?? 'hot';
-      const minScore = parseInt(req.query.minScore ?? '65');
+      const { status, minScore: minScoreStr } = req.query;
+      const minScore = minScoreStr ? parseInt(minScoreStr) : 0;
 
       logger.info({ status, minScore }, '[api:export] CSV export requested');
 
+      const filter: Record<string, unknown> = {};
+      if (status)   filter['status'] = status;
+      if (minScore) filter['score']  = { $gte: minScore };
+
       const companies = await companyRepository.findMany(
-        { status, score: { $gte: minScore } },
+        filter,
         { sort: { score: -1 }, limit: 5000 }
       );
 
@@ -64,7 +68,7 @@ export async function exportRoutes(app: FastifyInstance) {
       // Also save to disk
       try {
         await mkdir(join(process.cwd(), 'exports'), { recursive: true });
-        const filename = `leads-${status}-${Date.now()}.csv`;
+        const filename = `leads-${status ?? 'all'}-${Date.now()}.csv`;
         await writeFile(join(process.cwd(), 'exports', filename), csv);
         logger.info({ filename, rows: rows.length }, '[api:export] CSV saved to disk');
       } catch (err) {
@@ -75,7 +79,7 @@ export async function exportRoutes(app: FastifyInstance) {
 
       return reply
         .header('Content-Type', 'text/csv')
-        .header('Content-Disposition', `attachment; filename="genlea-${status}-leads.csv"`)
+        .header('Content-Disposition', `attachment; filename="genlea-${status ?? 'all'}-leads.csv"`)
         .send(csv);
     }
   );
