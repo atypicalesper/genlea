@@ -5,9 +5,10 @@ import { createWorker, queueManager, QUEUE_NAMES } from '../core/queue.manager.j
 import { connectMongo } from '../storage/mongo.client.js';
 import { companyRepository } from '../storage/repositories/company.repository.js';
 import { contactRepository } from '../storage/repositories/contact.repository.js';
-import { jobRepository } from '../storage/repositories/job.repository.js';
 import { normalizer } from '../enrichment/normalizer.js';
-import { indianRatioAnalyzer } from '../enrichment/dev-origin.analyzer.js';
+import { indianRatioAnalyzer as devOriginAnalyzer } from '../enrichment/dev-origin.analyzer.js';
+import { contactResolver } from '../enrichment/contact.resolver.js';
+import { deduplicateContacts } from '../enrichment/deduplicator.js';
 import { githubScraper } from '../scrapers/github.scraper.js';
 import { hunterScraper } from '../scrapers/hunter.scraper.js';
 import { logger } from '../utils/logger.js';
@@ -26,79 +27,91 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
     }
 
     let contactsFound = 0;
-    let jobsFound = 0;
 
-    // ── 1. GitHub — tech stack + dev count ───────────────────────────────────
-    logger.debug({ domain }, '[enrichment.worker] Starting GitHub enrichment');
+    // ── 1. GitHub — tech stack + dev count ─────────────────────────────────────
+    logger.debug({ domain }, '[enrichment.worker] GitHub enrichment');
     const githubResult = await githubScraper.enrichOrg(domain);
     if (githubResult?.company) {
-      await companyRepository.upsert({
-        ...githubResult.company,
-        domain,
-        name: company.name,
-      });
-      logger.info({ domain, techStack: githubResult.company.techStack }, '[enrichment.worker] GitHub data merged');
+      await companyRepository.upsert({ ...githubResult.company, domain, name: company.name });
+      logger.info(
+        { domain, techStack: githubResult.company.techStack },
+        '[enrichment.worker] GitHub tech stack merged'
+      );
+    } else {
+      logger.debug({ domain }, '[enrichment.worker] No GitHub org found');
     }
 
-    // ── 2. Hunter — email pattern + contacts ─────────────────────────────────
-    logger.debug({ domain }, '[enrichment.worker] Starting Hunter enrichment');
+    // ── 2. Hunter — email pattern discovery ────────────────────────────────────
+    logger.debug({ domain }, '[enrichment.worker] Hunter email discovery');
     const hunterResult = await hunterScraper.enrichDomain(domain);
     if (hunterResult?.contacts?.length) {
-      const { contacts } = normalizer.processResults([hunterResult]);
-      for (const contact of contacts) {
+      const { contacts: rawContacts } = normalizer.processResults([hunterResult]);
+      const dedupedContacts = deduplicateContacts(rawContacts);
+
+      for (const contact of dedupedContacts) {
         if (!contact.role) continue;
         const saved = await contactRepository.upsert({
           ...contact,
           companyId,
           fullName: contact.fullName ?? '',
-          role: contact.role,
+          role:     contact.role,
         });
         contactsFound++;
         logger.debug(
-          { email: saved.email, role: saved.role, domain },
-          '[enrichment.worker] Contact upserted from Hunter'
+          { email: saved.email, role: saved.role, confidence: saved.emailConfidence },
+          '[enrichment.worker] Hunter contact upserted'
         );
       }
+    } else {
+      logger.debug({ domain }, '[enrichment.worker] No Hunter results');
     }
 
-    // ── 3. Dev Origin Ratio — analyse employee names from LinkedIn data ───────
-    logger.debug({ domain, companyId }, '[enrichment.worker] Starting origin ratio analysis');
+    // ── 3. Contact Resolver — verify emails + fill missing CEO/HR ──────────────
+    logger.debug({ domain, companyId }, '[enrichment.worker] Contact resolution');
+    await contactResolver.resolveForCompany(companyId, domain);
+
+    // ── 4. Dev Origin Ratio — analyse employee name list ───────────────────────
+    logger.debug({ domain, companyId }, '[enrichment.worker] Origin ratio analysis');
     const allContacts = await contactRepository.findByCompanyId(companyId);
     const nameList = allContacts
       .filter(c => c.fullName)
-      .map(c => ({
-        firstName: c.firstName,
-        lastName:  c.lastName,
-        fullName:  c.fullName,
-      }));
+      .map(c => ({ firstName: c.firstName, lastName: c.lastName, fullName: c.fullName }));
 
-    if (nameList.length >= parseInt(process.env['ORIGIN_RATIO_MIN_SAMPLE'] ?? '10')) {
-      const ratioResult = await indianRatioAnalyzer.analyzeNames(nameList);
+    const minSample = parseInt(process.env['ORIGIN_RATIO_MIN_SAMPLE'] ?? '10');
+    if (nameList.length >= minSample) {
+      const ratioResult = await devOriginAnalyzer.analyzeNames(nameList);
       logger.info(
-        { domain, ratio: ratioResult.ratio, sample: ratioResult.totalCount, reliable: ratioResult.reliable },
+        {
+          domain,
+          ratio:    ratioResult.ratio,
+          sample:   ratioResult.totalCount,
+          reliable: ratioResult.reliable,
+        },
         '[enrichment.worker] Origin ratio computed'
       );
 
       const threshold = parseFloat(process.env['ORIGIN_RATIO_THRESHOLD'] ?? '0.60');
       await companyRepository.upsert({
         domain,
-        name: company.name,
-        originDevCount: ratioResult.indianCount,
-        totalDevCount:  ratioResult.totalCount,
-        originRatio:    ratioResult.ratio,
+        name:              company.name,
+        originDevCount:    ratioResult.indianCount,
+        totalDevCount:     ratioResult.totalCount,
+        originRatio:       ratioResult.ratio,
         toleranceIncluded: ratioResult.ratio < 0.75 && ratioResult.ratio >= threshold,
       });
     } else {
       logger.debug(
-        { domain, sample: nameList.length },
-        '[enrichment.worker] Not enough employee names for origin analysis — skipping'
+        { domain, sample: nameList.length, required: minSample },
+        '[enrichment.worker] Insufficient sample for origin analysis'
       );
     }
 
-    // ── 4. Enqueue scoring ────────────────────────────────────────────────────
+    // ── 5. Enqueue scoring ──────────────────────────────────────────────────────
     await queueManager.addScoringJob({ runId, companyId });
+
+    const durationMs = Date.now() - startedAt;
     logger.info(
-      { runId, companyId, domain, contactsFound, durationMs: Date.now() - startedAt },
+      { runId, companyId, domain, contactsFound, durationMs },
       '[enrichment.worker] Job complete — scoring enqueued'
     );
 
@@ -113,12 +126,12 @@ export async function startEnrichmentWorker(): Promise<void> {
   const worker = createWorker<EnrichmentJobData>(
     QUEUE_NAMES.ENRICHMENT,
     processEnrichmentJob,
-    3
+    3 // 3 concurrent enrichment jobs
   );
-  logger.info('[enrichment.worker] Worker started');
+  logger.info('[enrichment.worker] Worker started — listening for enrichment jobs');
 
   process.on('SIGTERM', async () => {
-    logger.info('[enrichment.worker] SIGTERM received — shutting down');
+    logger.info('[enrichment.worker] SIGTERM received — draining and shutting down');
     await worker.close();
     process.exit(0);
   });
