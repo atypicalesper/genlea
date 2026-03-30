@@ -161,7 +161,7 @@ export class BrowserManager {
   async humanScroll(page: Page, scrolls: number = 5): Promise<void> {
     for (let i = 0; i < scrolls; i++) {
       const scrollAmount = randomInt(300, 800);
-      await page.evaluate((amount: number) => window.scrollBy(0, amount), scrollAmount);
+      await page.evaluate((amount: number) => { (globalThis as any).scrollBy(0, amount); }, scrollAmount);
       await page.waitForTimeout(randomBetween(500, 1500));
     }
   }

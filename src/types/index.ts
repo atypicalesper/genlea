@@ -85,6 +85,7 @@ export interface RawContact {
 export interface RawJob {
   companyDomain: string;
   title: string;
+  source?: ScraperSource;
   techTags?: string[];
   sourceUrl?: string;
   postedAt?: Date;
@@ -112,16 +113,21 @@ export interface Company {
   _id?: string;
   name: string;
   domain: string;
+  description?: string;
   linkedinUrl?: string;
   crunchbaseUrl?: string;
   websiteUrl?: string;
+  githubOrg?: string;
   hqCountry: string;
   hqState?: string;
   hqCity?: string;
   employeeCount?: number;
-  indianDevCount?: number;
+  /** Count of developers identified as South Asian origin */
+  originDevCount?: number;
   totalDevCount?: number;
-  indianDevRatio?: number;
+  /** Ratio of South Asian-origin devs to total devs (0–1) */
+  originRatio?: number;
+  /** True when included via relaxed originRatio threshold */
   toleranceIncluded: boolean;
   fundingStage?: FundingStage;
   fundingTotalUsd?: number;
@@ -166,7 +172,7 @@ export interface Job {
   companyId: string;
   title: string;
   techTags: string[];
-  source: ScraperSource;
+  source?: ScraperSource;
   sourceUrl?: string;
   postedAt?: Date;
   scrapedAt: Date;
@@ -190,12 +196,17 @@ export interface ScrapeLog {
 // ── Scoring ───────────────────────────────────────────────────────────────────
 
 export interface ScoreBreakdown {
-  indianRatioScore: number;    // 0–30
-  jobFreshnessScore: number;   // 0–20
-  techStackScore: number;      // 0–20
-  contactScore: number;        // 0–15
-  companyFitScore: number;     // 0–15
-  total: number;               // 0–100
+  /** Dev origin concentration score (0–30) */
+  originRatioScore: number;
+  /** Job posting freshness score (0–20) */
+  jobFreshnessScore: number;
+  /** Tech stack alignment score (0–20) */
+  techStackScore: number;
+  /** Contact data completeness score (0–15) */
+  contactScore: number;
+  /** Company size + funding stage fit score (0–15) */
+  companyFitScore: number;
+  total: number;
 }
 
 export interface ScoringInput {

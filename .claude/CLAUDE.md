@@ -61,14 +61,44 @@ All files live here. **Never write to tmp or outside this directory.**
 ### 🔄 Being Built Now (implementation in progress)
 | File | Status | Purpose |
 |---|---|---|
-| `src/core/queue.manager.ts` | 🔄 Next | BullMQ queues: discovery, enrichment, scoring |
-| `src/utils/logger.ts` | 🔄 Next | Pino structured logger |
-| `src/utils/random.ts` | 🔄 Next | randomInt, randomBetween helpers |
-| `src/storage/mongo.client.ts` | 🔄 Next | MongoDB singleton connection |
-| `src/storage/repositories/company.repository.ts` | 🔄 Next | Companies CRUD + upsert |
-| `src/storage/repositories/contact.repository.ts` | 🔄 Next | Contacts CRUD |
-| `src/storage/repositories/job.repository.ts` | 🔄 Next | Jobs CRUD |
-| `src/storage/repositories/scrape-log.repository.ts` | 🔄 Next | Audit logs |
+| `src/enrichment/email.verifier.ts` | 🔄 Next | MX + SMTP verify emails |
+| `src/enrichment/deduplicator.ts` | 🔄 Next | Fuzzy dedup across scrapers |
+| `src/enrichment/contact.resolver.ts` | 🔄 Next | Find/verify CEO/HR contacts |
+
+### ✅ Newly Completed
+| File | Status | Purpose |
+|---|---|---|
+| `src/utils/logger.ts` | ✅ Done | Pino structured logger |
+| `src/utils/random.ts` | ✅ Done | randomInt, delay, normalizeDomain |
+| `src/core/queue.manager.ts` | ✅ Done | BullMQ typed queues |
+| `src/storage/mongo.client.ts` | ✅ Done | MongoDB singleton |
+| `src/storage/repositories/company.repository.ts` | ✅ Done | Companies CRUD + upsert |
+| `src/storage/repositories/contact.repository.ts` | ✅ Done | Contacts CRUD |
+| `src/storage/repositories/job.repository.ts` | ✅ Done | Jobs CRUD |
+| `src/storage/repositories/scrape-log.repository.ts` | ✅ Done | Audit logs |
+| `src/enrichment/normalizer.ts` | ✅ Done | Multi-source merge, tech tag aliasing |
+| `src/enrichment/dev-origin.analyzer.ts` | ✅ Done | Calls name-origin service for ratio |
+| `src/scoring/rules.ts` | ✅ Done | 5 pure rule functions |
+| `src/scoring/scorer.ts` | ✅ Done | Orchestrates scoring, emits log |
+| `src/scrapers/linkedin.scraper.ts` | ✅ Done | Playwright stealth, session-aware |
+| `src/scrapers/apollo.scraper.ts` | ✅ Done | API + Playwright web fallback |
+| `src/scrapers/crunchbase.scraper.ts` | ✅ Done | API + Playwright web fallback |
+| `src/scrapers/hunter.scraper.ts` | ✅ Done | Email pattern + verify API |
+| `src/scrapers/github.scraper.ts` | ✅ Done | Tech stack via GitHub API |
+| `src/scrapers/wellfound.scraper.ts` | ✅ Done | Free Playwright, no auth |
+| `src/workers/discovery.worker.ts` | ✅ Done | Phase 1 BullMQ worker |
+| `src/workers/enrichment.worker.ts` | ✅ Done | Phase 2 BullMQ worker |
+| `src/workers/scoring.worker.ts` | ✅ Done | Phase 3 BullMQ worker |
+| `src/workers/index.ts` | ✅ Done | Starts all workers |
+| `src/api/server.ts` | ✅ Done | Fastify server bootstrap |
+| `src/api/routes/leads.ts` | ✅ Done | GET /api/leads, /stats, /companies/:id |
+| `src/api/routes/export.ts` | ✅ Done | GET /api/export/csv |
+| `src/api/routes/scrape.ts` | ✅ Done | POST /api/scrape |
+| `src/api/routes/jobs.ts` | ✅ Done | GET /api/jobs/status + logs |
+| `scripts/db-init.ts` | ✅ Done | Creates all MongoDB indexes |
+| `scripts/seed-queries.ts` | ✅ Done | Seeds 10 initial scrape jobs |
+| `GETTING_STARTED.md` | ✅ Done | Full step-by-step run guide |
+
 
 ### ❌ Not Yet Started
 | File | Status | Purpose |

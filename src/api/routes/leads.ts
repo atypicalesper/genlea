@@ -1,0 +1,73 @@
+import { FastifyInstance } from 'fastify';
+import { companyRepository } from '../../storage/repositories/company.repository.js';
+import { contactRepository } from '../../storage/repositories/contact.repository.js';
+import { LeadStatus, LeadFilter } from '../../types/index.js';
+import { logger } from '../../utils/logger.js';
+
+export async function leadsRoutes(app: FastifyInstance) {
+
+  // GET /api/leads — paginated, filterable list
+  app.get<{ Querystring: LeadFilter }>('/leads', async (req, reply) => {
+    const {
+      status, minScore, techStack, fundingStage,
+      hqState, page = 1, limit = 50,
+    } = req.query;
+
+    logger.info({ filters: req.query }, '[api:leads] GET /leads request');
+
+    const filter: Record<string, unknown> = {};
+    if (status) filter['status'] = status;
+    if (minScore) filter['score'] = { $gte: Number(minScore) };
+    if (fundingStage) filter['fundingStage'] = fundingStage;
+    if (hqState) filter['hqState'] = hqState;
+    if (techStack) {
+      const tags = Array.isArray(techStack) ? techStack : [techStack];
+      filter['techStack'] = { $in: tags };
+    }
+
+    const skip = (Number(page) - 1) * Number(limit);
+    const [companies, total] = await Promise.all([
+      companyRepository.findMany(filter, { sort: { score: -1 }, limit: Number(limit), skip }),
+      companyRepository.count(filter),
+    ]);
+
+    logger.info({ total, returned: companies.length }, '[api:leads] Responding');
+    return reply.send({
+      success: true,
+      data: companies,
+      meta: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) },
+    });
+  });
+
+  // GET /api/companies/:id — single company with contacts
+  app.get<{ Params: { id: string } }>('/companies/:id', async (req, reply) => {
+    const { id } = req.params;
+    logger.info({ id }, '[api:leads] GET /companies/:id request');
+
+    const company = await companyRepository.findById(id);
+    if (!company) {
+      logger.warn({ id }, '[api:leads] Company not found');
+      return reply.status(404).send({ success: false, error: 'Company not found' });
+    }
+
+    const contacts = await contactRepository.findByCompanyId(id);
+    logger.info({ id, domain: company.domain, contacts: contacts.length }, '[api:leads] Company found');
+
+    return reply.send({ success: true, data: { company, contacts } });
+  });
+
+  // GET /api/stats — dashboard summary counts
+  app.get('/stats', async (_req, reply) => {
+    logger.info('[api:leads] GET /stats request');
+    const [total, hot, warm, cold] = await Promise.all([
+      companyRepository.count(),
+      companyRepository.count({ status: { $in: ['hot', 'hot_verified'] } }),
+      companyRepository.count({ status: 'warm' }),
+      companyRepository.count({ status: 'cold' }),
+    ]);
+    return reply.send({
+      success: true,
+      data: { total, hot, warm, cold, disqualified: total - hot - warm - cold },
+    });
+  });
+}
