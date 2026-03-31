@@ -296,8 +296,8 @@ function parseEmployeeEnum(val: string): number | undefined {
 function parseEmployeeText(text: string): number | undefined {
   const m = text.match(/(\d+)\s*[-–]\s*(\d+)|(\d+)\+?/);
   if (!m) return undefined;
-  if (m[1] && m[2]) return Math.floor((parseInt(m[1]) + parseInt(m[2])) / 2);
-  if (m[3]) return parseInt(m[3]);
+  if (m[1] && m[2]) return Math.floor((parseInt(m[1], 10) + parseInt(m[2], 10)) / 2);
+  if (m[3]) return parseInt(m[3], 10);
   return undefined;
 }
 

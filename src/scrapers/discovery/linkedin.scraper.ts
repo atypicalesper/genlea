@@ -184,7 +184,7 @@ export class LinkedInScraper implements Scraper {
     if (empEl) {
       const empText = (await empEl.textContent())?.trim() ?? '';
       const match = empText.match(/(\d+[\d,]*)/);
-      if (match) rawCompany.employeeCount = parseInt(match[1]!.replace(/,/g, ''));
+      if (match) rawCompany.employeeCount = parseInt(match[1]!.replace(/,/g, ''), 10);
       rawCompany.employeeCountRange = empText;
     }
 

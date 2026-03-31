@@ -22,6 +22,7 @@ interface SessionMeta {
 export class SessionManager {
   private sessions: Map<string, SessionMeta> = new Map();
   private readonly sessionDir: string;
+  private _saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.sessionDir = process.env['LI_SESSION_DIR'] ?? 'sessions/linkedin';
@@ -49,6 +50,17 @@ export class SessionManager {
     await writeFile(metaPath, JSON.stringify([...this.sessions.values()], null, 2));
   }
 
+  /** Schedule a debounced session meta save — batches rapid profile-view writes into one */
+  private scheduleSave(): void {
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = null;
+      this.saveSessionMeta().catch(err =>
+        logger.warn({ err }, '[session.manager] Debounced save failed')
+      );
+    }, 5000);
+  }
+
   /** Register a new session account */
   async registerAccount(accountId: string, source: SessionSource): Promise<void> {
     const meta: SessionMeta = {
@@ -57,7 +69,7 @@ export class SessionManager {
       cookiesPath: join(process.cwd(), this.sessionDir, `${accountId}.json`),
       lastUsed: 0,
       profilesScrapedToday: 0,
-      dailyProfileLimit: parseInt(process.env['LI_MAX_PROFILES_PER_SESSION'] ?? '80'),
+      dailyProfileLimit: parseInt(process.env['LI_MAX_PROFILES_PER_SESSION'] ?? '80', 10),
       cooldownUntil: 0,
       isBlocked: false,
     };
@@ -84,7 +96,7 @@ export class SessionManager {
 
       if (session.profilesScrapedToday >= session.dailyProfileLimit) {
         // Put session in cooldown
-        const cooldownHours = parseInt(process.env['LI_SESSION_COOLDOWN_HOURS'] ?? '8');
+        const cooldownHours = parseInt(process.env['LI_SESSION_COOLDOWN_HOURS'] ?? '8', 10);
         session.cooldownUntil = now + cooldownHours * 60 * 60 * 1000;
         logger.info({ accountId: session.accountId }, 'Session hit daily limit — cooling down');
         continue;
@@ -118,7 +130,7 @@ export class SessionManager {
 
     session.profilesScrapedToday++;
     session.lastUsed = Date.now();
-    await this.saveSessionMeta();
+    this.scheduleSave(); // debounced — batches up to 80 per-profile writes into one flush
   }
 
   /** Save cookies from a context back to session file */

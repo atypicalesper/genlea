@@ -240,8 +240,8 @@ export class WellfoundScraper implements Scraper {
 function parseEmployeeText(text: string): number | undefined {
   const match = text.match(/(\d+)\s*[-–]\s*(\d+)|(\d+)\+?/);
   if (!match) return undefined;
-  if (match[1] && match[2]) return Math.floor((parseInt(match[1]) + parseInt(match[2])) / 2);
-  if (match[3]) return parseInt(match[3]);
+  if (match[1] && match[2]) return Math.floor((parseInt(match[1], 10) + parseInt(match[2], 10)) / 2);
+  if (match[3]) return parseInt(match[3], 10);
   return undefined;
 }
 

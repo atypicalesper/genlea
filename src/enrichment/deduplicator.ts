@@ -49,11 +49,13 @@ function mergeCompanyRecords(base: Partial<Company>, incoming: Partial<Company>)
     crunchbaseUrl:   incoming.crunchbaseUrl ?? base.crunchbaseUrl,
     websiteUrl:      incoming.websiteUrl ?? base.websiteUrl,
     githubOrg:       incoming.githubOrg ?? base.githubOrg,
+    hqCountry:       incoming.hqCountry ?? base.hqCountry,
     hqCity:          incoming.hqCity ?? base.hqCity,
     hqState:         incoming.hqState ?? base.hqState,
     fundingStage:    incoming.fundingStage && incoming.fundingStage !== 'Unknown'
                        ? incoming.fundingStage
                        : base.fundingStage,
+    foundedYear:     incoming.foundedYear ?? base.foundedYear,
     // Take max of numeric fields — use maxDefined() so 0 is preserved (0 ratio ≠ unknown)
     employeeCount:   maxDefined(base.employeeCount, incoming.employeeCount),
     fundingTotalUsd: maxDefined(base.fundingTotalUsd, incoming.fundingTotalUsd),
