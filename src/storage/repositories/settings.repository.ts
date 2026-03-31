@@ -18,13 +18,21 @@ const DEFAULTS: AppSettings = {
   updatedAt: new Date(),
 };
 
+let _settingsCache: AppSettings | null = null;
+let _settingsCacheAt = 0;
+const CACHE_TTL_MS = 60_000;
+
 export const settingsRepository = {
   async get(): Promise<AppSettings> {
+    if (_settingsCache && Date.now() - _settingsCacheAt < CACHE_TTL_MS) {
+      return _settingsCache;
+    }
     const col = getCollection<SettingsDoc>('settings');
     const doc = await col.findOne({ _id: 'global' } as any);
-    if (!doc) return { ...DEFAULTS };
-    const { _id: _ignore, ...rest } = doc;
-    return rest;
+    const result: AppSettings = doc ? (() => { const { _id: _ignore, ...rest } = doc; return rest; })() : { ...DEFAULTS };
+    _settingsCache = result;
+    _settingsCacheAt = Date.now();
+    return result;
   },
 
   async patch(updates: Partial<Omit<AppSettings, 'updatedAt'>>): Promise<AppSettings> {
@@ -34,6 +42,7 @@ export const settingsRepository = {
       { $set: { ...updates, updatedAt: new Date() } },
       { upsert: true }
     );
+    _settingsCache = null;
     return this.get();
   },
 };

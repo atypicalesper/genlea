@@ -28,11 +28,32 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       return;
     }
 
+    // ── Enrichment cooldown — skip full re-enrichment if done within 24h ────────
+    const COOLDOWN_MS = 24 * 60 * 60 * 1000;
+    if (company.lastEnrichedAt) {
+      const ageMs = Date.now() - new Date(company.lastEnrichedAt).getTime();
+      if (ageMs < COOLDOWN_MS) {
+        logger.info(
+          { domain, ageHours: (ageMs / 3_600_000).toFixed(1) },
+          '[enrichment.worker] Recently enriched — skipping, queuing scoring only'
+        );
+        await queueManager.addScoringJob({ runId, companyId });
+        return;
+      }
+    }
+
     let contactsFound = 0;
 
-    // ── 1. GitHub — tech stack + contributor names ──────────────────────────────
-    logger.debug({ domain }, '[enrichment.worker] GitHub enrichment');
-    const githubResult = await githubScraper.enrichOrg(domain);
+    // ── 1+2. GitHub + Clearbit in parallel ─────────────────────────────────────
+    logger.debug({ domain }, '[enrichment.worker] GitHub + Clearbit in parallel');
+    const [githubResult, clearbitResult] = await Promise.all([
+      githubScraper.enrichOrg(domain),
+      clearbitScraper.enrichDomain(domain).catch(err => {
+        logger.warn({ err, domain }, '[enrichment.worker] Clearbit failed — continuing');
+        return null;
+      }),
+    ]);
+
     if (githubResult?.company) {
       await companyRepository.upsert({ ...githubResult.company, domain, name: company.name });
       logger.info(
@@ -43,30 +64,6 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       logger.debug({ domain }, '[enrichment.worker] No GitHub org found');
     }
 
-    // Save GitHub contributor names as contacts (used for origin ratio)
-    if (githubResult?.contacts?.length) {
-      for (const contact of githubResult.contacts) {
-        if (!contact.fullName) continue;
-        await contactRepository.upsert({
-          ...contact,
-          companyId,
-          fullName: contact.fullName,
-          role: contact.role ?? 'Unknown',
-        }).catch(() => {}); // ignore dupes
-      }
-      logger.info(
-        { domain, count: githubResult.contacts.length },
-        '[enrichment.worker] GitHub contributor names saved'
-      );
-      contactsFound += githubResult.contacts.length;
-    }
-
-    // ── 2. Clearbit — company enrichment (tech, headcount, location) ───────────
-    logger.debug({ domain }, '[enrichment.worker] Clearbit enrichment');
-    const clearbitResult = await clearbitScraper.enrichDomain(domain).catch(err => {
-      logger.warn({ err, domain }, '[enrichment.worker] Clearbit failed — continuing');
-      return null;
-    });
     if (clearbitResult?.company) {
       await companyRepository.upsert({ ...clearbitResult.company, domain, name: company.name });
       logger.info(
@@ -75,6 +72,25 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       );
     } else {
       logger.debug({ domain }, '[enrichment.worker] No Clearbit data');
+    }
+
+    // Save GitHub contributor names as contacts (batch — used for origin ratio)
+    if (githubResult?.contacts?.length) {
+      const saveResults = await Promise.allSettled(
+        githubResult.contacts
+          .filter(c => c.fullName)
+          .map(contact =>
+            contactRepository.upsert({
+              ...contact,
+              companyId,
+              fullName: contact.fullName!,
+              role: contact.role ?? 'Unknown',
+            })
+          )
+      );
+      const saved = saveResults.filter(r => r.status === 'fulfilled').length;
+      contactsFound += saved;
+      logger.info({ domain, saved }, '[enrichment.worker] GitHub contributor names saved');
     }
 
     // ── 3. Hunter — email pattern discovery ────────────────────────────────────
@@ -122,12 +138,7 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
     if (nameList.length >= minSample) {
       const ratioResult = await devOriginAnalyzer.analyzeNames(nameList);
       logger.info(
-        {
-          domain,
-          ratio:    ratioResult.ratio,
-          sample:   ratioResult.totalCount,
-          reliable: ratioResult.reliable,
-        },
+        { domain, ratio: ratioResult.ratio, sample: ratioResult.totalCount, reliable: ratioResult.reliable },
         '[enrichment.worker] Origin ratio computed'
       );
 
@@ -146,7 +157,8 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       );
     }
 
-    // ── 6. Enqueue scoring ──────────────────────────────────────────────────────
+    // ── 6. Stamp lastEnrichedAt + enqueue scoring ───────────────────────────────
+    await companyRepository.upsert({ domain, name: company.name, lastEnrichedAt: new Date() });
     await queueManager.addScoringJob({ runId, companyId });
 
     const durationMs = Date.now() - startedAt;

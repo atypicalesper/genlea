@@ -90,6 +90,7 @@ export const companyRepository = {
         createdAt: now,
         updatedAt: now,
         lastScrapedAt: now,
+        lastEnrichedAt: data.lastEnrichedAt,
       };
       const result = await col.insertOne(doc as CompanyDoc);
       logger.info({ domain, id: result.insertedId.toString() }, '[company.repository] Company inserted');
@@ -113,6 +114,7 @@ export const companyRepository = {
         ...(data.totalDevCount !== undefined && { totalDevCount: data.totalDevCount }),
         ...(data.originRatio !== undefined && { originRatio: data.originRatio }),
         ...(data.toleranceIncluded !== undefined && { toleranceIncluded: data.toleranceIncluded }),
+        ...(data.lastEnrichedAt && { lastEnrichedAt: data.lastEnrichedAt }),
       },
       $max: {
         // employeeCount/fundingTotalUsd: take the larger value across sources

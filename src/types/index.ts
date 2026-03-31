@@ -146,6 +146,7 @@ export interface Company {
   createdAt: Date;
   updatedAt: Date;
   lastScrapedAt: Date;
+  lastEnrichedAt?: Date;
 }
 
 export interface Contact {
