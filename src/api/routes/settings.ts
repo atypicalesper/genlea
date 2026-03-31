@@ -12,7 +12,7 @@ export async function settingsRoutes(app: FastifyInstance) {
 
   // PATCH /api/settings
   app.patch<{ Body: Record<string, unknown> }>('/settings', async (req, reply) => {
-    const allowed = ['originRatioThreshold', 'originRatioMinSample', 'leadScoreHotVerifiedThreshold', 'leadScoreHotThreshold', 'leadScoreWarmThreshold'];
+    const allowed = ['originRatioThreshold', 'originRatioMinSample', 'leadScoreHotVerifiedThreshold', 'leadScoreHotThreshold', 'leadScoreWarmThreshold', 'leadScoreColdThreshold'];
     const updates: Record<string, unknown> = {};
     for (const key of allowed) {
       if (key in req.body) {

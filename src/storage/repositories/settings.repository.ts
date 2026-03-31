@@ -6,6 +6,7 @@ export interface AppSettings {
   leadScoreHotVerifiedThreshold: number; // score to become hot_verified — default 80
   leadScoreHotThreshold: number;        // score to become hot — default 55
   leadScoreWarmThreshold: number;       // score to become warm — default 38
+  leadScoreColdThreshold: number;       // score to become cold (below = disqualified) — default 20
   updatedAt: Date;
 }
 
@@ -17,6 +18,7 @@ const DEFAULTS: AppSettings = {
   leadScoreHotVerifiedThreshold: 80,
   leadScoreHotThreshold:        55,
   leadScoreWarmThreshold:       38,
+  leadScoreColdThreshold:       20,
   updatedAt: new Date(),
 };
 

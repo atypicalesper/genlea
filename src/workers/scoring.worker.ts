@@ -42,6 +42,7 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
         hotVerified: settings.leadScoreHotVerifiedThreshold,
         hot:         settings.leadScoreHotThreshold,
         warm:        settings.leadScoreWarmThreshold,
+        cold:        settings.leadScoreColdThreshold,
       }
     );
 

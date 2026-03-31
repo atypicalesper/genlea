@@ -73,6 +73,16 @@ async function bootstrap() {
   await server.listen({ port, host });
   logger.info({ port, host }, '[api] GenLea API server started');
   logger.info('[api] Swagger: not configured — add @fastify/swagger if needed');
+
+  // Graceful shutdown — finish in-flight requests before exiting
+  const shutdown = async (signal: string) => {
+    logger.info({ signal }, '[api] Shutdown signal received — closing server');
+    await server.close();
+    logger.info('[api] Server closed — exiting');
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT',  () => shutdown('SIGINT'));
 }
 
 bootstrap().catch(err => {
