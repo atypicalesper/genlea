@@ -13,6 +13,12 @@ export async function jobsRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: stats });
   });
 
+  // GET /api/jobs/active — what is currently being processed
+  app.get('/jobs/active', async (_req, reply) => {
+    const active = await queueManager.getActiveJobs();
+    return reply.send({ success: true, data: active });
+  });
+
   // GET /api/jobs/logs — recent scrape logs
   app.get<{ Querystring: { scraper?: string; limit?: string } }>(
     '/jobs/logs',

@@ -38,10 +38,12 @@ export class GlassdoorScraper implements Scraper {
 
       for (const listing of listings) {
         const key = listing.companyName.toLowerCase().trim();
+        const domain = slugifyName(listing.companyName);
         if (!byCompany.has(key)) {
           byCompany.set(key, {
             company: {
               name:          listing.companyName,
+              domain,
               hqCity:        listing.city,
               hqState:       listing.state,
               hqCountry:     'US',
@@ -52,10 +54,11 @@ export class GlassdoorScraper implements Scraper {
           });
         }
         byCompany.get(key)!.jobs.push({
-          title:    listing.jobTitle,
-          techTags: listing.techTags,
-          source:   'glassdoor',
-          postedAt: listing.postedAt,
+          companyDomain: domain,
+          title:         listing.jobTitle,
+          techTags:      listing.techTags,
+          source:        'glassdoor',
+          postedAt:      listing.postedAt,
         });
       }
 
@@ -166,6 +169,13 @@ export class GlassdoorScraper implements Scraper {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function slugifyName(name: string): string {
+  return name.toLowerCase()
+    .replace(/\s+(inc|llc|ltd|corp|co\.?)\.?$/i, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 40) + '.com';
+}
 
 interface GlassdoorListing {
   jobTitle:      string;

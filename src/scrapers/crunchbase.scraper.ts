@@ -31,7 +31,8 @@ export class CrunchbaseScraper implements Scraper {
   }
 
   async isAvailable(): Promise<boolean> {
-    return true; // always available — fallback to web scraping if no API key
+    // Web mode hits crunchbase.com/discover which requires login/CAPTCHA — no results without API key
+    return this.hasApiKey;
   }
 
   private get hasApiKey(): boolean {

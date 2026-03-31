@@ -76,6 +76,15 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
   </div>
 </div>
 
+<!-- PIPELINE ACTIVITY BAR (global, all tabs) -->
+<div id="activity-bar" class="hidden bg-blue-50 border-b border-blue-200 px-5 py-1.5 flex items-center gap-2 text-xs text-blue-700 overflow-x-auto">
+  <span class="inline-flex items-center gap-1 shrink-0">
+    <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse inline-block"></span>
+    <span class="font-semibold">Pipeline running:</span>
+  </span>
+  <div id="activity-pills" class="flex gap-1.5 flex-wrap"></div>
+</div>
+
 <!-- ERROR BANNER -->
 <div id="error-banner" class="bg-red-50 border-b border-red-200 px-5 py-2 flex items-center justify-between">
   <span id="error-msg" class="text-red-700 text-xs"></span>
@@ -331,6 +340,18 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
         <button onclick="drainQueue('enrichment')" class="action-btn danger text-xs">✕ Drain Enrichment</button>
         <button onclick="drainQueue('scoring')" class="action-btn danger text-xs">✕ Drain Scoring</button>
       </div>
+    </div>
+
+    <!-- Currently Processing -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5 md:col-span-2">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h2 class="font-semibold text-gray-900">Currently Processing</h2>
+          <p class="text-xs text-gray-400 mt-0.5">Jobs actively running through the pipeline right now</p>
+        </div>
+        <button onclick="loadActiveJobs()" class="text-xs text-blue-600 hover:underline">↻ Refresh</button>
+      </div>
+      <div id="active-jobs-panel" class="text-xs text-gray-400">Loading…</div>
     </div>
 
     <!-- Scoring & Ratio Settings -->
@@ -632,7 +653,7 @@ function switchTab(name) {
   if (idx >= 0) document.querySelectorAll('.tab-btn')[idx].classList.add('active');
   const panel = document.getElementById('tab-' + name);
   if (panel) panel.classList.add('active');
-  if (name === 'control')   { loadQueueStats(); loadCronInfo(); }
+  if (name === 'control')   { loadQueueStats(); loadCronInfo(); loadActiveJobs(); }
   if (name === 'logs')      loadLogs();
   if (name === 'analytics') loadAnalytics();
 }
@@ -1030,6 +1051,69 @@ function qrow(label, val, cls) {
     '<span class="font-semibold ' + cls + '">' + val + '</span></div>';
 }
 
+const STAGE_COLORS = { discovery: 'bg-blue-100 text-blue-700', enrichment: 'bg-purple-100 text-purple-700', scoring: 'bg-green-100 text-green-700' };
+const STAGE_LABELS = { discovery: '🔍 Scraping', enrichment: '🔬 Enriching', scoring: '⚖️ Scoring' };
+
+async function loadActiveJobs() {
+  try {
+    const json = await apiFetch('/api/jobs/active');
+    const jobs = json.data || [];
+    const panel = document.getElementById('active-jobs-panel');
+    const bar   = document.getElementById('activity-bar');
+    const pills = document.getElementById('activity-pills');
+
+    if (!jobs.length) {
+      panel.innerHTML = '<div class="text-gray-400 italic">No jobs currently running — pipeline is idle.</div>';
+      bar.classList.add('hidden');
+      return;
+    }
+
+    // Group by queue stage
+    const byStage = { discovery: [], enrichment: [], scoring: [] };
+    jobs.forEach(function(j) { (byStage[j.queue] = byStage[j.queue] || []).push(j); });
+
+    let html = '<div class="grid grid-cols-3 gap-3">';
+    ['discovery','enrichment','scoring'].forEach(function(stage) {
+      const list = byStage[stage] || [];
+      const cls  = STAGE_COLORS[stage] || 'bg-gray-100 text-gray-700';
+      const lbl  = STAGE_LABELS[stage] || stage;
+      html += '<div class="rounded-lg border border-gray-100 p-3">';
+      html += '<div class="text-xs font-semibold mb-2 ' + cls + ' inline-flex items-center gap-1 px-2 py-0.5 rounded">' + lbl + ' <span class="font-bold">' + list.length + '</span></div>';
+      if (!list.length) {
+        html += '<div class="text-xs text-gray-300 mt-1">idle</div>';
+      } else {
+        html += '<div class="space-y-1.5 mt-1">';
+        list.forEach(function(j) {
+          const label = stage === 'discovery'  ? (j.source || '?')
+                      : stage === 'enrichment' ? (j.domain || '?')
+                      : 'company';
+          const since = j.startedAt ? Math.round((Date.now() - new Date(j.startedAt).getTime()) / 1000) + 's' : '';
+          html += '<div class="flex items-center justify-between gap-2">';
+          html += '<span class="font-medium text-gray-700 truncate">' + label + '</span>';
+          if (since) html += '<span class="text-gray-400 shrink-0">' + since + '</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    panel.innerHTML = html;
+
+    // Update global activity bar
+    bar.classList.remove('hidden');
+    pills.innerHTML = jobs.map(function(j) {
+      const label = j.queue === 'discovery'  ? j.source
+                  : j.queue === 'enrichment' ? j.domain
+                  : 'scoring';
+      const cls = STAGE_COLORS[j.queue] || 'bg-gray-100 text-gray-700';
+      return '<span class="' + cls + ' px-2 py-0.5 rounded-full font-medium">' + j.queue + ':' + label + '</span>';
+    }).join('');
+  } catch(e) {
+    document.getElementById('active-jobs-panel').innerHTML = '<div class="text-red-400">Failed to load active jobs</div>';
+  }
+}
+
 async function loadCronInfo() {
   try {
     const json = await apiFetch('/api/jobs/cron');
@@ -1294,6 +1378,7 @@ function exportCSV() {
 loadStats();
 loadCompanies();
 loadSettings();
+loadActiveJobs();
 
 // Sort score column by default
 document.getElementById('si-score').textContent = '↓';
@@ -1310,10 +1395,16 @@ logRefreshId = setInterval(function() {
   if (document.getElementById('tab-logs').classList.contains('active')) loadLogs();
 }, 10000);
 
-// Queue stats auto-refresh
+// Queue stats + active jobs auto-refresh
 setInterval(function() {
-  if (document.getElementById('tab-control').classList.contains('active')) loadQueueStats();
-}, 8000);
+  if (document.getElementById('tab-control').classList.contains('active')) {
+    loadQueueStats();
+    loadActiveJobs();
+  }
+}, 5000);
+
+// Always poll active jobs for the global activity bar (even on other tabs)
+setInterval(loadActiveJobs, 8000);
 </script>
 </body>
 </html>`;

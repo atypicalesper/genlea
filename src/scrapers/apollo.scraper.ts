@@ -25,7 +25,8 @@ export class ApolloScraper implements Scraper {
   }
 
   async isAvailable(): Promise<boolean> {
-    return true; // always available — web mode used when no API key
+    // Web mode hits app.apollo.io which requires login — no results without API key
+    return this.hasApiKey;
   }
 
   private get hasApiKey(): boolean {

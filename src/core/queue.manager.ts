@@ -73,6 +73,44 @@ export class QueueManager {
     };
   }
 
+  async getActiveJobs(): Promise<Array<{
+    queue: string;
+    jobId: string | undefined;
+    name: string;
+    source?: string;
+    domain?: string;
+    runId?: string;
+    startedAt: Date | null;
+  }>> {
+    const [discoveryActive, enrichmentActive, scoringActive] = await Promise.all([
+      discoveryQueue.getActive(),
+      enrichmentQueue.getActive(),
+      scoringQueue.getActive(),
+    ]);
+
+    const parse = (jobs: Job[], queue: string) => jobs.map(j => {
+      const parts = j.name.split(':');
+      const startedAt = j.processedOn ? new Date(j.processedOn) : null;
+
+      if (queue === 'discovery') {
+        // name format: "${label}:${source}:${runId}"
+        return { queue, jobId: j.id, name: j.name, source: parts[1], runId: parts[2], startedAt };
+      }
+      if (queue === 'enrichment') {
+        // name format: "enrich:${domain}:${runId}"
+        return { queue, jobId: j.id, name: j.name, domain: parts[1], runId: parts[2], startedAt };
+      }
+      // scoring: "score:${companyId}:${runId}"
+      return { queue, jobId: j.id, name: j.name, runId: parts[2], startedAt };
+    });
+
+    return [
+      ...parse(discoveryActive, 'discovery'),
+      ...parse(enrichmentActive, 'enrichment'),
+      ...parse(scoringActive, 'scoring'),
+    ];
+  }
+
   async drainAll(): Promise<void> {
     await Promise.all([
       discoveryQueue.drain(),
