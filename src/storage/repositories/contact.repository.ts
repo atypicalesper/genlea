@@ -87,6 +87,10 @@ export const contactRepository = {
       {
         $set: {
           updatedAt: now,
+          // Upgrade email if we now have one (e.g. Hunter found it after GitHub inserted name-only)
+          ...(email && !existing.email && { email }),
+          // Upgrade role if it improves from Unknown → a real role
+          ...(data.role && data.role !== 'Unknown' && existing.role === 'Unknown' && { role: data.role }),
           ...(data.phone && { phone: data.phone }),
           ...(data.linkedinUrl && { linkedinUrl: data.linkedinUrl }),
           ...(data.emailVerified !== undefined && { emailVerified: data.emailVerified }),
