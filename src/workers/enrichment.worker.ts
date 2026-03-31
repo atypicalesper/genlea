@@ -12,6 +12,7 @@ import { deduplicateContacts } from '../enrichment/deduplicator.js';
 import { githubScraper } from '../scrapers/github.scraper.js';
 import { hunterScraper } from '../scrapers/hunter.scraper.js';
 import { clearbitScraper } from '../scrapers/clearbit.scraper.js';
+import { websiteTeamScraper } from '../enrichment/website.scraper.js';
 import { settingsRepository } from '../storage/repositories/settings.repository.js';
 import { logger } from '../utils/logger.js';
 
@@ -101,7 +102,37 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       logger.info({ domain, saved }, '[enrichment.worker] GitHub contributor names saved');
     }
 
-    // ── 3. Hunter — email pattern discovery ────────────────────────────────────
+    // ── 3. Website team page — free name source, no API key ────────────────────
+    const freshCompany = await companyRepository.findById(companyId);
+    const websiteUrl   = freshCompany?.websiteUrl;
+    if (websiteUrl) {
+      logger.debug({ domain, websiteUrl }, '[enrichment.worker] Scraping website team page');
+      const teamMembers = await websiteTeamScraper.scrapeTeam(websiteUrl, domain).catch(err => {
+        logger.warn({ err, domain }, '[enrichment.worker] Website team scrape failed — continuing');
+        return [];
+      });
+      if (teamMembers.length > 0) {
+        const saveResults = await Promise.allSettled(
+          teamMembers.map(person =>
+            contactRepository.upsert({
+              companyId,
+              fullName:    person.fullName,
+              firstName:   person.fullName.split(' ')[0],
+              lastName:    person.fullName.split(' ').at(-1),
+              role:        'Unknown',
+              linkedinUrl: person.linkedinUrl,
+              email:       person.email,
+              sources:     ['clearbit'], // closest available source type
+            })
+          )
+        );
+        const saved = saveResults.filter(r => r.status === 'fulfilled').length;
+        contactsFound += saved;
+        logger.info({ domain, saved }, '[enrichment.worker] Website team members saved');
+      }
+    }
+
+    // ── 4. Hunter — email pattern discovery ────────────────────────────────────
     logger.debug({ domain }, '[enrichment.worker] Hunter email discovery');
     const hunterResult = await hunterScraper.enrichDomain(domain);
     if (hunterResult?.contacts?.length) {
@@ -126,13 +157,13 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       logger.debug({ domain }, '[enrichment.worker] No Hunter results');
     }
 
-    // ── 4. Contact Resolver — verify emails + fill missing CEO/HR ──────────────
+    // ── 5. Contact Resolver — verify emails + fill missing CEO/HR ──────────────
     logger.debug({ domain, companyId }, '[enrichment.worker] Contact resolution');
     await contactResolver.resolveForCompany(companyId, domain).catch(err =>
       logger.error({ err, domain, companyId }, '[enrichment.worker] Contact resolution failed — continuing')
     );
 
-    // ── 5. Dev Origin Ratio — analyse employee name list ───────────────────────
+    // ── 6. Dev Origin Ratio — analyse employee name list ───────────────────────
     logger.debug({ domain, companyId }, '[enrichment.worker] Origin ratio analysis');
     const allContacts = await contactRepository.findByCompanyId(companyId);
     const nameList = allContacts
@@ -165,7 +196,7 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       );
     }
 
-    // ── 6. Stamp lastEnrichedAt + enqueue scoring ───────────────────────────────
+    // ── 7. Stamp lastEnrichedAt + enqueue scoring ───────────────────────────────
     await companyRepository.upsert({ domain, name: company.name, lastEnrichedAt: new Date() });
     await queueManager.addScoringJob({ runId, companyId });
 

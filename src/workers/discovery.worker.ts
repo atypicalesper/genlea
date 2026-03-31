@@ -109,6 +109,17 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
         continue;
       }
 
+      // Skip companies with no tech signal at all — not a target
+      const hasTech = (company.techStack?.length ?? 0) > 0;
+      const rawForCheck = domainToRaw.get(company.domain) ?? [];
+      const hasTechJobs = rawForCheck.some(r =>
+        r.jobs?.some(j => j.techTags && j.techTags.length > 0)
+      );
+      if (!hasTech && !hasTechJobs) {
+        logger.debug({ domain: company.domain }, '[discovery.worker] No tech signal — skipping');
+        continue;
+      }
+
       // Skip known large enterprises — they will never be valid leads
       if (BLOCKED_DOMAINS.has(company.domain)) {
         logger.debug({ domain: company.domain }, '[discovery.worker] Blocked enterprise domain — skipping');

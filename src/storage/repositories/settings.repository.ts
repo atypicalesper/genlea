@@ -11,10 +11,10 @@ export interface AppSettings {
 type SettingsDoc = AppSettings & { _id: string };
 
 const DEFAULTS: AppSettings = {
-  originRatioThreshold: 0.60,
-  originRatioMinSample: 10,
-  leadScoreHotThreshold: 65,
-  leadScoreWarmThreshold: 50,
+  originRatioThreshold:  0.60,
+  originRatioMinSample:  5,   // was 10 — most startups have <10 public contributors
+  leadScoreHotThreshold:  55,  // was 65 — unknown ratio now gives 10pts, lower bar
+  leadScoreWarmThreshold: 38,  // was 50
   updatedAt: new Date(),
 };
 

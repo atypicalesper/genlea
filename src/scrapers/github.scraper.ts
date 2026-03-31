@@ -111,14 +111,14 @@ export class GitHubScraper implements Scraper {
     logger.debug({ orgName }, '[github:tech] Fetching repos');
 
     const res = await this.client.get<Array<{ name: string; language: string | null }>>(
-      `/orgs/${orgName}/repos?sort=updated&per_page=30`
+      `/orgs/${orgName}/repos?sort=updated&per_page=50`
     );
 
     const repos = res.data;
     const langCounts: Record<string, number> = {};
 
-    // Get language breakdown for top 10 repos
-    const topRepos = repos.slice(0, 10);
+    // Get language breakdown for top 15 repos
+    const topRepos = repos.slice(0, 15);
     const langResults = await Promise.allSettled(
       topRepos.map(r => this.client.get<Record<string, number>>(`/repos/${orgName}/${r.name}/languages`))
     );
@@ -160,9 +160,9 @@ export class GitHubScraper implements Scraper {
     const empty = { count: null, contacts: [] };
     try {
       const reposRes = await this.client.get<Array<{ name: string }>>(
-        `/orgs/${orgName}/repos?sort=pushed&per_page=5`
+        `/orgs/${orgName}/repos?sort=pushed&per_page=10`
       );
-      const repos = reposRes.data.slice(0, 3);
+      const repos = reposRes.data.slice(0, 8);
 
       const contributorSets = await Promise.allSettled(
         repos.map(r =>
@@ -182,8 +182,8 @@ export class GitHubScraper implements Scraper {
       const count = logins.size > 0 ? logins.size : null;
       logger.debug({ orgName, uniqueContributors: logins.size }, '[github:devs] Contributor logins collected');
 
-      // Fetch real names for up to 30 contributors (for origin ratio)
-      const sample = [...logins].slice(0, 30);
+      // Fetch real names for up to 60 contributors (for origin ratio)
+      const sample = [...logins].slice(0, 60);
       const profileResults = await Promise.allSettled(
         sample.map(login => this.client.get<{ login: string; name: string | null; company: string | null }>(
           `/users/${login}`

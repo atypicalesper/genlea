@@ -6,11 +6,14 @@ const TARGET_TAGS = (process.env['TARGET_TECH_STACK'] ?? 'nodejs,typescript,pyth
 // ── 1. Dev Origin Concentration (0–30) ───────────────────────────────────────
 export function originRatioScore(company: Company): number {
   const ratio = company.originRatio;
-  if (ratio === undefined || ratio === null) return 0;
+  // Unknown ratio (no GitHub org / private repos) → neutral 10pts
+  // Company might still be a great lead — don't zero-penalise before we know
+  if (ratio === undefined || ratio === null) return 10;
   if (ratio >= 0.90) return 30;
   if (ratio >= 0.75) return 25;
-  if (ratio >= 0.60) return 17; // tolerance floor
+  if (ratio >= 0.60) return 17;
   if (ratio >= 0.50) return 10;
+  // Confirmed low ratio → 0 (not a target)
   return 0;
 }
 

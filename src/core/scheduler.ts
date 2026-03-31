@@ -11,45 +11,44 @@ const SEED_QUERIES: Array<{
   keywords: string;
   techStack?: string[];
 }> = [
-  // ── Wellfound — YC + early-stage ─────────────────────────────────────────
-  { source: 'wellfound', keywords: 'Y Combinator startup software engineer',           techStack: ['nodejs', 'python', 'react'] },
-  { source: 'wellfound', keywords: 'YC startup backend engineer seed series a',        techStack: ['nodejs', 'typescript'] },
-  { source: 'wellfound', keywords: 'YC W24 startup engineer hiring',                   techStack: ['python', 'react'] },
-  { source: 'wellfound', keywords: 'YC S24 startup engineer hiring',                   techStack: ['nodejs', 'typescript'] },
-  { source: 'wellfound', keywords: 'seed stage startup software engineer US',          techStack: ['fullstack', 'nodejs'] },
-  { source: 'wellfound', keywords: 'series a startup backend engineer US',             techStack: ['python', 'nodejs'] },
-  { source: 'wellfound', keywords: 'early stage startup generative ai llm engineer',   techStack: ['python', 'generative-ai', 'ai'] },
-  { source: 'wellfound', keywords: 'pre-seed startup fullstack engineer US',           techStack: ['react', 'nodejs'] },
+  // ── Wellfound — most reliable free source for funded US startups ──────────
+  { source: 'wellfound', keywords: 'YC W24 startup software engineer',                techStack: ['nodejs', 'python', 'react'] },
+  { source: 'wellfound', keywords: 'YC S24 startup software engineer',                techStack: ['nodejs', 'typescript'] },
+  { source: 'wellfound', keywords: 'YC W23 startup backend engineer',                 techStack: ['python', 'react'] },
+  { source: 'wellfound', keywords: 'seed stage fintech startup engineer US',          techStack: ['nodejs', 'python'] },
+  { source: 'wellfound', keywords: 'seed stage AI startup engineer US',               techStack: ['python', 'generative-ai', 'ai'] },
+  { source: 'wellfound', keywords: 'series a saas startup backend engineer US',       techStack: ['nodejs', 'typescript'] },
+  { source: 'wellfound', keywords: 'series a healthtech startup engineer US',         techStack: ['python', 'react'] },
+  { source: 'wellfound', keywords: 'series a fintech startup engineer US',            techStack: ['nodejs', 'typescript'] },
+  { source: 'wellfound', keywords: 'remote first startup fullstack engineer US',      techStack: ['react', 'nodejs', 'fullstack'] },
+  { source: 'wellfound', keywords: 'distributed team startup backend engineer US',    techStack: ['python', 'nodejs'] },
+  { source: 'wellfound', keywords: 'pre-seed startup generative ai llm engineer',     techStack: ['python', 'generative-ai'] },
+  { source: 'wellfound', keywords: 'bootstrapped saas startup nodejs engineer',       techStack: ['nodejs', 'nestjs'] },
 
-  // ── LinkedIn ──────────────────────────────────────────────────────────────
-  { source: 'linkedin', keywords: 'Y Combinator startup software engineer hiring US',    techStack: ['nodejs', 'python'] },
-  { source: 'linkedin', keywords: 'seed funded startup backend engineer US',             techStack: ['nodejs', 'typescript'] },
-  { source: 'linkedin', keywords: 'series a startup software engineer 10-50 employees', techStack: ['react', 'python'] },
-  { source: 'linkedin', keywords: 'early stage saas startup engineer hiring US',        techStack: ['nodejs', 'nestjs'] },
+  // ── LinkedIn — requires session but highest quality ────────────────────────
+  { source: 'linkedin', keywords: 'YC startup software engineer seed series a US',   techStack: ['nodejs', 'python'] },
+  { source: 'linkedin', keywords: 'seed funded saas startup engineer 10-50 US',      techStack: ['nodejs', 'typescript'] },
+  { source: 'linkedin', keywords: 'series a AI startup engineer hiring US',           techStack: ['python', 'generative-ai'] },
+  { source: 'linkedin', keywords: 'remote startup fullstack engineer distributed',    techStack: ['react', 'nodejs'] },
 
-  // ── Indeed ────────────────────────────────────────────────────────────────
-  { source: 'indeed', keywords: 'early stage startup software engineer US seed series a' },
-  { source: 'indeed', keywords: 'Y Combinator startup engineer hiring US' },
-  { source: 'indeed', keywords: 'small startup backend python nodejs engineer US' },
-
-  // ── Crunchbase ────────────────────────────────────────────────────────────
-  { source: 'crunchbase', keywords: 'Y Combinator seed startup software US' },
-  { source: 'crunchbase', keywords: 'series a startup saas software US 2023 2024' },
-
-  // ── Apollo ────────────────────────────────────────────────────────────────
-  { source: 'apollo', keywords: 'seed stage saas startup software engineer US',        techStack: ['nodejs', 'python'] },
-  { source: 'apollo', keywords: 'series a startup tech company US 10 50 employees',   techStack: ['react', 'typescript'] },
+  // ── Indeed — catches active job postings not on other boards ─────────────
+  { source: 'indeed', keywords: 'startup software engineer seed funded US' },
+  { source: 'indeed', keywords: 'early stage startup backend python nodejs US' },
+  { source: 'indeed', keywords: 'startup fullstack engineer series a US remote' },
+  { source: 'indeed', keywords: 'AI startup machine learning engineer US seed' },
+  { source: 'indeed', keywords: 'saas startup typescript react engineer US' },
 
   // ── Glassdoor ─────────────────────────────────────────────────────────────
-  { source: 'glassdoor', keywords: 'software engineer startup seed series a US',         techStack: ['nodejs', 'react', 'python'] },
-  { source: 'glassdoor', keywords: 'Y Combinator startup software engineer US',          techStack: ['python', 'typescript'] },
-  { source: 'glassdoor', keywords: 'early stage startup backend engineer nodejs python', techStack: ['nodejs', 'python'] },
+  { source: 'glassdoor', keywords: 'startup software engineer seed series a US',     techStack: ['nodejs', 'react', 'python'] },
+  { source: 'glassdoor', keywords: 'AI startup engineer python typescript US',       techStack: ['python', 'typescript', 'generative-ai'] },
+  { source: 'glassdoor', keywords: 'fintech startup backend engineer US',            techStack: ['nodejs', 'python'] },
+  { source: 'glassdoor', keywords: 'remote startup fullstack engineer US',           techStack: ['react', 'nodejs', 'fullstack'] },
 
-  // ── Surely Remote ─────────────────────────────────────────────────────────
-  { source: 'surelyremote', keywords: 'software engineer startup seed series a',         techStack: ['nodejs', 'react', 'python'] },
-  { source: 'surelyremote', keywords: 'backend engineer startup nodejs typescript',      techStack: ['nodejs', 'typescript'] },
-  { source: 'surelyremote', keywords: 'fullstack engineer early stage startup',          techStack: ['react', 'nodejs', 'fullstack'] },
-  { source: 'surelyremote', keywords: 'generative ai llm engineer startup',              techStack: ['python', 'generative-ai', 'ai'] },
+  // ── Surely Remote — remote-first companies are top outsourcing targets ────
+  { source: 'surelyremote', keywords: 'startup backend engineer nodejs python',      techStack: ['nodejs', 'python'] },
+  { source: 'surelyremote', keywords: 'startup AI engineer generative llm',          techStack: ['python', 'generative-ai', 'ai'] },
+  { source: 'surelyremote', keywords: 'startup fullstack react typescript',          techStack: ['react', 'typescript', 'fullstack'] },
+  { source: 'surelyremote', keywords: 'saas startup backend typescript nestjs',      techStack: ['nodejs', 'nestjs', 'typescript'] },
 ];
 
 // ── Track last seed time (readable by API) ─────────────────────────────────────
