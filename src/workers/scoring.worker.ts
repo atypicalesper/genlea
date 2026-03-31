@@ -6,6 +6,7 @@ import { connectMongo } from '../storage/mongo.client.js';
 import { companyRepository } from '../storage/repositories/company.repository.js';
 import { contactRepository } from '../storage/repositories/contact.repository.js';
 import { jobRepository } from '../storage/repositories/job.repository.js';
+import { settingsRepository } from '../storage/repositories/settings.repository.js';
 import { scoreCompany } from '../scoring/scorer.js';
 import { logger } from '../utils/logger.js';
 
@@ -17,10 +18,11 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
 
   try {
     // ── Fetch all data needed to score ───────────────────────────────────────
-    const [company, contacts, jobs] = await Promise.all([
+    const [company, contacts, jobs, settings] = await Promise.all([
       companyRepository.findById(companyId),
       contactRepository.findByCompanyId(companyId),
       jobRepository.findByCompanyId(companyId, true),
+      settingsRepository.get(),
     ]);
 
     if (!company) {
@@ -34,7 +36,10 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     );
 
     // ── Score ────────────────────────────────────────────────────────────────
-    const { score, status, breakdown } = scoreCompany({ company, contacts, jobs });
+    const { score, status, breakdown } = scoreCompany(
+      { company, contacts, jobs },
+      { hot: settings.leadScoreHotThreshold, warm: settings.leadScoreWarmThreshold }
+    );
 
     // ── Persist score ─────────────────────────────────────────────────────────
     await companyRepository.updateScore(companyId, score, status, breakdown);

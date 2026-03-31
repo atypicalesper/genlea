@@ -39,7 +39,10 @@ export const contactRepository = {
     const now = new Date();
     const email = data.email ? normalizeEmail(data.email) : undefined;
 
-    const existing = email ? await col.findOne({ email } as any) : null;
+    // Dedup by email+companyId so the same email can exist under different companies
+    const existing = email
+      ? await col.findOne({ email, companyId: data.companyId } as any)
+      : await col.findOne({ companyId: data.companyId, fullName: data.fullName } as any);
 
     if (!existing) {
       const doc: ContactRaw = {
@@ -66,7 +69,7 @@ export const contactRepository = {
     }
 
     await col.updateOne(
-      { email } as any,
+      { _id: existing._id } as any,
       {
         $set: {
           updatedAt: now,
@@ -84,7 +87,7 @@ export const contactRepository = {
       }
     );
 
-    const updated = await col.findOne({ email } as any);
+    const updated = await col.findOne({ _id: existing._id } as any);
     return toContact(updated!);
   },
 
