@@ -1,11 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { queueManager, discoveryQueue, enrichmentQueue, scoringQueue } from '../../core/queue.manager.js';
 import { scrapeLogRepository } from '../../storage/repositories/scrape-log.repository.js';
+import { getLastSeedAt, getSeedQueryCount } from '../../core/scheduler.js';
 import { logger } from '../../utils/logger.js';
-
-// Track last seed time for dashboard display
-let lastSeedAt: Date | null = null;
-export function recordSeedTime() { lastSeedAt = new Date(); }
 
 export async function jobsRoutes(app: FastifyInstance) {
 
@@ -47,9 +44,9 @@ export async function jobsRoutes(app: FastifyInstance) {
       data: {
         schedule: '0 */2 * * *',
         description: 'Every 2 hours (on the hour)',
-        lastSeedAt: lastSeedAt?.toISOString() ?? null,
+        lastSeedAt: getLastSeedAt()?.toISOString() ?? null,
         nextApproxAt: new Date(nextRunMs).toISOString(),
-        seedQueryCount: 26,
+        seedQueryCount: getSeedQueryCount(),
       },
     });
   });

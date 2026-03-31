@@ -56,6 +56,11 @@ export const jobRepository = {
     return toJob(updated!);
   },
 
+  async deleteByCompanyId(companyId: string): Promise<void> {
+    const col = getCollection<JobRaw>(COLLECTIONS.JOBS);
+    await col.deleteMany({ companyId } as any);
+  },
+
   async deactivateAll(companyId: string): Promise<void> {
     const col = getCollection<JobRaw>(COLLECTIONS.JOBS);
     await col.updateMany({ companyId } as any, { $set: { isActive: false } });

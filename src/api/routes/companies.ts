@@ -86,7 +86,8 @@ export async function companiesRoutes(app: FastifyInstance) {
 
     await Promise.all([
       companyRepository.deleteOne(id),
-      // contacts/jobs repositories don't have deleteByCompanyId yet — use a best-effort
+      contactRepository.deleteByCompanyId(id),
+      jobRepository.deleteByCompanyId(id),
     ]);
     logger.info({ id, domain: company.domain }, '[api:companies] Company deleted');
     return reply.send({ success: true });

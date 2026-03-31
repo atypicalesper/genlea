@@ -96,6 +96,11 @@ export const contactRepository = {
     );
   },
 
+  async deleteByCompanyId(companyId: string): Promise<void> {
+    const col = getCollection<ContactRaw>(COLLECTIONS.CONTACTS);
+    await col.deleteMany({ companyId } as any);
+  },
+
   async count(filter: Filter<ContactRaw> = {}): Promise<number> {
     return getCollection<ContactRaw>(COLLECTIONS.CONTACTS).countDocuments(filter as any);
   },

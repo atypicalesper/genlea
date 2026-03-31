@@ -34,8 +34,8 @@ export function jobFreshnessScore(jobs: Job[]): number {
 // ── 3. Tech Stack Alignment (0–20) ───────────────────────────────────────────
 export function techStackScore(company: Company, jobs: Job[]): number {
   const allTags = new Set([
-    ...company.techStack,
-    ...jobs.flatMap(j => j.techTags),
+    ...(company.techStack ?? []),
+    ...jobs.flatMap(j => j.techTags ?? []),
   ]);
 
   let score = 0;
@@ -84,7 +84,7 @@ export function companyFitScore(company: Company): number {
 
   // Industry bonus
   const highValueIndustries = ['ai', 'saas', 'fintech', 'healthtech', 'edtech'];
-  const companyIndustries = company.industry.map(i => i.toLowerCase());
+  const companyIndustries = (company.industry ?? []).map(i => i.toLowerCase());
   if (highValueIndustries.some(i => companyIndustries.some(ci => ci.includes(i)))) {
     score += 3;
   }

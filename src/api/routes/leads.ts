@@ -73,7 +73,7 @@ export async function leadsRoutes(app: FastifyInstance) {
     return reply.send({
       success: true,
       data: companies,
-      meta: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) },
+      meta: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Math.max(Number(limit), 1)) },
     });
   });
 

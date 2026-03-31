@@ -51,6 +51,11 @@ const SEED_QUERIES: Array<{
   { source: 'surelyremote', keywords: 'generative ai llm engineer startup',              techStack: ['python', 'generative-ai', 'ai'] },
 ];
 
+// ── Track last seed time (readable by API) ─────────────────────────────────────
+let _lastSeedAt: Date | null = null;
+export function getLastSeedAt(): Date | null { return _lastSeedAt; }
+export function getSeedQueryCount(): number { return SEED_QUERIES.length; }
+
 // ── Enqueue one round of seed queries ─────────────────────────────────────────
 
 export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: string; queries: number }> {
@@ -79,6 +84,7 @@ export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: st
     );
   }
 
+  _lastSeedAt = new Date();
   logger.info({ runId, label }, '[scheduler] ✅ Seed round enqueued');
   return { runId, queries: SEED_QUERIES.length };
 }
