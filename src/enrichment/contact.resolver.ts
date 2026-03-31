@@ -27,14 +27,16 @@ export const contactResolver = {
     let enriched = 0;
     let verified = 0;
 
-    // ── Step 1: Verify existing unverified emails ─────────────────────────────
-    for (const contact of existingContacts) {
-      if (contact.email && !contact.emailVerified && contact._id) {
+    // ── Step 1: Verify existing unverified emails (parallel, max 3 concurrent) ──
+    const unverified = existingContacts.filter(c => c.email && !c.emailVerified && c._id);
+    const VERIFY_CONCURRENCY = 3;
+    for (let i = 0; i < unverified.length; i += VERIFY_CONCURRENCY) {
+      const batch = unverified.slice(i, i + VERIFY_CONCURRENCY);
+      await Promise.all(batch.map(async contact => {
         logger.debug({ email: contact.email }, '[contact.resolver] Verifying existing email');
-        const result = await emailVerifier.verify(contact.email);
-
+        const result = await emailVerifier.verify(contact.email!);
         if (result.confidence > 0.6) {
-          await contactRepository.markEmailVerified(contact._id, result.confidence);
+          await contactRepository.markEmailVerified(contact._id!, result.confidence);
           verified++;
           logger.info(
             { email: contact.email, confidence: result.confidence, role: contact.role },
@@ -46,7 +48,7 @@ export const contactResolver = {
             '[contact.resolver] Email verification failed'
           );
         }
-      }
+      }));
     }
 
     // ── Step 2: Find missing priority contacts via Hunter ─────────────────────

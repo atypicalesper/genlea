@@ -141,7 +141,14 @@ function normalizePhone(phone?: string): string | undefined {
   if (!phone) return undefined;
   const digits = phone.replace(/\D/g, '');
   if (digits.length < 7) return undefined;
-  return `+${digits.startsWith('1') ? digits : '1' + digits}`;
+  // Already has country code (starts with + in original, or digits are 11+ chars starting with 1)
+  if (phone.trim().startsWith('+')) return `+${digits}`;
+  // 10-digit US number — prepend country code
+  if (digits.length === 10) return `+1${digits}`;
+  // 11-digit starting with 1 — already has US country code
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  // International or ambiguous — return as-is with + prefix
+  return `+${digits}`;
 }
 
 function isValidEmail(email: string): boolean {

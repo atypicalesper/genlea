@@ -1,20 +1,22 @@
 import { getCollection } from '../mongo.client.js';
 
 export interface AppSettings {
-  originRatioThreshold: number;    // min Indian dev ratio to flag — default 0.60
-  originRatioMinSample: number;    // min names needed for reliable ratio — default 10
-  leadScoreHotThreshold: number;   // score to become hot — default 65
-  leadScoreWarmThreshold: number;  // score to become warm — default 50
+  originRatioThreshold: number;         // min Indian dev ratio to flag — default 0.60
+  originRatioMinSample: number;         // min names needed for reliable ratio — default 5
+  leadScoreHotVerifiedThreshold: number; // score to become hot_verified — default 80
+  leadScoreHotThreshold: number;        // score to become hot — default 55
+  leadScoreWarmThreshold: number;       // score to become warm — default 38
   updatedAt: Date;
 }
 
 type SettingsDoc = AppSettings & { _id: string };
 
 const DEFAULTS: AppSettings = {
-  originRatioThreshold:  0.60,
-  originRatioMinSample:  5,   // was 10 — most startups have <10 public contributors
-  leadScoreHotThreshold:  55,  // was 65 — unknown ratio now gives 10pts, lower bar
-  leadScoreWarmThreshold: 38,  // was 50
+  originRatioThreshold:         0.60,
+  originRatioMinSample:         5,
+  leadScoreHotVerifiedThreshold: 80,
+  leadScoreHotThreshold:        55,
+  leadScoreWarmThreshold:       38,
   updatedAt: new Date(),
 };
 

@@ -9,12 +9,13 @@ import {
 } from './rules.js';
 
 // Env-var defaults — overridden at call time by values from settingsRepository
-const ENV_HOT_THRESHOLD  = parseInt(process.env['LEAD_SCORE_HOT_THRESHOLD']  ?? '65');
-const ENV_WARM_THRESHOLD = parseInt(process.env['LEAD_SCORE_WARM_THRESHOLD'] ?? '50');
+const ENV_HOT_VERIFIED_THRESHOLD = parseInt(process.env['LEAD_SCORE_HOT_VERIFIED_THRESHOLD'] ?? '80');
+const ENV_HOT_THRESHOLD          = parseInt(process.env['LEAD_SCORE_HOT_THRESHOLD']           ?? '55');
+const ENV_WARM_THRESHOLD         = parseInt(process.env['LEAD_SCORE_WARM_THRESHOLD']          ?? '38');
 
 export function scoreCompany(
   input: ScoringInput,
-  thresholds?: { hot: number; warm: number }
+  thresholds?: { hotVerified?: number; hot: number; warm: number }
 ): ScoringResult {
   const { company, contacts, jobs } = input;
 
@@ -55,12 +56,13 @@ export function scoreCompany(
   return { score: breakdown.total, status, breakdown };
 }
 
-function resolveStatus(score: number, thresholds?: { hot: number; warm: number }): LeadStatus {
-  const hot  = thresholds?.hot  ?? ENV_HOT_THRESHOLD;
-  const warm = thresholds?.warm ?? ENV_WARM_THRESHOLD;
-  if (score >= 80)   return 'hot_verified';
-  if (score >= hot)  return 'hot';
-  if (score >= warm) return 'warm';
-  if (score >= 35)   return 'cold';
+function resolveStatus(score: number, thresholds?: { hotVerified?: number; hot: number; warm: number }): LeadStatus {
+  const hotVerified = thresholds?.hotVerified ?? ENV_HOT_VERIFIED_THRESHOLD;
+  const hot         = thresholds?.hot         ?? ENV_HOT_THRESHOLD;
+  const warm        = thresholds?.warm        ?? ENV_WARM_THRESHOLD;
+  if (score >= hotVerified) return 'hot_verified';
+  if (score >= hot)         return 'hot';
+  if (score >= warm)        return 'warm';
+  if (score >= 35)          return 'cold';
   return 'disqualified';
 }

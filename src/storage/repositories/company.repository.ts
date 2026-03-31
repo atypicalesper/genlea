@@ -35,12 +35,14 @@ export const companyRepository = {
   async findHotLeads(
     status: LeadStatus = 'hot',
     limit: number = 100,
-    skip: number = 0
+    skip: number = 0,
+    minScore?: number
   ): Promise<Company[]> {
     const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
-    const minScore = status === 'hot_verified' ? 80 : status === 'hot' ? 65 : 50;
+    // Use caller-supplied threshold (from settingsRepository) — fall back to safe defaults
+    const floor = minScore ?? (status === 'hot_verified' ? 80 : status === 'hot' ? 55 : 38);
     const docs = await col
-      .find({ status, score: { $gte: minScore } })
+      .find({ status, score: { $gte: floor } })
       .sort({ score: -1 })
       .skip(skip)
       .limit(limit)
@@ -97,12 +99,15 @@ export const companyRepository = {
       return toCompany({ ...doc, _id: result.insertedId });
     }
 
+    // Compute merged sources locally so we can update sourcesCount without a second round-trip
+    const mergedSources = [...new Set([...(existing.sources ?? []), ...(data.sources ?? [])])];
+
     // Merge: union arrays, keep max of numeric fields, always $set fresh ratio data
     const update: UpdateFilter<CompanyDoc> = {
       $set: {
         updatedAt: now,
         // Only bump lastScrapedAt when a discovery scraper is contributing new source data
-        ...(data.sources?.length && { lastScrapedAt: now }),
+        ...(data.sources?.length && { lastScrapedAt: now, sourcesCount: mergedSources.length }),
         ...(data.name && { name: data.name }),
         ...(data.linkedinUrl && { linkedinUrl: data.linkedinUrl }),
         ...(data.websiteUrl && { websiteUrl: data.websiteUrl }),
@@ -143,7 +148,7 @@ export const companyRepository = {
     return toCompany(updated!);
   },
 
-  /** Update company score + status after scoring phase */
+  /** Update company score + status after scoring phase — single atomic pipeline write */
   async updateScore(
     id: string,
     score: number,
@@ -151,16 +156,23 @@ export const companyRepository = {
     scoreBreakdown: Company['scoreBreakdown']
   ): Promise<void> {
     const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
-    const oid = new ObjectId(id);
-    // Always update the numeric score + breakdown so the dashboard shows current data
+    // Aggregation pipeline update: score always updates; status only updates if not manuallyReviewed
     await col.updateOne(
-      { _id: oid },
-      { $set: { score, scoreBreakdown, updatedAt: new Date() } }
-    );
-    // Only overwrite status if the user hasn't manually reviewed this company
-    await col.updateOne(
-      { _id: oid, manuallyReviewed: { $ne: true } },
-      { $set: { status } }
+      { _id: new ObjectId(id) },
+      [{
+        $set: {
+          score,
+          scoreBreakdown,
+          updatedAt: new Date(),
+          status: {
+            $cond: {
+              if:   { $eq: ['$manuallyReviewed', true] },
+              then: '$status',   // preserve existing if user set it manually
+              else: status,      // scorer-computed value
+            },
+          },
+        },
+      }]
     );
     logger.info({ id, score, status }, '[company.repository] Score updated');
   },
@@ -173,6 +185,15 @@ export const companyRepository = {
       { $set: { status: 'disqualified', updatedAt: new Date() } }
     );
     logger.info({ id }, '[company.repository] Company disqualified');
+  },
+
+  /** Overwrite openRoles with current active job titles — called from scoring worker */
+  async setOpenRoles(id: string, roles: string[]): Promise<void> {
+    const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
+    await col.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { openRoles: [...new Set(roles)], updatedAt: new Date() } }
+    );
   },
 
   async count(filter: Filter<CompanyDoc> = {}): Promise<number> {

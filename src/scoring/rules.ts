@@ -73,9 +73,10 @@ export function contactScore(contacts: Contact[]): number {
 export function companyFitScore(company: Company): number {
   let score = 0;
 
-  // Size
-  const emp = company.employeeCount ?? 0;
-  if (emp >= 30 && emp <= 200) score += 7;
+  // Size — undefined means unknown (not 0 employees), give neutral credit
+  const emp = company.employeeCount;
+  if (emp === undefined || emp === null) score += 2; // unknown size → neutral
+  else if (emp >= 30 && emp <= 200) score += 7;
   else if ((emp >= 11 && emp < 30) || (emp > 200 && emp <= 500)) score += 4;
 
   // Funding stage

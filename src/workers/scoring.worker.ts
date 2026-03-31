@@ -38,8 +38,18 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     // ── Score ────────────────────────────────────────────────────────────────
     const { score, status, breakdown } = scoreCompany(
       { company, contacts, jobs },
-      { hot: settings.leadScoreHotThreshold, warm: settings.leadScoreWarmThreshold }
+      {
+        hotVerified: settings.leadScoreHotVerifiedThreshold,
+        hot:         settings.leadScoreHotThreshold,
+        warm:        settings.leadScoreWarmThreshold,
+      }
     );
+
+    // ── Sync openRoles from active job titles ─────────────────────────────────
+    const openRoles = [...new Set(jobs.filter(j => j.isActive).map(j => j.title))];
+    if (openRoles.length > 0) {
+      await companyRepository.setOpenRoles(companyId, openRoles);
+    }
 
     // ── Persist score ─────────────────────────────────────────────────────────
     await companyRepository.updateScore(companyId, score, status, breakdown);

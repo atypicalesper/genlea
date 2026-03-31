@@ -101,8 +101,7 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
     }
 
     // ── 3. Website team page — free name source, no API key ────────────────────
-    const freshCompany = await companyRepository.findById(companyId);
-    const websiteUrl   = freshCompany?.websiteUrl;
+    const websiteUrl = company.websiteUrl;
     if (websiteUrl) {
       logger.debug({ domain, websiteUrl }, '[enrichment.worker] Scraping website team page');
       const teamMembers = await websiteTeamScraper.scrapeTeam(websiteUrl, domain).catch(err => {
@@ -120,7 +119,7 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
               role:        'Unknown',
               linkedinUrl: person.linkedinUrl,
               email:       person.email,
-              sources:     ['clearbit'], // closest available source type
+              sources:     ['website'],
             })
           )
         );

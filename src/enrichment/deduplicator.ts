@@ -54,12 +54,12 @@ function mergeCompanyRecords(base: Partial<Company>, incoming: Partial<Company>)
     fundingStage:    incoming.fundingStage && incoming.fundingStage !== 'Unknown'
                        ? incoming.fundingStage
                        : base.fundingStage,
-    // Take max of numeric fields (latest/most-complete value wins)
-    employeeCount:   Math.max(base.employeeCount ?? 0, incoming.employeeCount ?? 0) || undefined,
-    fundingTotalUsd: Math.max(base.fundingTotalUsd ?? 0, incoming.fundingTotalUsd ?? 0) || undefined,
-    originDevCount:  Math.max(base.originDevCount ?? 0, incoming.originDevCount ?? 0) || undefined,
-    totalDevCount:   Math.max(base.totalDevCount ?? 0, incoming.totalDevCount ?? 0) || undefined,
-    originRatio:     Math.max(base.originRatio ?? 0, incoming.originRatio ?? 0) || undefined,
+    // Take max of numeric fields — use maxDefined() so 0 is preserved (0 ratio ≠ unknown)
+    employeeCount:   maxDefined(base.employeeCount, incoming.employeeCount),
+    fundingTotalUsd: maxDefined(base.fundingTotalUsd, incoming.fundingTotalUsd),
+    originDevCount:  maxDefined(base.originDevCount, incoming.originDevCount),
+    totalDevCount:   maxDefined(base.totalDevCount, incoming.totalDevCount),
+    originRatio:     maxDefined(base.originRatio, incoming.originRatio),
     score:           Math.max(base.score ?? 0, incoming.score ?? 0),
     // Union arrays
     industry:        uniqueArray([...(base.industry ?? []), ...(incoming.industry ?? [])]),
@@ -67,6 +67,12 @@ function mergeCompanyRecords(base: Partial<Company>, incoming: Partial<Company>)
     openRoles:       uniqueArray([...(base.openRoles ?? []), ...(incoming.openRoles ?? [])]),
     sources:         uniqueArray([...(base.sources ?? []), ...(incoming.sources ?? [])]),
   };
+}
+
+/** Returns the larger of two numbers, preserving 0 as a valid value. Returns undefined only if both inputs are undefined. */
+function maxDefined(a?: number, b?: number): number | undefined {
+  if (a === undefined && b === undefined) return undefined;
+  return Math.max(a ?? 0, b ?? 0);
 }
 
 // ── Contact Deduplication ─────────────────────────────────────────────────────
@@ -81,13 +87,24 @@ export function deduplicateContacts(contacts: Partial<Contact>[]): Partial<Conta
 
   for (const c of contacts) {
     if (c.email) {
-      const key = c.email.toLowerCase().trim();
-      const existing = byEmail.get(key);
-      if (!existing) {
-        byEmail.set(key, c);
+      const emailKey = c.email.toLowerCase().trim();
+      const nameKey  = `${(c.fullName ?? '').toLowerCase().trim()}:${c.companyId ?? ''}`;
+
+      // Merge with email map if email already seen
+      const existingByEmail = byEmail.get(emailKey);
+      if (existingByEmail) {
+        byEmail.set(emailKey, mergeContactRecords(existingByEmail, c));
+        logger.debug({ email: emailKey }, '[deduplicator] Contact merged by email');
       } else {
-        byEmail.set(key, mergeContactRecords(existing, c));
-        logger.debug({ email: key }, '[deduplicator] Contact merged by email');
+        // Check if this person was previously added without an email — promote and merge
+        const existingByName = byNameCompany.get(nameKey);
+        if (existingByName) {
+          byEmail.set(emailKey, mergeContactRecords(existingByName, c));
+          byNameCompany.delete(nameKey);
+          logger.debug({ email: emailKey, name: c.fullName }, '[deduplicator] Contact promoted from name-map to email-map');
+        } else {
+          byEmail.set(emailKey, c);
+        }
       }
     } else {
       // Fall back to name + companyId

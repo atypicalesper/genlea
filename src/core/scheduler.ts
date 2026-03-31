@@ -59,6 +59,16 @@ export function getSeedQueryCount(): number { return SEED_QUERIES.length; }
 // ── Enqueue one round of seed queries ─────────────────────────────────────────
 
 export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: string; queries: number }> {
+  // Skip if there's already a large backlog — avoid unbounded queue growth
+  if (label === 'cron' || label === 'scheduled') {
+    const counts = await discoveryQueue.getJobCounts();
+    const waiting = counts.waiting ?? 0;
+    if (waiting > 200) {
+      logger.warn({ waiting, label }, '[scheduler] Discovery backlog too large — skipping seed round');
+      return { runId: 'skipped', queries: 0 };
+    }
+  }
+
   const runId = generateRunId();
   logger.info({ runId, queries: SEED_QUERIES.length, label }, '[scheduler] Enqueueing seed round');
 

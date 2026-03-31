@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { companyRepository } from '../../storage/repositories/company.repository.js';
-import { contactRepository } from '../../storage/repositories/contact.repository.js';
+import { getCollection, COLLECTIONS } from '../../storage/mongo.client.js';
 import { LeadStatus, LeadFilter } from '../../types/index.js';
 import { logger } from '../../utils/logger.js';
 
@@ -54,9 +54,11 @@ export async function leadsRoutes(app: FastifyInstance) {
       filter['techStack'] = { $in: tags };
     }
     if (search) {
+      // Escape regex special chars to prevent ReDoS
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter['$or'] = [
-        { name:   { $regex: search, $options: 'i' } },
-        { domain: { $regex: search, $options: 'i' } },
+        { name:   { $regex: escaped, $options: 'i' } },
+        { domain: { $regex: escaped, $options: 'i' } },
       ];
     }
 
@@ -77,21 +79,33 @@ export async function leadsRoutes(app: FastifyInstance) {
     });
   });
 
-  // GET /api/stats — dashboard summary counts
+  // GET /api/stats — dashboard summary counts (single aggregation, not 7 queries)
   app.get('/stats', async (_req, reply) => {
     logger.info('[api:leads] GET /stats request');
-    const [total, hot_verified, hot, warm, cold, disqualified, pending] = await Promise.all([
-      companyRepository.count(),
-      companyRepository.count({ status: 'hot_verified' }),
-      companyRepository.count({ status: 'hot' }),
-      companyRepository.count({ status: 'warm' }),
-      companyRepository.count({ status: 'cold' }),
-      companyRepository.count({ status: 'disqualified' }),
-      companyRepository.count({ status: 'pending' }),
-    ]);
+    const agg = await getCollection(COLLECTIONS.COMPANIES)
+      .aggregate<{ _id: string; count: number }>([
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ])
+      .toArray();
+
+    const byStatus: Record<string, number> = {};
+    let total = 0;
+    for (const row of agg) {
+      byStatus[row._id] = row.count;
+      total += row.count;
+    }
+
     return reply.send({
       success: true,
-      data: { total, hot_verified, hot, warm, cold, disqualified, pending },
+      data: {
+        total,
+        hot_verified: byStatus['hot_verified'] ?? 0,
+        hot:          byStatus['hot']          ?? 0,
+        warm:         byStatus['warm']         ?? 0,
+        cold:         byStatus['cold']         ?? 0,
+        disqualified: byStatus['disqualified'] ?? 0,
+        pending:      byStatus['pending']      ?? 0,
+      },
     });
   });
 }

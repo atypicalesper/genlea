@@ -17,7 +17,8 @@ export type ScraperSource =
   | 'wellfound'
   | 'clearbit'
   | 'indeed'
-  | 'surelyremote';
+  | 'surelyremote'
+  | 'website';
 
 export type ContactRole = 'CEO' | 'CTO' | 'COO' | 'Founder' | 'HR' | 'Recruiter' | 'Head of Talent' | 'Engineering Manager' | 'Unknown';
 
