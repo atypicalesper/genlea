@@ -21,6 +21,20 @@ import { deduplicateCompanies } from '../enrichment/deduplicator.js';
 import { logger } from '../utils/logger.js';
 import { generateRunId } from '../utils/random.js';
 
+// ── Enterprise blocklist — never valid leads ──────────────────────────────────
+const BLOCKED_DOMAINS = new Set([
+  'google.com', 'amazon.com', 'microsoft.com', 'apple.com', 'meta.com',
+  'facebook.com', 'netflix.com', 'salesforce.com', 'oracle.com', 'ibm.com',
+  'sap.com', 'adobe.com', 'intuit.com', 'paypal.com', 'ebay.com',
+  'uber.com', 'lyft.com', 'airbnb.com', 'twitter.com', 'x.com',
+  'linkedin.com', 'snap.com', 'pinterest.com', 'reddit.com', 'discord.com',
+  'shopify.com', 'squarespace.com', 'wix.com', 'hubspot.com', 'zendesk.com',
+  'atlassian.com', 'slack.com', 'zoom.us', 'dropbox.com', 'box.com',
+  'twilio.com', 'cloudflare.com', 'okta.com', 'datadog.com', 'splunk.com',
+  'crowdstrike.com', 'pagerduty.com', 'hashicorp.com', 'confluent.io',
+  'stripe.com', 'plaid.com', 'braintree.com', 'square.com',
+]);
+
 const SCRAPERS = {
   linkedin:   linkedInScraper,
   apollo:     apolloScraper,
@@ -92,6 +106,18 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
     for (const company of dedupedCompanies) {
       if (!company.domain || !company.name) {
         logger.warn({ company }, '[discovery.worker] Skipping company with missing domain/name');
+        continue;
+      }
+
+      // Skip known large enterprises — they will never be valid leads
+      if (BLOCKED_DOMAINS.has(company.domain)) {
+        logger.debug({ domain: company.domain }, '[discovery.worker] Blocked enterprise domain — skipping');
+        continue;
+      }
+
+      // Skip if employee count already disqualifies company fit (>1000 = never a target)
+      if (company.employeeCount && company.employeeCount > 1000) {
+        logger.debug({ domain: company.domain, employees: company.employeeCount }, '[discovery.worker] Too large — skipping');
         continue;
       }
 

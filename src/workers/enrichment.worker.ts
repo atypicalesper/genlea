@@ -28,6 +28,13 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       return;
     }
 
+    // ── Size guard — disqualify oversized companies immediately ─────────────────
+    if (company.employeeCount && company.employeeCount > 1000) {
+      logger.info({ domain, employees: company.employeeCount }, '[enrichment.worker] Too large — disqualifying, skipping enrichment');
+      await companyRepository.upsert({ domain, name: company.name, status: 'disqualified' as const });
+      return;
+    }
+
     // ── Enrichment cooldown — skip full re-enrichment if done within 24h ────────
     // Bypass with force=true (set by manual /api/companies/:id/enrich trigger)
     const COOLDOWN_MS = 24 * 60 * 60 * 1000;
