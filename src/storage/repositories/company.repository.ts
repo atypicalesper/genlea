@@ -134,10 +134,10 @@ export const companyRepository = {
         ...(data.score !== undefined && { score: data.score }),
       },
       $addToSet: {
-        ...(data.sources?.length && { sources: { $each: data.sources } }),
+        ...(data.sources?.length   && { sources:   { $each: data.sources } }),
         ...(data.techStack?.length && { techStack: { $each: data.techStack } }),
-        ...(data.industry?.length && { industry: { $each: data.industry } }),
-        ...(data.openRoles?.length && { openRoles: { $each: data.openRoles } }),
+        ...(data.industry?.length  && { industry:  { $each: data.industry } }),
+        // openRoles is managed exclusively by setOpenRoles() in the scoring worker — not via upsert
       },
     };
 

@@ -188,6 +188,7 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
         <option>wellfound</option><option>linkedin</option><option>crunchbase</option>
         <option>apollo</option><option>indeed</option><option>glassdoor</option>
         <option>surelyremote</option><option>github</option><option>zoominfo</option>
+        <option>website</option><option>hunter</option><option>clearbit</option>
       </select>
     </div>
     <div class="flex flex-col gap-0.5">
@@ -415,10 +416,19 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
         <div class="space-y-4">
           <div>
             <div class="flex justify-between items-baseline mb-1">
-              <label class="text-xs font-medium text-gray-600">Hot Lead Threshold (score ≥)</label>
-              <span class="text-xs font-bold text-orange-600" id="hot-display">65</span>
+              <label class="text-xs font-medium text-gray-600">Hot Verified Threshold (score ≥)</label>
+              <span class="text-xs font-bold text-orange-700" id="hotv-display">80</span>
             </div>
-            <input type="range" id="s-hot-threshold" min="40" max="90" step="5" value="65"
+            <input type="range" id="s-hotv-threshold" min="60" max="100" step="5" value="80"
+              oninput="document.getElementById('hotv-display').textContent=this.value" class="w-full"/>
+            <div class="text-[10px] text-gray-400 mt-0.5">Score to classify as 🔥 Hot Verified lead</div>
+          </div>
+          <div>
+            <div class="flex justify-between items-baseline mb-1">
+              <label class="text-xs font-medium text-gray-600">Hot Lead Threshold (score ≥)</label>
+              <span class="text-xs font-bold text-orange-600" id="hot-display">55</span>
+            </div>
+            <input type="range" id="s-hot-threshold" min="40" max="90" step="5" value="55"
               oninput="document.getElementById('hot-display').textContent=this.value" class="w-full"/>
             <div class="text-[10px] text-gray-400 mt-0.5">Score to classify as 🔥 Hot lead</div>
           </div>
@@ -459,7 +469,7 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
           <option>wellfound</option><option>linkedin</option><option>crunchbase</option>
           <option>apollo</option><option>indeed</option><option>glassdoor</option>
           <option>surelyremote</option><option>github</option><option>zoominfo</option>
-          <option>hunter</option><option>clearbit</option>
+          <option>hunter</option><option>clearbit</option><option>website</option>
         </select>
         <select id="log-filter-limit" onchange="loadLogs()" class="text-xs">
           <option value="50">Last 50</option>
@@ -1199,13 +1209,15 @@ async function loadSettings() {
     const json = await apiFetch('/api/settings');
     const d = json.data;
     const orPct = Math.round((d.originRatioThreshold || 0.60) * 100);
-    document.getElementById('s-origin-ratio').value = orPct;
-    document.getElementById('s-min-sample').value   = d.originRatioMinSample  || 10;
-    document.getElementById('s-hot-threshold').value  = d.leadScoreHotThreshold  || 65;
-    document.getElementById('s-warm-threshold').value = d.leadScoreWarmThreshold || 50;
-    document.getElementById('sample-display').textContent = d.originRatioMinSample || 10;
-    document.getElementById('hot-display').textContent    = d.leadScoreHotThreshold || 65;
-    document.getElementById('warm-display').textContent   = d.leadScoreWarmThreshold || 50;
+    document.getElementById('s-origin-ratio').value    = orPct;
+    document.getElementById('s-min-sample').value      = d.originRatioMinSample           || 5;
+    document.getElementById('s-hotv-threshold').value  = d.leadScoreHotVerifiedThreshold  || 80;
+    document.getElementById('s-hot-threshold').value   = d.leadScoreHotThreshold          || 55;
+    document.getElementById('s-warm-threshold').value  = d.leadScoreWarmThreshold         || 38;
+    document.getElementById('sample-display').textContent = d.originRatioMinSample           || 5;
+    document.getElementById('hotv-display').textContent   = d.leadScoreHotVerifiedThreshold  || 80;
+    document.getElementById('hot-display').textContent    = d.leadScoreHotThreshold          || 55;
+    document.getElementById('warm-display').textContent   = d.leadScoreWarmThreshold         || 38;
     updateRatioDisplay();
   } catch(e) { /* silent */ }
 }
@@ -1226,10 +1238,11 @@ async function saveSettings() {
   try {
     const ratio = parseInt(document.getElementById('s-origin-ratio').value) / 100;
     await apiPatch('/api/settings', {
-      originRatioThreshold:  ratio,
-      originRatioMinSample:  parseInt(document.getElementById('s-min-sample').value),
-      leadScoreHotThreshold: parseInt(document.getElementById('s-hot-threshold').value),
-      leadScoreWarmThreshold:parseInt(document.getElementById('s-warm-threshold').value),
+      originRatioThreshold:          ratio,
+      originRatioMinSample:          parseInt(document.getElementById('s-min-sample').value),
+      leadScoreHotVerifiedThreshold: parseInt(document.getElementById('s-hotv-threshold').value),
+      leadScoreHotThreshold:         parseInt(document.getElementById('s-hot-threshold').value),
+      leadScoreWarmThreshold:        parseInt(document.getElementById('s-warm-threshold').value),
     });
     const el = document.getElementById('settings-saved');
     el.classList.remove('hidden');

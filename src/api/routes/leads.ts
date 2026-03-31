@@ -65,9 +65,10 @@ export async function leadsRoutes(app: FastifyInstance) {
     const sortField = VALID_SORT_FIELDS[sortBy] ?? 'score';
     const sortOrder = sortDir === 'asc' ? 1 : -1;
 
-    const skip = (Number(page) - 1) * Number(limit);
+    const safeLimit = Math.min(Number(limit), 500);
+    const skip = (Number(page) - 1) * safeLimit;
     const [companies, total] = await Promise.all([
-      companyRepository.findMany(filter, { sort: { [sortField]: sortOrder }, limit: Number(limit), skip }),
+      companyRepository.findMany(filter, { sort: { [sortField]: sortOrder }, limit: safeLimit, skip }),
       companyRepository.count(filter),
     ]);
 
@@ -75,7 +76,7 @@ export async function leadsRoutes(app: FastifyInstance) {
     return reply.send({
       success: true,
       data: companies,
-      meta: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Math.max(Number(limit), 1)) },
+      meta: { total, page: Number(page), limit: safeLimit, pages: Math.ceil(total / Math.max(safeLimit, 1)) },
     });
   });
 
