@@ -165,6 +165,16 @@ export const companyRepository = {
     logger.info({ id, score, status }, '[company.repository] Score updated');
   },
 
+  /** Disqualify a company — respects manuallyReviewed flag */
+  async disqualify(id: string): Promise<void> {
+    const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
+    await col.updateOne(
+      { _id: new ObjectId(id), manuallyReviewed: { $ne: true } },
+      { $set: { status: 'disqualified', updatedAt: new Date() } }
+    );
+    logger.info({ id }, '[company.repository] Company disqualified');
+  },
+
   async count(filter: Filter<CompanyDoc> = {}): Promise<number> {
     return getCollection<CompanyDoc>(COLLECTIONS.COMPANIES).countDocuments(filter);
   },

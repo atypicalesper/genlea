@@ -62,7 +62,7 @@ export class GitHubScraper implements Scraper {
       const rawCompany: Partial<RawCompany> = {
         domain,
         techStack,
-        employeeCount: devCount ?? undefined,
+        // NOTE: devCount is GitHub contributor count, NOT headcount — do not set employeeCount
         githubOrg: orgName,
       };
 

@@ -31,7 +31,7 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
     // ── Size guard — disqualify oversized companies immediately ─────────────────
     if (company.employeeCount && company.employeeCount > 1000) {
       logger.info({ domain, employees: company.employeeCount }, '[enrichment.worker] Too large — disqualifying, skipping enrichment');
-      await companyRepository.upsert({ domain, name: company.name, status: 'disqualified' as const });
+      await companyRepository.disqualify(companyId);
       return;
     }
 
