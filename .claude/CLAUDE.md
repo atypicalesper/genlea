@@ -58,45 +58,37 @@ All files live here. **Never write to tmp or outside this directory.**
 | `src/core/proxy.manager.ts` | ✅ Done | BrightData + file-based proxy rotation, fail tracking |
 | `src/core/session.manager.ts` | ✅ Done | LinkedIn session cookies, daily limits, cooldown, auto-login |
 
-### 🔄 Being Built Now
-| File | Status | Notes |
-|---|---|---|
-| `src/scrapers/clearbit.scraper.ts` | 🔄 Next | Company enrichment (logo, description, tech) |
-| `src/api/routes/companies.ts` | 🔄 Next | Separate companies route with full detail |
-
-### ✅ Newly Completed (this session)
+### ✅ All Core Modules Complete
 | File | Status | Purpose |
 |---|---|---|
-| `src/enrichment/email.verifier.ts` | ✅ Done | MX + raw SMTP probe, disposable domain check |
-| `src/enrichment/deduplicator.ts` | ✅ Done | Domain-keyed company, email-keyed contact, title-keyed job |
-| `src/enrichment/contact.resolver.ts` | ✅ Done | SMTP verify existing emails + Hunter gap-fill for CEO/HR |
-| `src/scrapers/zoominfo.scraper.ts` | ✅ Done | Playwright login + company/contacts tab (phone numbers) |
-| `src/index.ts` | ✅ Done | Commander CLI (scrape/score/stats/export/login) |
-| `scripts/verify-emails.ts` | ✅ Done | Batch SMTP verify up to 500 pending contacts |
-| `src/workers/enrichment.worker.ts` | ✅ Done | Wired: GitHub → Hunter → contactResolver → originRatio |
-| `services/name-origin/` | ✅ Done | Separate git repo — education-signal Python classifier |
-
-### ❌ Genuinely Not Yet Started
-| File | Status | Purpose |
-|---|---|---|
-| `src/scrapers/clearbit.scraper.ts` | ❌ | Logo, domain→company enrichment |
-| `src/api/routes/companies.ts` | ❌ | Separate company detail route |
-| `src/scrapers/indeed.scraper.ts` | ❌ | Free job scraping from Indeed |
-| `scripts/rescore-all.ts` | ❌ | Re-run scoring on all existing companies |
+| `src/scrapers/discovery/` | ✅ Done | wellfound, indeed, glassdoor, linkedin, apollo, crunchbase, surelyremote, zoominfo |
+| `src/scrapers/enrichment/` | ✅ Done | github, hunter, clearbit — called from enrichment worker |
+| `src/enrichment/website-team.enricher.ts` | ✅ Done | Scrapes /team /about pages for names (no API key) |
+| `src/enrichment/contact.resolver.ts` | ✅ Done | SMTP verify + Hunter gap-fill |
+| `src/enrichment/dev-origin.analyzer.ts` | ✅ Done | Indian name classifier |
+| `src/api/dashboard.ts` | ✅ Done | Live dashboard — leads, pipeline status, queue controls |
+| `src/api/routes/` | ✅ Done | companies, export (CSV), jobs, leads, scrape, settings |
+| `src/workers/` | ✅ Done | discovery, enrichment, scoring workers |
+| `src/core/scheduler.ts` | ✅ Done | Cron every 2h + startup seed + nightly stale job cleanup |
+| `src/scoring/` | ✅ Done | 5-signal scorer, DB-driven thresholds via settingsRepository |
 
 ---
 
-## 🏗️ Architecture (Quick Summary)
+## 🏗️ Architecture (Current)
 
 ```
-[Scrapers] → [Queue: BullMQ] → [Workers] → [Normalizer] → [Deduplicator] → [Indian Ratio Analyzer] → [Scorer] → [MongoDB]
-                                                                                                                        ↓
-                                                                                                         [Fastify API] → [CSV Export]
+Scheduler (2h cron)
+  → discovery queue
+  → discovery.worker: scrape → normalize → dedup → [blocklist/size/tech filter] → upsert → enrichment queue
+  → enrichment.worker: GitHub + Clearbit + website-team + Hunter + contactResolver + originRatio → scoring queue
+  → scoring.worker: score 0-100 → updateScore (respects manuallyReviewed flag)
+                                                           ↓
+                                         Fastify API + Dashboard + CSV Export
 ```
 
 **3 Queue Phases:**
 1. `discovery` — find companies via scraper, enqueue for enrichment
-2. `enrichment` — get full company details + contacts, enqueue for scoring
+2. `enrichment` — GitHub/Clearbit/website/Hunter/originRatio, enqueue for scoring
 3. `scoring` — score 0–100, write final status to MongoDB
 
 **MongoDB Collections:** `companies`, `contacts`, `jobs`, `scrape_logs`
