@@ -53,7 +53,7 @@ const SEED_QUERIES: Array<{
 
 // ── Enqueue one round of seed queries ─────────────────────────────────────────
 
-async function enqueueSeedRound(label = 'scheduled'): Promise<void> {
+export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: string; queries: number }> {
   const runId = generateRunId();
   logger.info({ runId, queries: SEED_QUERIES.length, label }, '[scheduler] Enqueueing seed round');
 
@@ -80,6 +80,7 @@ async function enqueueSeedRound(label = 'scheduled'): Promise<void> {
   }
 
   logger.info({ runId, label }, '[scheduler] ✅ Seed round enqueued');
+  return { runId, queries: SEED_QUERIES.length };
 }
 
 // ── Start scheduler (cron every 2 hours + immediate run on startup) ───────────

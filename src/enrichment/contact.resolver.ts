@@ -65,33 +65,34 @@ export const contactResolver = {
       '[contact.resolver] Attempting Hunter enrichment for missing roles'
     );
 
-    // Try Hunter domain search for email patterns
-    if (process.env['HUNTER_API_KEY']) {
-      const hunterResult = await hunterScraper.enrichDomain(domain);
-      if (hunterResult?.contacts?.length) {
-        for (const rawContact of hunterResult.contacts) {
-          if (!rawContact.email || !rawContact.role || !rawContact.fullName) continue;
-          if (!PRIORITY_ROLES.includes(rawContact.role as ContactRole)) continue;
+    // Try Hunter domain search — works without API key via Playwright fallback
+    const hunterResult = await hunterScraper.enrichDomain(domain).catch(err => {
+      logger.warn({ err, domain }, '[contact.resolver] Hunter domain search failed — skipping');
+      return null;
+    });
+    if (hunterResult?.contacts?.length) {
+      for (const rawContact of hunterResult.contacts) {
+        if (!rawContact.email || !rawContact.role || !rawContact.fullName) continue;
+        if (!PRIORITY_ROLES.includes(rawContact.role as ContactRole)) continue;
 
-          // Check if we already have this role filled with an email
-          const existing = existingByRole.get(rawContact.role as ContactRole);
-          if (existing?.email) continue;
+        // Check if we already have this role filled with an email
+        const existing = existingByRole.get(rawContact.role as ContactRole);
+        if (existing?.email) continue;
 
-          const saved = await contactRepository.upsert({
-            companyId,
-            fullName:      rawContact.fullName,
-            role:          rawContact.role as ContactRole,
-            email:         rawContact.email,
-            emailConfidence: rawContact.emailConfidence ?? 0.6,
-            sources:       ['hunter'],
-          });
-          enriched++;
-          existingByRole.set(saved.role, saved);
-          logger.info(
-            { email: saved.email, role: saved.role, domain },
-            '[contact.resolver] Contact added from Hunter'
-          );
-        }
+        const saved = await contactRepository.upsert({
+          companyId,
+          fullName:        rawContact.fullName,
+          role:            rawContact.role as ContactRole,
+          email:           rawContact.email,
+          emailConfidence: rawContact.emailConfidence ?? 0.6,
+          sources:         ['hunter'],
+        });
+        enriched++;
+        existingByRole.set(saved.role, saved);
+        logger.info(
+          { email: saved.email, role: saved.role, domain },
+          '[contact.resolver] Contact added from Hunter'
+        );
       }
     }
 

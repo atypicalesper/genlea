@@ -11,6 +11,7 @@ import { exportRoutes } from './routes/export.js';
 import { scrapeRoutes } from './routes/scrape.js';
 import { jobsRoutes } from './routes/jobs.js';
 import { companiesRoutes } from './routes/companies.js';
+import { settingsRoutes } from './routes/settings.js';
 import { dashboardRoutes } from './dashboard.js';
 import { logger } from '../utils/logger.js';
 
@@ -52,6 +53,9 @@ async function bootstrap() {
     return { queues: stats };
   });
 
+  // Root redirect → dashboard
+  server.get('/', async (_req, reply) => reply.redirect('/dashboard'));
+
   // Dashboard
   await server.register(dashboardRoutes);
 
@@ -61,6 +65,7 @@ async function bootstrap() {
   await server.register(exportRoutes,    { prefix: '/api' });
   await server.register(scrapeRoutes,    { prefix: '/api' });
   await server.register(jobsRoutes,      { prefix: '/api' });
+  await server.register(settingsRoutes,  { prefix: '/api' });
 
   const port = parseInt(process.env['API_PORT'] ?? '4000');
   const host = process.env['API_HOST'] ?? '0.0.0.0';

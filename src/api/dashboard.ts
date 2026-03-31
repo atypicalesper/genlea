@@ -11,203 +11,565 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>GenLea — Dashboard</title>
+  <title>GenLea Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    .badge { display:inline-block; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; }
-    .badge-hot_verified { background:#fff7ed; color:#c2410c; border:1px solid #fed7aa; }
-    .badge-hot         { background:#fef2f2; color:#dc2626; border:1px solid #fca5a5; }
-    .badge-warm        { background:#fefce8; color:#ca8a04; border:1px solid #fde047; }
-    .badge-cold        { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; }
-    .badge-disqualified{ background:#f9fafb; color:#6b7280; border:1px solid #e5e7eb; }
-    .badge-pending     { background:#f5f3ff; color:#7c3aed; border:1px solid #ddd6fe; }
-    tr.data-row:hover td { background:#f8fafc; }
-    .stat-card { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:8px 20px; border-right:1px solid #f1f5f9; }
-    .stat-card:last-child { border-right:none; }
-    #error-banner { display:none; }
+    *{box-sizing:border-box;}
+    .badge{display:inline-block;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600;}
+    .badge-hot_verified{background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;}
+    .badge-hot{background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;}
+    .badge-warm{background:#fefce8;color:#ca8a04;border:1px solid #fde047;}
+    .badge-cold{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;}
+    .badge-disqualified{background:#f9fafb;color:#6b7280;border:1px solid #e5e7eb;}
+    .badge-pending{background:#f5f3ff;color:#7c3aed;border:1px solid #ddd6fe;}
+    .badge-skipped{background:#fafafa;color:#9ca3af;border:1px solid #e5e7eb;}
+    .badge-processing{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;}
+    .badge-success{background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;}
+    .badge-failed{background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;}
+    .badge-partial{background:#fefce8;color:#ca8a04;border:1px solid #fde047;}
+    tr.data-row:hover td{background:#f8fafc;}
+    .tab-btn{padding:8px 18px;font-size:13px;font-weight:500;border-bottom:2px solid transparent;color:#6b7280;cursor:pointer;white-space:nowrap;transition:color .15s,border-color .15s;}
+    .tab-btn.active{color:#2563eb;border-bottom-color:#2563eb;}
+    .tab-btn:hover:not(.active){color:#374151;border-bottom-color:#e5e7eb;}
+    .tab-panel{display:none;}
+    .tab-panel.active{display:block;}
+    .stat-pill{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:8px 16px;border-right:1px solid #f1f5f9;cursor:pointer;transition:background .1s;}
+    .stat-pill:last-child{border-right:none;}
+    .stat-pill:hover{background:#f8fafc;}
+    .stat-pill.active-seg{background:#eff6ff;}
+    .sort-th{cursor:pointer;user-select:none;}
+    .sort-th:hover{background:#f1f5f9;}
+    .sort-th span.sort-icon{opacity:.35;margin-left:3px;font-size:10px;}
+    .sort-th.sorted span.sort-icon{opacity:1;color:#2563eb;}
+    .queue-card{border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px;}
+    .prog-bar{height:8px;background:#e5e7eb;border-radius:9999px;overflow:hidden;}
+    .prog-fill{height:100%;border-radius:9999px;transition:width .4s;}
+    #error-banner{display:none;}
+    .action-btn{padding:3px 8px;border-radius:5px;font-size:11px;border:1px solid #e5e7eb;background:white;cursor:pointer;transition:background .1s;}
+    .action-btn:hover{background:#f1f5f9;}
+    .action-btn.danger:hover{background:#fef2f2;border-color:#fca5a5;color:#dc2626;}
+    input[type=range]{accent-color:#2563eb;}
+    .toast{position:fixed;bottom:24px;right:24px;z-index:9999;background:#1e293b;color:white;padding:10px 18px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;}
+    .toast.show{opacity:1;}
+    select,input[type=text],input[type=number]{border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;font-size:12px;background:white;outline:none;}
+    select:focus,input:focus{border-color:#93c5fd;box-shadow:0 0 0 2px #eff6ff;}
   </style>
 </head>
-<body class="bg-gray-50 min-h-screen font-sans text-sm">
+<body class="bg-gray-50 min-h-screen font-sans text-sm text-gray-800">
 
-<!-- Header -->
-<div class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-  <div class="flex items-center gap-3">
-    <span class="font-bold text-gray-900 text-xl">GenLea</span>
-    <span class="text-gray-400">Lead Dashboard</span>
-  </div>
+<!-- HEADER -->
+<div class="bg-white border-b border-gray-200 px-5 py-2.5 flex items-center justify-between sticky top-0 z-40">
   <div class="flex items-center gap-4">
+    <span class="font-bold text-gray-900 text-lg tracking-tight">GenLea</span>
+    <nav class="flex" id="main-tabs">
+      <button class="tab-btn active" onclick="switchTab('leads')">Leads</button>
+      <button class="tab-btn" onclick="switchTab('control')">Control Panel</button>
+      <button class="tab-btn" onclick="switchTab('logs')">Activity Logs</button>
+      <button class="tab-btn" onclick="switchTab('analytics')">Analytics</button>
+      <button class="tab-btn" onclick="switchTab('queues')">Queue Monitor</button>
+    </nav>
+  </div>
+  <div class="flex items-center gap-3">
     <span id="last-refresh" class="text-xs text-gray-400"></span>
     <button onclick="hardRefresh()" class="text-xs text-blue-600 hover:underline">↻ Refresh</button>
-    <a href="/queues" target="_blank" class="text-xs text-gray-500 hover:underline">Queue Monitor</a>
-    <a href="/health" target="_blank" class="text-xs text-gray-500 hover:underline">Health</a>
+    <a href="/health" target="_blank" class="text-xs text-gray-400 hover:underline">Health</a>
   </div>
 </div>
 
-<!-- Error banner (shown when API is unreachable) -->
-<div id="error-banner" class="bg-red-50 border-b border-red-200 px-6 py-2 flex items-center justify-between">
+<!-- ERROR BANNER -->
+<div id="error-banner" class="bg-red-50 border-b border-red-200 px-5 py-2 flex items-center justify-between">
   <span id="error-msg" class="text-red-700 text-xs"></span>
   <button onclick="hardRefresh()" class="text-xs text-red-600 hover:underline font-medium">Retry</button>
 </div>
 
-<!-- Stats bar -->
+<!-- STATS BAR (always visible) -->
 <div class="bg-white border-b border-gray-200 px-4 flex overflow-x-auto" id="stats-bar">
-  <div class="stat-card"><span class="text-xs text-gray-400">Total</span><span class="font-bold text-gray-700 text-lg" id="s-total">—</span></div>
-  <div class="stat-card"><span class="text-xs text-purple-500">Pending</span><span class="font-bold text-purple-600 text-lg" id="s-pending">—</span></div>
-  <div class="stat-card"><span class="text-xs text-orange-500">🔥 Hot</span><span class="font-bold text-orange-600 text-lg" id="s-hot">—</span></div>
-  <div class="stat-card"><span class="text-xs text-yellow-600">🌡 Warm</span><span class="font-bold text-yellow-600 text-lg" id="s-warm">—</span></div>
-  <div class="stat-card"><span class="text-xs text-blue-500">❄ Cold</span><span class="font-bold text-blue-600 text-lg" id="s-cold">—</span></div>
-  <div class="stat-card"><span class="text-xs text-gray-400">✗ Disqual.</span><span class="font-bold text-gray-500 text-lg" id="s-disq">—</span></div>
+  <div class="stat-pill active-seg" id="seg-all" onclick="setSegment('all')">
+    <span class="text-[10px] text-gray-400 uppercase tracking-wide">Total</span>
+    <span class="font-bold text-gray-700 text-base" id="s-total">—</span>
+  </div>
+  <div class="stat-pill" id="seg-qualified" onclick="setSegment('qualified')">
+    <span class="text-[10px] text-green-600 uppercase tracking-wide">Qualified</span>
+    <span class="font-bold text-green-600 text-base" id="s-qualified">—</span>
+    <span class="text-[9px] text-gray-400">hot + warm</span>
+  </div>
+  <div class="stat-pill" id="seg-hot" onclick="setSegment('hot_verified')">
+    <span class="text-[10px] text-orange-500">🔥 Hot Verified</span>
+    <span class="font-bold text-orange-600 text-base" id="s-hotv">—</span>
+  </div>
+  <div class="stat-pill" id="seg-hot2" onclick="setSegment('hot')">
+    <span class="text-[10px] text-red-500">🔥 Hot</span>
+    <span class="font-bold text-red-600 text-base" id="s-hot">—</span>
+  </div>
+  <div class="stat-pill" id="seg-warm" onclick="setSegment('warm')">
+    <span class="text-[10px] text-yellow-600">🌡 Warm</span>
+    <span class="font-bold text-yellow-600 text-base" id="s-warm">—</span>
+  </div>
+  <div class="stat-pill" id="seg-cold" onclick="setSegment('cold')">
+    <span class="text-[10px] text-blue-500">❄ Cold</span>
+    <span class="font-bold text-blue-600 text-base" id="s-cold">—</span>
+  </div>
+  <div class="stat-pill" id="seg-disq" onclick="setSegment('disqualified')">
+    <span class="text-[10px] text-gray-400">✗ Disqualified</span>
+    <span class="font-bold text-gray-500 text-base" id="s-disq">—</span>
+  </div>
+  <div class="stat-pill" id="seg-pending" onclick="setSegment('pending')">
+    <span class="text-[10px] text-purple-500">⏳ Pending</span>
+    <span class="font-bold text-purple-600 text-base" id="s-pending">—</span>
+  </div>
 </div>
 
-<!-- Filters -->
-<div class="bg-white border-b border-gray-200 px-6 py-3 flex flex-wrap gap-3 items-end">
-  <div class="flex flex-col gap-1">
-    <label class="text-xs text-gray-500 font-medium">Status</label>
-    <select id="f-status" class="border border-gray-200 rounded px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
-      <option value="">All</option>
-      <option value="pending">⏳ Pending</option>
-      <option value="hot_verified">🔥 Hot Verified</option>
-      <option value="hot">🔥 Hot</option>
-      <option value="warm">🌡 Warm</option>
-      <option value="cold">❄ Cold</option>
-      <option value="disqualified">✗ Disqualified</option>
-    </select>
+<!-- ════════════════════════════════════════════════════════════ LEADS TAB -->
+<div class="tab-panel active" id="tab-leads">
+  <!-- Filters -->
+  <div class="bg-white border-b border-gray-200 px-5 py-2.5 flex flex-wrap gap-2 items-end">
+    <div class="flex flex-col gap-0.5">
+      <label class="text-[10px] text-gray-400 uppercase tracking-wide">Search</label>
+      <input id="f-search" type="text" placeholder="company name or domain…"
+        style="width:180px" oninput="debounceSearch()" />
+    </div>
+    <div class="flex flex-col gap-0.5">
+      <label class="text-[10px] text-gray-400 uppercase tracking-wide">Status</label>
+      <select id="f-status" onchange="applyFilters()">
+        <option value="">All</option>
+        <option value="hot_verified">🔥 Hot Verified</option>
+        <option value="hot">🔥 Hot</option>
+        <option value="warm">🌡 Warm</option>
+        <option value="cold">❄ Cold</option>
+        <option value="disqualified">✗ Disqualified</option>
+        <option value="pending">⏳ Pending</option>
+      </select>
+    </div>
+    <div class="flex flex-col gap-0.5">
+      <label class="text-[10px] text-gray-400 uppercase tracking-wide">Min Score</label>
+      <input id="f-minscore" type="number" min="0" max="100" placeholder="0" style="width:56px"/>
+    </div>
+    <div class="flex flex-col gap-0.5">
+      <label class="text-[10px] text-gray-400 uppercase tracking-wide">Max Score</label>
+      <input id="f-maxscore" type="number" min="0" max="100" placeholder="100" style="width:56px"/>
+    </div>
+    <div class="flex flex-col gap-0.5">
+      <label class="text-[10px] text-gray-400 uppercase tracking-wide">Tech Stack</label>
+      <select id="f-tech" onchange="applyFilters()">
+        <option value="">Any</option>
+        <option>nodejs</option><option>typescript</option><option>python</option>
+        <option>react</option><option>nextjs</option><option>nestjs</option>
+        <option>fastapi</option><option>django</option><option>golang</option>
+        <option>rust</option><option>ai</option><option>ml</option>
+        <option>generative-ai</option><option>aws</option><option>docker</option>
+      </select>
+    </div>
+    <div class="flex flex-col gap-0.5">
+      <label class="text-[10px] text-gray-400 uppercase tracking-wide">Funding</label>
+      <select id="f-funding" onchange="applyFilters()">
+        <option value="">Any</option>
+        <option>Pre-seed</option><option>Seed</option>
+        <option>Series A</option><option>Series B</option><option>Series C</option>
+        <option>Series D+</option><option>Bootstrapped</option>
+      </select>
+    </div>
+    <div class="flex flex-col gap-0.5">
+      <label class="text-[10px] text-gray-400 uppercase tracking-wide">Source</label>
+      <select id="f-source" onchange="applyFilters()">
+        <option value="">Any</option>
+        <option>wellfound</option><option>linkedin</option><option>crunchbase</option>
+        <option>apollo</option><option>indeed</option><option>glassdoor</option>
+        <option>surelyremote</option><option>github</option><option>zoominfo</option>
+      </select>
+    </div>
+    <div class="flex flex-col gap-0.5">
+      <label class="text-[10px] text-gray-400 uppercase tracking-wide">Per page</label>
+      <select id="f-limit" onchange="applyFilters()">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="250">250</option>
+      </select>
+    </div>
+    <button onclick="applyFilters()"
+      class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded transition self-end">
+      Apply
+    </button>
+    <button onclick="resetFilters()"
+      class="text-gray-500 text-xs px-3 py-1.5 rounded border border-gray-200 hover:bg-gray-50 transition self-end">
+      Reset
+    </button>
+    <button onclick="exportCSV()"
+      class="ml-auto bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded transition self-end">
+      ↓ Export CSV
+    </button>
   </div>
 
-  <div class="flex flex-col gap-1">
-    <label class="text-xs text-gray-500 font-medium">Min Score</label>
-    <input id="f-score" type="number" min="0" max="100" placeholder="0"
-      class="border border-gray-200 rounded px-2 py-1.5 text-xs w-16 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+  <!-- Table -->
+  <div class="px-5 py-3">
+    <div class="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+      <table class="w-full text-xs" id="leads-table">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide sort-th" onclick="setSort('name')">
+              Company<span class="sort-icon" id="si-name">↕</span>
+            </th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide sort-th" onclick="setSort('score')">
+              Score<span class="sort-icon" id="si-score">↕</span>
+            </th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Status</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide sort-th" onclick="setSort('originRatio')">
+              Origin %<span class="sort-icon" id="si-originRatio">↕</span>
+            </th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide sort-th" onclick="setSort('fundingStage')">
+              Funding<span class="sort-icon" id="si-fundingStage">↕</span>
+            </th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide sort-th" onclick="setSort('employeeCount')">
+              Employees<span class="sort-icon" id="si-employeeCount">↕</span>
+            </th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Tech Stack</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Open Roles</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Sources</th>
+            <th class="px-4 py-2.5 text-gray-500 uppercase tracking-wide">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="companies-tbody">
+          <tr><td colspan="10" class="px-4 py-10 text-center text-gray-400">
+            <div class="inline-flex flex-col items-center gap-2">
+              <div class="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+              <span>Loading companies…</span>
+            </div>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+    <!-- Pagination -->
+    <div class="flex items-center justify-between mt-2.5 text-xs text-gray-500">
+      <span id="page-info"></span>
+      <div class="flex gap-2">
+        <button id="btn-prev" onclick="changePage(-1)"
+          class="px-3 py-1.5 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+          ← Prev
+        </button>
+        <button id="btn-next" onclick="changePage(1)"
+          class="px-3 py-1.5 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+          Next →
+        </button>
+      </div>
+    </div>
   </div>
-
-  <div class="flex flex-col gap-1">
-    <label class="text-xs text-gray-500 font-medium">Tech Stack</label>
-    <select id="f-tech" class="border border-gray-200 rounded px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
-      <option value="">Any</option>
-      <option>nodejs</option><option>typescript</option><option>python</option>
-      <option>react</option><option>nextjs</option><option>nestjs</option>
-      <option>fastapi</option><option>ai</option><option>ml</option>
-      <option>generative-ai</option><option>golang</option><option>rust</option>
-    </select>
-  </div>
-
-  <div class="flex flex-col gap-1">
-    <label class="text-xs text-gray-500 font-medium">Funding</label>
-    <select id="f-funding" class="border border-gray-200 rounded px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
-      <option value="">Any</option>
-      <option>Pre-seed</option><option>Seed</option><option>Series A</option>
-      <option>Series B</option><option>Series C</option><option>Bootstrapped</option>
-    </select>
-  </div>
-
-  <div class="flex flex-col gap-1">
-    <label class="text-xs text-gray-500 font-medium">Source</label>
-    <select id="f-source" class="border border-gray-200 rounded px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
-      <option value="">Any</option>
-      <option>wellfound</option><option>linkedin</option><option>crunchbase</option>
-      <option>apollo</option><option>indeed</option><option>glassdoor</option>
-      <option>surelyremote</option><option>github</option>
-    </select>
-  </div>
-
-  <div class="flex flex-col gap-1">
-    <label class="text-xs text-gray-500 font-medium">Per page</label>
-    <select id="f-limit" class="border border-gray-200 rounded px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
-      <option value="25">25</option>
-      <option value="50" selected>50</option>
-      <option value="100">100</option>
-      <option value="250">250</option>
-    </select>
-  </div>
-
-  <button onclick="applyFilters()"
-    class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded transition">
-    Apply
-  </button>
-  <button onclick="resetFilters()"
-    class="text-gray-500 hover:text-gray-700 text-xs px-3 py-1.5 rounded border border-gray-200 transition">
-    Reset
-  </button>
-  <button onclick="exportCSV()"
-    class="ml-auto bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded transition">
-    ↓ Export CSV
-  </button>
 </div>
 
-<!-- Table -->
-<div class="px-6 py-4">
-  <div class="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-    <table class="w-full text-xs">
-      <thead class="bg-gray-50 border-b border-gray-200">
-        <tr>
-          <th class="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Company</th>
-          <th class="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-          <th class="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Score</th>
-          <th class="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Origin Ratio</th>
-          <th class="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Funding</th>
-          <th class="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Employees</th>
-          <th class="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Tech Stack</th>
-          <th class="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Sources</th>
-          <th class="px-4 py-2.5"></th>
-        </tr>
-      </thead>
-      <tbody id="companies-tbody">
-        <tr><td colspan="9" class="px-4 py-10 text-center text-gray-400">
-          <div class="inline-flex flex-col items-center gap-2">
-            <div class="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-            <span>Loading companies…</span>
+<!-- ══════════════════════════════════════════════════════ CONTROL PANEL TAB -->
+<div class="tab-panel" id="tab-control">
+  <div class="px-5 py-4 max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4">
+
+    <!-- Seed Control -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="font-semibold text-gray-900">Pipeline Seeding</h2>
+          <p class="text-xs text-gray-400 mt-0.5">Enqueue all 26 discovery queries across every scraper</p>
+        </div>
+        <button id="seed-btn" onclick="triggerSeed()"
+          class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition">
+          🚀 Seed Now
+        </button>
+      </div>
+      <div class="text-xs text-gray-500 space-y-1" id="cron-info">
+        <div class="flex justify-between"><span>Schedule</span><span class="font-medium text-gray-700">Every 2 hours (cron)</span></div>
+        <div class="flex justify-between"><span>Last seeded</span><span class="font-medium text-gray-700" id="cron-last">—</span></div>
+        <div class="flex justify-between"><span>Next approx.</span><span class="font-medium text-gray-700" id="cron-next">—</span></div>
+        <div class="flex justify-between"><span>Seed queries</span><span class="font-medium text-gray-700" id="cron-count">26</span></div>
+      </div>
+      <div id="seed-result" class="hidden mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700"></div>
+    </div>
+
+    <!-- Manual Scrape -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5">
+      <h2 class="font-semibold text-gray-900 mb-3">Manual Scrape</h2>
+      <div class="space-y-2.5">
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-gray-500">Source</label>
+          <select id="ms-source" class="text-xs">
+            <option value="wellfound">Wellfound</option>
+            <option value="linkedin">LinkedIn</option>
+            <option value="crunchbase">Crunchbase</option>
+            <option value="apollo">Apollo</option>
+            <option value="indeed">Indeed</option>
+            <option value="glassdoor">Glassdoor</option>
+            <option value="zoominfo">ZoomInfo</option>
+            <option value="surelyremote">Surely Remote</option>
+          </select>
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-gray-500">Keywords</label>
+          <input id="ms-keywords" type="text" placeholder="e.g. YC startup backend engineer US" style="width:100%"/>
+        </div>
+        <div class="flex items-end gap-2">
+          <div class="flex flex-col gap-1 flex-1">
+            <label class="text-xs text-gray-500">Limit</label>
+            <input id="ms-limit" type="number" value="25" min="5" max="100" style="width:70px"/>
           </div>
-        </td></tr>
-      </tbody>
-    </table>
-  </div>
+          <button onclick="triggerManualScrape()"
+            class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5 rounded transition">
+            Queue Job
+          </button>
+        </div>
+        <div id="scrape-result" class="hidden bg-indigo-50 border border-indigo-200 rounded-lg p-2.5 text-xs text-indigo-700"></div>
+      </div>
+    </div>
 
-  <!-- Pagination -->
-  <div class="flex items-center justify-between mt-3 text-xs text-gray-500" id="pagination">
-    <span id="page-info"></span>
-    <div class="flex gap-2">
-      <button id="btn-prev" onclick="changePage(-1)"
-        class="px-3 py-1.5 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
-        ← Prev
-      </button>
-      <button id="btn-next" onclick="changePage(1)"
-        class="px-3 py-1.5 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
-        Next →
-      </button>
+    <!-- Queue Status -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5 md:col-span-2">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-gray-900">Queue Status</h2>
+        <button onclick="loadQueueStats()" class="text-xs text-blue-600 hover:underline">↻ Refresh</button>
+      </div>
+      <div class="grid grid-cols-3 gap-3" id="queue-cards">
+        <div class="queue-card"><div class="text-xs text-gray-400 mb-2 font-medium uppercase tracking-wide">Discovery</div><div id="q-discovery" class="text-xs text-gray-400">Loading…</div></div>
+        <div class="queue-card"><div class="text-xs text-gray-400 mb-2 font-medium uppercase tracking-wide">Enrichment</div><div id="q-enrichment" class="text-xs text-gray-400">Loading…</div></div>
+        <div class="queue-card"><div class="text-xs text-gray-400 mb-2 font-medium uppercase tracking-wide">Scoring</div><div id="q-scoring" class="text-xs text-gray-400">Loading…</div></div>
+      </div>
+      <div class="flex gap-2 mt-3">
+        <button onclick="drainQueue('discovery')" class="action-btn danger text-xs">✕ Drain Discovery</button>
+        <button onclick="drainQueue('enrichment')" class="action-btn danger text-xs">✕ Drain Enrichment</button>
+        <button onclick="drainQueue('scoring')" class="action-btn danger text-xs">✕ Drain Scoring</button>
+      </div>
+    </div>
+
+    <!-- Scoring & Ratio Settings -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5 md:col-span-2">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="font-semibold text-gray-900">Pipeline Parameters</h2>
+          <p class="text-xs text-gray-400 mt-0.5">Controls how companies are qualified — changes take effect on next enrichment/scoring run</p>
+        </div>
+        <button onclick="saveSettings()" id="save-settings-btn"
+          class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition">
+          Save Settings
+        </button>
+      </div>
+      <div class="grid grid-cols-2 gap-6">
+
+        <!-- Origin Ratio -->
+        <div class="space-y-4">
+          <div>
+            <div class="flex justify-between items-baseline mb-1">
+              <label class="text-xs font-medium text-gray-600">Indian Origin Ratio Threshold</label>
+              <span class="text-xs font-bold text-blue-600" id="ratio-display">60%</span>
+            </div>
+            <input type="range" id="s-origin-ratio" min="10" max="90" step="5" value="60"
+              oninput="updateRatioDisplay()" class="w-full"/>
+            <div class="flex justify-between text-[10px] text-gray-400 mt-0.5">
+              <span>10% (1 in 10)</span><span>50% (1 in 2)</span><span>90% (9 in 10)</span>
+            </div>
+            <div class="mt-1.5 bg-blue-50 rounded-lg px-3 py-2 text-xs text-blue-700" id="ratio-desc">
+              At least <strong>6 in 10</strong> devs must be of Indian origin
+            </div>
+          </div>
+          <div>
+            <div class="flex justify-between items-baseline mb-1">
+              <label class="text-xs font-medium text-gray-600">Min Name Sample for Ratio</label>
+              <span class="text-xs font-bold text-gray-600" id="sample-display">10</span>
+            </div>
+            <input type="range" id="s-min-sample" min="3" max="50" step="1" value="10"
+              oninput="document.getElementById('sample-display').textContent=this.value" class="w-full"/>
+            <div class="text-[10px] text-gray-400 mt-0.5">Minimum names needed before ratio is considered reliable</div>
+          </div>
+        </div>
+
+        <!-- Score Thresholds -->
+        <div class="space-y-4">
+          <div>
+            <div class="flex justify-between items-baseline mb-1">
+              <label class="text-xs font-medium text-gray-600">Hot Lead Threshold (score ≥)</label>
+              <span class="text-xs font-bold text-orange-600" id="hot-display">65</span>
+            </div>
+            <input type="range" id="s-hot-threshold" min="40" max="90" step="5" value="65"
+              oninput="document.getElementById('hot-display').textContent=this.value" class="w-full"/>
+            <div class="text-[10px] text-gray-400 mt-0.5">Score to classify as 🔥 Hot lead</div>
+          </div>
+          <div>
+            <div class="flex justify-between items-baseline mb-1">
+              <label class="text-xs font-medium text-gray-600">Warm Lead Threshold (score ≥)</label>
+              <span class="text-xs font-bold text-yellow-600" id="warm-display">50</span>
+            </div>
+            <input type="range" id="s-warm-threshold" min="20" max="70" step="5" value="50"
+              oninput="document.getElementById('warm-display').textContent=this.value" class="w-full"/>
+            <div class="text-[10px] text-gray-400 mt-0.5">Score to classify as 🌡 Warm lead</div>
+          </div>
+          <div id="settings-saved" class="hidden bg-emerald-50 border border-emerald-200 rounded-lg p-2.5 text-xs text-emerald-700">
+            ✓ Settings saved — applies to new enrichment/scoring jobs
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ ACTIVITY LOGS TAB -->
+<div class="tab-panel" id="tab-logs">
+  <div class="px-5 py-4">
+    <!-- Log stats + filter bar -->
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div class="flex gap-3 items-center flex-wrap">
+        <div class="flex gap-2 text-xs">
+          <span class="bg-gray-100 rounded-full px-3 py-1">Total: <span id="log-total" class="font-bold">—</span></span>
+          <span class="bg-green-50 text-green-700 rounded-full px-3 py-1">Success: <span id="log-success" class="font-bold">—</span></span>
+          <span class="bg-yellow-50 text-yellow-700 rounded-full px-3 py-1">Partial: <span id="log-partial" class="font-bold">—</span></span>
+          <span class="bg-red-50 text-red-700 rounded-full px-3 py-1">Failed: <span id="log-failed" class="font-bold">—</span></span>
+        </div>
+        <select id="log-filter-scraper" onchange="loadLogs()" class="text-xs">
+          <option value="">All scrapers</option>
+          <option>wellfound</option><option>linkedin</option><option>crunchbase</option>
+          <option>apollo</option><option>indeed</option><option>glassdoor</option>
+          <option>surelyremote</option><option>github</option><option>zoominfo</option>
+          <option>hunter</option><option>clearbit</option>
+        </select>
+        <select id="log-filter-limit" onchange="loadLogs()" class="text-xs">
+          <option value="50">Last 50</option>
+          <option value="100">Last 100</option>
+          <option value="200">Last 200</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2 text-xs">
+        <label class="flex items-center gap-1.5 cursor-pointer">
+          <input type="checkbox" id="log-autorefresh" checked onchange="toggleLogRefresh()"/>
+          Auto-refresh (10s)
+        </label>
+        <button onclick="loadLogs()" class="text-blue-600 hover:underline">↻ Refresh</button>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+      <table class="w-full text-xs">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Time</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Scraper</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Status</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Companies</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Contacts</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Jobs</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Duration</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Errors</th>
+          </tr>
+        </thead>
+        <tbody id="logs-tbody">
+          <tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">Loading logs…</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </div>
 
-<!-- Company detail modal -->
+<!-- ══════════════════════════════════════════════════════════ ANALYTICS TAB -->
+<div class="tab-panel" id="tab-analytics">
+  <div class="px-5 py-4 max-w-5xl mx-auto space-y-4">
+
+    <!-- Lead Funnel -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5">
+      <h2 class="font-semibold text-gray-900 mb-3">Lead Qualification Funnel</h2>
+      <div id="funnel-bars" class="space-y-2"></div>
+    </div>
+
+    <!-- Two column: tech stacks + scraper performance -->
+    <div class="grid grid-cols-2 gap-4">
+      <div class="bg-white border border-gray-200 rounded-xl p-5">
+        <h2 class="font-semibold text-gray-900 mb-3">Top Tech Stacks</h2>
+        <div id="tech-bars" class="space-y-1.5"></div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded-xl p-5">
+        <h2 class="font-semibold text-gray-900 mb-3">Scraper Performance</h2>
+        <div id="scraper-bars" class="space-y-2"></div>
+      </div>
+    </div>
+
+    <!-- Score distribution -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5">
+      <h2 class="font-semibold text-gray-900 mb-3">Score Distribution</h2>
+      <div class="flex items-end gap-1.5 h-28" id="score-hist"></div>
+      <div class="flex justify-between text-[10px] text-gray-400 mt-1 px-0.5">
+        <span>0</span><span>10</span><span>20</span><span>30</span><span>40</span>
+        <span>50</span><span>60</span><span>70</span><span>80</span><span>90</span><span>100</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ QUEUE MONITOR TAB -->
+<div class="tab-panel" id="tab-queues" style="height:calc(100vh - 110px)">
+  <iframe src="/queues" class="w-full h-full border-0" title="Queue Monitor"></iframe>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ COMPANY MODAL -->
 <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="closeModal(event)">
-  <div class="bg-white rounded-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl" onclick="event.stopPropagation()">
-    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-      <h2 id="modal-title" class="font-semibold text-gray-900"></h2>
-      <button onclick="document.getElementById('modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+  <div class="bg-white rounded-xl w-full max-w-2xl max-h-[88vh] overflow-y-auto shadow-2xl" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between px-6 py-3.5 border-b border-gray-100 sticky top-0 bg-white z-10">
+      <h2 id="modal-title" class="font-semibold text-gray-900 text-base"></h2>
+      <div class="flex items-center gap-2">
+        <button id="modal-enrich-btn" onclick="reEnrich()" class="action-btn text-xs text-indigo-600">↺ Re-enrich</button>
+        <button id="modal-rescore-btn" onclick="reScore()" class="action-btn text-xs text-amber-600">⚡ Re-score</button>
+        <button onclick="document.getElementById('modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-xl leading-none ml-1">✕</button>
+      </div>
     </div>
-    <div id="modal-body" class="px-6 py-4 text-sm"></div>
+    <div id="modal-body" class="px-6 py-4"></div>
   </div>
 </div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
 
 <script>
-let currentPage = 1;
-let totalPages  = 1;
+// ══════════════════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════════════════
+let currentPage   = 1;
+let totalPages    = 1;
+let sortCol       = 'score';
+let sortDir       = 'desc';
+let activeSegment = 'all';
+let searchTimer   = null;
+let logRefreshId  = null;
+let modalCompanyId = null;
 
-// ── Fetch helpers ────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// UTILITIES
+// ══════════════════════════════════════════════════════════════════════════════
 
-async function apiFetch(url, ms = 12000) {
+async function apiFetch(url, opts, ms) {
+  ms = ms || 15000;
   const ctrl = new AbortController();
-  const id   = setTimeout(() => ctrl.abort(), ms);
+  const tid  = setTimeout(() => ctrl.abort(), ms);
   try {
-    const r = await fetch(url, { signal: ctrl.signal });
+    const r = await fetch(url, Object.assign({ signal: ctrl.signal }, opts || {}));
     if (!r.ok) {
-      const text = await r.text().catch(() => r.statusText);
-      throw new Error('API ' + r.status + ': ' + text.slice(0, 120));
+      const txt = await r.text().catch(() => r.statusText);
+      throw new Error('API ' + r.status + ': ' + txt.slice(0, 140));
     }
     return r.json();
   } finally {
-    clearTimeout(id);
+    clearTimeout(tid);
   }
+}
+
+async function apiPost(url, body) {
+  return apiFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+async function apiPatch(url, body) {
+  return apiFetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+async function apiDelete(url) {
+  return apiFetch(url, { method: 'DELETE' });
 }
 
 function showError(msg) {
@@ -218,53 +580,164 @@ function hideError() {
   document.getElementById('error-banner').style.display = 'none';
 }
 
-// ── Stats ────────────────────────────────────────────────────────────────────
+function toast(msg, ms) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), ms || 3000);
+}
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+}
+function fmtDuration(ms) {
+  if (!ms) return '—';
+  if (ms < 1000) return ms + 'ms';
+  return (ms / 1000).toFixed(1) + 's';
+}
+function scoreColor(s) {
+  if (!s || s < 1) return 'text-gray-300';
+  if (s >= 80) return 'text-orange-600';
+  if (s >= 65) return 'text-red-500';
+  if (s >= 50) return 'text-yellow-500';
+  return 'text-blue-400';
+}
+function ratioColor(r) {
+  if (r == null) return 'text-gray-300';
+  if (r >= 0.75) return 'text-green-600';
+  if (r >= 0.60) return 'text-yellow-600';
+  if (r >= 0.40) return 'text-orange-400';
+  return 'text-gray-300';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TABS
+// ══════════════════════════════════════════════════════════════════════════════
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const tabs = ['leads','control','logs','analytics','queues'];
+  const idx  = tabs.indexOf(name);
+  if (idx >= 0) document.querySelectorAll('.tab-btn')[idx].classList.add('active');
+  const panel = document.getElementById('tab-' + name);
+  if (panel) panel.classList.add('active');
+  if (name === 'control')   { loadQueueStats(); loadCronInfo(); }
+  if (name === 'logs')      loadLogs();
+  if (name === 'analytics') loadAnalytics();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STATS
+// ══════════════════════════════════════════════════════════════════════════════
 
 async function loadStats() {
   try {
     const json = await apiFetch('/api/stats');
     const d = json.data;
-    document.getElementById('s-total').textContent   = d.total   ?? 0;
-    document.getElementById('s-pending').textContent = d.pending ?? 0;
-    document.getElementById('s-hot').textContent     = d.hot     ?? 0;
-    document.getElementById('s-warm').textContent    = d.warm    ?? 0;
-    document.getElementById('s-cold').textContent    = d.cold    ?? 0;
-    document.getElementById('s-disq').textContent    = d.disqualified ?? 0;
+    document.getElementById('s-total').textContent   = d.total         ?? 0;
+    document.getElementById('s-hotv').textContent    = d.hot_verified  ?? 0;
+    document.getElementById('s-hot').textContent     = d.hot           ?? 0;
+    document.getElementById('s-warm').textContent    = d.warm          ?? 0;
+    document.getElementById('s-cold').textContent    = d.cold          ?? 0;
+    document.getElementById('s-disq').textContent    = d.disqualified  ?? 0;
+    document.getElementById('s-pending').textContent = d.pending       ?? 0;
+    const qualified = (d.hot_verified||0) + (d.hot||0) + (d.warm||0);
+    document.getElementById('s-qualified').textContent = qualified;
     hideError();
-  } catch (e) {
-    showError('Stats unavailable — ' + e.message + '. Is the API running? (npm run dev)');
+  } catch(e) {
+    showError('Stats unavailable — ' + e.message);
   }
 }
 
-// ── Company table ────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// SEGMENT / SORT / FILTERS
+// ══════════════════════════════════════════════════════════════════════════════
+
+function setSegment(seg) {
+  activeSegment = seg;
+  document.querySelectorAll('.stat-pill').forEach(p => p.classList.remove('active-seg'));
+  const map = {
+    all:'seg-all', qualified:'seg-qualified', hot_verified:'seg-hot',
+    hot:'seg-hot2', warm:'seg-warm', cold:'seg-cold', disqualified:'seg-disq', pending:'seg-pending'
+  };
+  const el = document.getElementById(map[seg]);
+  if (el) el.classList.add('active-seg');
+  document.getElementById('f-status').value = ['all','qualified'].includes(seg) ? '' : seg;
+  currentPage = 1;
+  loadCompanies();
+}
+
+function setSort(col) {
+  if (sortCol === col) {
+    sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+  } else {
+    sortCol = col;
+    sortDir = 'desc';
+  }
+  document.querySelectorAll('.sort-th').forEach(th => th.classList.remove('sorted'));
+  document.querySelectorAll('[id^="si-"]').forEach(el => { el.textContent = '↕'; });
+  const th = document.querySelector('[onclick="setSort(\\''+col+'\\')"]');
+  if (th) th.classList.add('sorted');
+  const icon = document.getElementById('si-' + col);
+  if (icon) icon.textContent = sortDir === 'desc' ? '↓' : '↑';
+  currentPage = 1;
+  loadCompanies();
+}
+
+function debounceSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { currentPage = 1; loadCompanies(); }, 350);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LEADS TABLE
+// ══════════════════════════════════════════════════════════════════════════════
 
 async function loadCompanies() {
   const status  = document.getElementById('f-status').value;
-  const score   = document.getElementById('f-score').value;
+  const minsc   = document.getElementById('f-minscore').value;
+  const maxsc   = document.getElementById('f-maxscore').value;
   const tech    = document.getElementById('f-tech').value;
   const funding = document.getElementById('f-funding').value;
   const source  = document.getElementById('f-source').value;
   const limit   = document.getElementById('f-limit').value;
+  const search  = document.getElementById('f-search').value.trim();
 
-  const params = new URLSearchParams({ page: currentPage, limit });
-  if (status)  params.set('status', status);
-  if (score)   params.set('minScore', score);
+  const params = new URLSearchParams({
+    page:    String(currentPage),
+    limit:   String(limit),
+    sortBy:  sortCol,
+    sortDir: sortDir,
+  });
+  if (activeSegment === 'qualified')    params.set('qualified', 'true');
+  else if (activeSegment === 'disqualified') params.set('qualified', 'false');
+  else if (status) params.set('status', status);
+  if (minsc)   params.set('minScore', minsc);
+  if (maxsc)   params.set('maxScore', maxsc);
   if (tech)    params.set('techStack', tech);
   if (funding) params.set('fundingStage', funding);
   if (source)  params.set('source', source);
+  if (search)  params.set('search', search);
 
   const tbody = document.getElementById('companies-tbody');
-  tbody.innerHTML = \`<tr><td colspan="9" class="px-4 py-10 text-center text-gray-400">
-    <div class="inline-flex flex-col items-center gap-2">
-      <div class="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-      <span>Loading…</span>
-    </div>
-  </td></tr>\`;
+  tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center text-gray-400">' +
+    '<div class="inline-flex gap-2 items-center"><div class="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>Loading…</div>' +
+    '</td></tr>';
 
   try {
     const json = await apiFetch('/api/leads?' + params);
     const { data, meta } = json;
-
     totalPages = meta.pages || 1;
     document.getElementById('page-info').textContent =
       'Page ' + meta.page + ' of ' + totalPages + ' — ' + meta.total + ' companies';
@@ -273,189 +746,574 @@ async function loadCompanies() {
     hideError();
 
     if (!data || !data.length) {
-      const isFiltered = status || score || tech || funding || source;
-      tbody.innerHTML = \`<tr><td colspan="9" class="px-4 py-12 text-center">
-        <div class="flex flex-col items-center gap-3 text-gray-400">
-          <div class="text-3xl">\${isFiltered ? '🔍' : '📭'}</div>
-          <div class="font-medium text-gray-600">\${isFiltered ? 'No matches for current filters' : 'No companies in database yet'}</div>
-          <div class="text-xs max-w-sm">\${isFiltered
-            ? 'Try removing filters — companies may still be in <b>pending</b> state (not yet scored).'
-            : 'Run <code class="bg-gray-100 px-1 rounded font-mono">npm run seed</code> to start scraping, or wait for the auto-scheduler (runs every 2h).'
-          }</div>
-          \${isFiltered ? '<button onclick="resetFilters()" class="mt-1 text-xs text-blue-600 hover:underline">Clear filters</button>' : ''}
-        </div>
-      </td></tr>\`;
+      tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-12 text-center">' +
+        '<div class="flex flex-col items-center gap-2 text-gray-400">' +
+        '<div class="text-3xl">📭</div>' +
+        '<div class="font-medium text-gray-600">No companies found</div>' +
+        '<div class="text-xs">Try adjusting filters or run a seed from the Control Panel</div>' +
+        '<button onclick="resetFilters()" class="mt-1 text-xs text-blue-600 hover:underline">Clear filters</button>' +
+        '</div></td></tr>';
       return;
     }
 
-    tbody.innerHTML = data.map(c => {
-      const ratio = c.originRatio != null ? Math.round(c.originRatio * 100) + '%' : '—';
-      const score = c.score != null && c.score > 0 ? c.score : '—';
-      const tags  = (c.techStack || []).slice(0, 4).map(t =>
-        '<span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">' + esc(t) + '</span>'
-      ).join(' ');
-      const sources = (c.sources || []).slice(0, 3).map(s =>
-        '<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-[10px]">' + esc(s) + '</span>'
-      ).join(' ');
+    tbody.innerHTML = data.map(function(c) {
+      const ratio  = c.originRatio != null ? Math.round(c.originRatio * 100) + '%' : '—';
+      const score  = c.score != null && c.score > 0 ? c.score : '—';
       const status = c.status || 'pending';
+      const tags   = (c.techStack || []).slice(0, 4).map(function(t) {
+        return '<span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">' + esc(t) + '</span>';
+      }).join(' ');
+      const roles = (c.openRoles || []).slice(0, 2).map(function(r) {
+        return '<span class="bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded text-[10px]">' + esc(r) + '</span>';
+      }).join(' ');
+      const sources = (c.sources || []).slice(0, 3).map(function(s) {
+        return '<span class="bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded text-[10px]">' + esc(s) + '</span>';
+      }).join(' ');
 
       return '<tr class="data-row border-b border-gray-100 cursor-pointer" onclick="openCompany(\\''+c._id+'\\')"> ' +
-        '<td class="px-4 py-2.5"><div class="font-medium text-gray-900">' + esc(c.name || '—') + '</div>' +
-          '<div class="text-[10px] text-blue-500">' + esc(c.domain || '') + '</div></td>' +
-        '<td class="px-4 py-2.5"><span class="badge badge-' + status + '">' + esc(status) + '</span></td>' +
+        '<td class="px-4 py-2.5 max-w-[200px]">' +
+          '<div class="font-medium text-gray-900 truncate">' + esc(c.name || '—') + '</div>' +
+          '<div class="text-[10px] text-blue-500 truncate">' + esc(c.domain || '') + '</div>' +
+        '</td>' +
         '<td class="px-4 py-2.5 font-bold ' + scoreColor(c.score) + '">' + score + '</td>' +
+        '<td class="px-4 py-2.5"><span class="badge badge-' + esc(status) + '">' + esc(status) + '</span></td>' +
         '<td class="px-4 py-2.5 font-semibold ' + ratioColor(c.originRatio) + '">' + ratio + '</td>' +
         '<td class="px-4 py-2.5 text-gray-500">' + esc(c.fundingStage || '—') + '</td>' +
-        '<td class="px-4 py-2.5 text-gray-600">' + (c.employeeCount || '—') + '</td>' +
-        '<td class="px-4 py-2.5"><div class="flex flex-wrap gap-1">' + (tags || '—') + '</div></td>' +
-        '<td class="px-4 py-2.5"><div class="flex flex-wrap gap-1">' + (sources || '—') + '</div></td>' +
-        '<td class="px-4 py-2.5"><button onclick="event.stopPropagation();openCompany(\\''+c._id+'\\') " class="text-blue-500 hover:text-blue-700">→</button></td>' +
+        '<td class="px-4 py-2.5 text-gray-600">' + esc(c.employeeCount || '—') + '</td>' +
+        '<td class="px-4 py-2.5"><div class="flex flex-wrap gap-1">' + (tags || '<span class="text-gray-300">—</span>') + '</div></td>' +
+        '<td class="px-4 py-2.5"><div class="flex flex-wrap gap-1">' + (roles || '<span class="text-gray-300">—</span>') + '</div></td>' +
+        '<td class="px-4 py-2.5"><div class="flex flex-wrap gap-1">' + (sources || '<span class="text-gray-300">—</span>') + '</div></td>' +
+        '<td class="px-4 py-2.5">' +
+          '<div class="flex gap-1" onclick="event.stopPropagation()">' +
+            '<button onclick="quickStatus(\\''+c._id+'\\',\\''+status+'\\')" class="action-btn" title="Change status">✎</button>' +
+            '<button onclick="openCompany(\\''+c._id+'\\',true)" class="action-btn" title="View detail">→</button>' +
+          '</div>' +
+        '</td>' +
       '</tr>';
     }).join('');
 
-    document.getElementById('last-refresh').textContent =
-      'Last updated ' + new Date().toLocaleTimeString();
+    document.getElementById('last-refresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
 
-  } catch (e) {
-    const isAbort = e.name === 'AbortError';
-    const msg = isAbort
-      ? 'Request timed out (12s). MongoDB or API may be slow — check terminal logs.'
+  } catch(e) {
+    const msg = e.name === 'AbortError'
+      ? 'Request timed out — check that the API and MongoDB are running'
       : e.message;
     showError(msg);
-    tbody.innerHTML = \`<tr><td colspan="9" class="px-4 py-10 text-center">
-      <div class="flex flex-col items-center gap-2 text-red-400">
-        <span class="text-2xl">⚠</span>
-        <span class="font-medium">\${esc(msg)}</span>
-        <button onclick="hardRefresh()" class="mt-1 text-xs text-blue-600 hover:underline">Retry</button>
-      </div>
-    </td></tr>\`;
+    tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center">' +
+      '<div class="flex flex-col items-center gap-2 text-red-400"><span class="text-2xl">⚠</span>' +
+      '<span class="font-medium">' + esc(msg) + '</span>' +
+      '<button onclick="hardRefresh()" class="text-xs text-blue-600 hover:underline mt-1">Retry</button>' +
+      '</div></td></tr>';
   }
 }
 
-// ── Company modal ────────────────────────────────────────────────────────────
+async function quickStatus(id, currentStatus) {
+  const statuses = ['hot_verified','hot','warm','cold','disqualified','pending'];
+  const next = prompt('Set status for company:\\n\\nValid values: ' + statuses.join(', ') + '\\n\\nCurrent: ' + currentStatus);
+  if (!next || !statuses.includes(next.trim())) return;
+  try {
+    await apiPatch('/api/companies/' + id + '/status', { status: next.trim() });
+    toast('Status updated to ' + next.trim());
+    loadCompanies();
+    loadStats();
+  } catch(e) {
+    toast('Failed: ' + e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COMPANY MODAL
+// ══════════════════════════════════════════════════════════════════════════════
 
 async function openCompany(id) {
+  modalCompanyId = id;
   document.getElementById('modal-title').textContent = 'Loading…';
   document.getElementById('modal-body').innerHTML =
-    '<div class="text-gray-400 py-6 text-center">Loading…</div>';
+    '<div class="text-gray-400 py-6 text-center">Loading company data…</div>';
   document.getElementById('modal').classList.remove('hidden');
 
   try {
-    const json = await apiFetch('/api/companies/' + id, 10000);
-    const { company: c, contacts: ct, summary } = json.data;
-
-    // API returns contacts as { ceo, cto, hr, other[] } — flatten to array
+    const json = await apiFetch('/api/companies/' + id, null, 10000);
+    const { company: c, contacts: ct, jobs: jb, summary } = json.data;
     const contactList = [ct.ceo, ct.cto, ct.hr, ...(ct.other||[])].filter(Boolean);
-    const totalContacts = summary ? summary.totalContacts : contactList.length;
+    const activeJobs  = (jb && jb.active) ? jb.active : [];
 
     document.getElementById('modal-title').innerHTML =
       esc(c.name || c.domain) +
-      ' <span class="badge badge-' + (c.status||'pending') + ' ml-2">' + esc(c.status||'pending') + '</span>';
+      ' <span class="badge badge-' + esc(c.status||'pending') + ' ml-2 text-xs">' + esc(c.status||'pending') + '</span>';
 
-    const contactCard = (person) =>
-      '<div class="border border-gray-100 rounded-lg p-3 mb-2">' +
-        '<div class="flex justify-between">' +
-          '<div><span class="font-medium">' + esc(person.fullName||'—') + '</span>' +
-          ' <span class="text-gray-400 text-xs">' + esc(person.role||'') + '</span></div>' +
-          '<span class="text-xs ' + (person.emailVerified?'text-green-600':'text-gray-300') + '">' +
-            (person.emailVerified?'✓ verified':'unverified') + '</span>' +
+    const contactCard = function(p) {
+      return '<div class="border border-gray-100 rounded-lg p-3 mb-2 text-xs">' +
+        '<div class="flex justify-between items-start">' +
+          '<div><span class="font-semibold text-gray-900">' + esc(p.fullName||'—') + '</span>' +
+          ' <span class="text-gray-400">' + esc(p.role||'') + '</span></div>' +
+          '<span class="' + (p.emailVerified?'text-green-600':'text-gray-300') + ' shrink-0">' +
+            (p.emailVerified ? '✓ verified' : 'unverified') + '</span>' +
         '</div>' +
-        (person.email ? '<div class="text-blue-500 text-xs mt-1">' + esc(person.email) + '</div>' : '') +
-        (person.phone ? '<div class="text-gray-400 text-xs">' + esc(person.phone) + '</div>' : '') +
-        (person.linkedinUrl ? '<div class="text-xs mt-0.5"><a href="' + esc(person.linkedinUrl) + '" target="_blank" class="text-blue-400 hover:underline">LinkedIn →</a></div>' : '') +
+        (p.email ? '<div class="text-blue-500 mt-1">' + esc(p.email) + '</div>' : '') +
+        (p.phone ? '<div class="text-gray-400">' + esc(p.phone) + '</div>' : '') +
+        (p.linkedinUrl ? '<a href="' + esc(p.linkedinUrl) + '" target="_blank" class="text-blue-400 hover:underline">LinkedIn →</a>' : '') +
       '</div>';
+    };
 
-    const contactsHtml = contactList.length
-      ? contactList.map(contactCard).join('')
-      : '<div class="text-gray-400 text-sm py-4 text-center">No contacts enriched yet</div>';
+    const jobCard = function(j) {
+      return '<div class="flex items-start justify-between py-1.5 border-b border-gray-50 last:border-0 text-xs">' +
+        '<div>' +
+          '<span class="font-medium text-gray-800">' + esc(j.title||'—') + '</span>' +
+          (j.postedAt ? ' <span class="text-gray-400 ml-1">' + fmtDate(j.postedAt) + '</span>' : '') +
+          (j.techTags && j.techTags.length ? '<div class="flex flex-wrap gap-1 mt-0.5">' +
+            j.techTags.slice(0,4).map(t => '<span class="bg-gray-100 text-gray-500 px-1 rounded text-[10px]">'+esc(t)+'</span>').join('') +
+          '</div>' : '') +
+        '</div>' +
+        '<span class="bg-blue-50 text-blue-500 text-[10px] px-1.5 py-0.5 rounded ml-2 shrink-0">' + esc(j.source||'') + '</span>' +
+      '</div>';
+    };
 
-    const scoreRow = c.scoreBreakdown
-      ? '<div class="mt-3 bg-gray-50 rounded-lg p-3 text-xs">' +
-          '<div class="font-medium text-gray-600 mb-2">Score Breakdown</div>' +
-          Object.entries(c.scoreBreakdown).map(([k,v]) =>
-            '<div class="flex justify-between"><span class="text-gray-400">' + esc(k) + '</span><span class="font-medium">' + v + '</span></div>'
-          ).join('') +
-        '</div>' : '';
+    const scoreRow = c.scoreBreakdown ? (
+      '<div class="mt-4 bg-gray-50 rounded-lg p-3 text-xs">' +
+        '<div class="font-medium text-gray-600 mb-2">Score Breakdown</div>' +
+        Object.entries(c.scoreBreakdown).filter(function(e){ return e[0] !== 'total'; }).map(function(e) {
+          const maxMap = { originRatioScore:30, jobFreshnessScore:20, techStackScore:20, contactScore:15, companyFitScore:15 };
+          const max = maxMap[e[0]] || 30;
+          const pct = max > 0 ? Math.round((Number(e[1]) / max) * 100) : 0;
+          return '<div class="flex items-center gap-2 mb-1.5">' +
+            '<span class="text-gray-400 w-36 shrink-0">' + esc(e[0].replace(/Score$/,'').replace(/([A-Z])/g,' $1')) + '</span>' +
+            '<div class="prog-bar flex-1"><div class="prog-fill bg-blue-400" style="width:' + pct + '%"></div></div>' +
+            '<span class="font-medium text-gray-700 w-10 text-right">' + e[1] + ' / ' + max + '</span>' +
+          '</div>';
+        }).join('') +
+        '<div class="flex justify-between font-bold text-gray-800 mt-2 pt-2 border-t border-gray-200">' +
+          '<span>Total Score</span><span class="' + scoreColor(c.score) + '">' + (c.score||0) + ' / 100</span>' +
+        '</div>' +
+      '</div>'
+    ) : '';
 
     document.getElementById('modal-body').innerHTML =
-      '<div class="grid grid-cols-2 gap-2 mb-3">' +
-        field('Domain',     '<a href="https://'+esc(c.domain)+'" target="_blank" class="text-blue-500 hover:underline">'+esc(c.domain)+'</a>') +
-        field('Score',      '<span class="font-bold text-lg '+scoreColor(c.score)+'">'+(c.score||'—')+' / 100</span>') +
-        field('Status',     '<span class="badge badge-'+(c.status||'pending')+'">'+esc(c.status||'pending')+'</span>') +
-        field('Origin Ratio','<span class="'+ratioColor(c.originRatio)+' font-semibold">'+(c.originRatio!=null?Math.round(c.originRatio*100)+'%':'—')+'</span>') +
-        field('Funding',    esc(c.fundingStage||'—')) +
-        field('Employees',  esc(c.employeeCount||'—')) +
-        field('Founded',    esc(c.foundedYear||'—')) +
-        field('Sources',    (c.sources||[]).map(s=>'<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-[10px]">'+esc(s)+'</span>').join(' ')||'—') +
+      '<div class="grid grid-cols-2 gap-2 mb-2">' +
+        mfield('Domain', '<a href="https://'+esc(c.domain)+'" target="_blank" class="text-blue-500 hover:underline">'+esc(c.domain)+'</a>') +
+        mfield('Score',  '<span class="font-bold text-lg '+scoreColor(c.score)+'">'+(c.score||'—')+' / 100</span>') +
+        mfield('Status', '<span class="badge badge-'+(c.status||'pending')+'">'+esc(c.status||'pending')+'</span>') +
+        mfield('Origin Ratio','<span class="'+ratioColor(c.originRatio)+' font-semibold">'+(c.originRatio!=null?Math.round(c.originRatio*100)+'%':'—')+'</span>') +
+        mfield('Funding', esc(c.fundingStage||'—')) +
+        mfield('Employees', esc(c.employeeCount||'—')) +
+        mfield('Founded', esc(c.foundedYear||'—')) +
+        mfield('HQ', esc([c.hqCity,c.hqState,c.hqCountry].filter(Boolean).join(', ')||'—')) +
+        mfield('Sources', (c.sources||[]).map(s=>'<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-[10px]">'+esc(s)+'</span>').join(' ')||'—') +
+        mfield('Scraped', fmtDate(c.lastScrapedAt)) +
       '</div>' +
       scoreRow +
-      (c.techStack&&c.techStack.length ?
-        '<div class="mt-3"><div class="text-xs text-gray-500 mb-1.5 font-medium">Tech Stack</div>' +
-        '<div class="flex flex-wrap gap-1">' + c.techStack.map(t=>'<span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs">'+esc(t)+'</span>').join('') + '</div></div>' : '') +
-      (c.description ? '<div class="mt-3 text-xs text-gray-500 italic">' + esc(c.description.slice(0,300)) + '</div>' : '') +
-      '<div class="mt-4"><div class="text-xs text-gray-500 mb-2 font-medium">Contacts (' + totalContacts + ')</div>' +
-      contactsHtml + '</div>';
+      (c.techStack&&c.techStack.length
+        ? '<div class="mt-3"><div class="text-xs text-gray-500 mb-1.5 font-medium">Tech Stack</div>' +
+          '<div class="flex flex-wrap gap-1">' + c.techStack.map(t=>'<span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs">'+esc(t)+'</span>').join('') + '</div></div>'
+        : '') +
+      (c.description ? '<div class="mt-3 text-xs text-gray-400 italic border-l-2 border-gray-200 pl-3">' + esc(c.description.slice(0,300)) + (c.description.length>300?'…':'') + '</div>' : '') +
+      '<div class="mt-4"><div class="text-xs text-gray-500 mb-2 font-medium">Contacts (' + contactList.length + ')</div>' +
+        (contactList.length ? contactList.map(contactCard).join('') : '<div class="text-gray-300 text-xs py-3 text-center">No contacts enriched yet</div>') +
+      '</div>' +
+      '<div class="mt-3"><div class="text-xs text-gray-500 mb-2 font-medium">Active Jobs (' + activeJobs.length + ')</div>' +
+        (activeJobs.length ? '<div class="border border-gray-100 rounded-lg px-3 py-1">' + activeJobs.map(jobCard).join('') + '</div>'
+          : '<div class="text-gray-300 text-xs py-3 text-center">No open jobs found yet</div>') +
+      '</div>' +
+      '<div class="mt-4 pt-3 border-t border-gray-100 flex gap-2">' +
+        '<button onclick="quickStatus(\\''+id+'\\',\\''+esc(c.status||'pending')+'\\')" class="action-btn text-xs">✎ Change Status</button>' +
+        '<button onclick="deleteCompany(\\''+id+'\\')" class="action-btn danger text-xs">✕ Delete</button>' +
+      '</div>';
 
-  } catch (e) {
+  } catch(e) {
     document.getElementById('modal-body').innerHTML =
-      '<div class="text-red-400 py-4 text-center">Failed to load: ' + esc(e.message) + '</div>';
+      '<div class="text-red-400 py-4 text-center text-sm">Failed to load: ' + esc(e.message) + '</div>';
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function field(label, value) {
-  return '<div class="bg-gray-50 rounded-lg p-2.5"><div class="text-[10px] text-gray-400 mb-0.5">'+label+'</div><div class="text-sm">'+value+'</div></div>';
+function mfield(label, value) {
+  return '<div class="bg-gray-50 rounded-lg p-2.5"><div class="text-[10px] text-gray-400 mb-0.5">' + label + '</div><div class="text-sm">' + value + '</div></div>';
 }
+
 function closeModal(e) {
   if (e.target === document.getElementById('modal'))
     document.getElementById('modal').classList.add('hidden');
 }
-function exportCSV() {
-  const status = document.getElementById('f-status').value;
-  const score  = document.getElementById('f-score').value;
-  const p = new URLSearchParams();
-  if (status) p.set('status', status);
-  if (score)  p.set('minScore', score);
-  window.location.href = '/api/export/csv?' + p;
+
+async function reEnrich() {
+  if (!modalCompanyId) return;
+  try {
+    await apiPost('/api/companies/' + modalCompanyId + '/enrich', {});
+    toast('Re-enrichment queued');
+  } catch(e) { toast('Failed: ' + e.message); }
 }
+
+async function reScore() {
+  if (!modalCompanyId) return;
+  try {
+    await apiPost('/api/companies/' + modalCompanyId + '/score', {});
+    toast('Re-scoring queued');
+  } catch(e) { toast('Failed: ' + e.message); }
+}
+
+async function deleteCompany(id) {
+  if (!confirm('Delete this company and all its data?')) return;
+  try {
+    await apiDelete('/api/companies/' + id);
+    toast('Company deleted');
+    document.getElementById('modal').classList.add('hidden');
+    loadCompanies();
+    loadStats();
+  } catch(e) { toast('Failed: ' + e.message); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CONTROL PANEL
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function triggerSeed() {
+  const btn = document.getElementById('seed-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Seeding…';
+  try {
+    const json = await apiPost('/api/seed', {});
+    const d = json.data;
+    const el = document.getElementById('seed-result');
+    el.classList.remove('hidden');
+    el.textContent = '✓ ' + d.queries + ' discovery jobs queued — Run ID: ' + d.runId;
+    toast('Seed round queued: ' + d.queries + ' jobs');
+    loadQueueStats();
+    setTimeout(() => el.classList.add('hidden'), 8000);
+  } catch(e) {
+    toast('Seed failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🚀 Seed Now';
+  }
+}
+
+async function triggerManualScrape() {
+  const source   = document.getElementById('ms-source').value;
+  const keywords = document.getElementById('ms-keywords').value.trim();
+  const limit    = parseInt(document.getElementById('ms-limit').value) || 25;
+  if (!keywords) { toast('Enter keywords first'); return; }
+  try {
+    const json = await apiPost('/api/scrape', { source, query: { keywords, location: 'United States' }, limit });
+    const el = document.getElementById('scrape-result');
+    el.classList.remove('hidden');
+    el.textContent = '✓ Queued — Run ID: ' + json.data.runId;
+    toast('Job queued for ' + source);
+    loadQueueStats();
+    setTimeout(() => el.classList.add('hidden'), 6000);
+  } catch(e) {
+    toast('Failed: ' + e.message);
+  }
+}
+
+async function loadQueueStats() {
+  try {
+    const json = await apiFetch('/api/jobs/status');
+    const d = json.data;
+    ['discovery','enrichment','scoring'].forEach(function(q) {
+      const counts = d[q] || {};
+      const waiting   = counts.waiting || 0;
+      const active    = counts.active  || 0;
+      const completed = counts.completed || 0;
+      const failed    = counts.failed || 0;
+      document.getElementById('q-' + q).innerHTML =
+        '<div class="space-y-1">' +
+          qrow('Waiting', waiting,  'text-yellow-600') +
+          qrow('Active',  active,   'text-blue-600') +
+          qrow('Done',    completed,'text-green-600') +
+          qrow('Failed',  failed,   'text-red-500') +
+        '</div>';
+    });
+  } catch(e) { /* silent */ }
+}
+
+function qrow(label, val, cls) {
+  return '<div class="flex justify-between"><span class="text-gray-400">' + label + '</span>' +
+    '<span class="font-semibold ' + cls + '">' + val + '</span></div>';
+}
+
+async function loadCronInfo() {
+  try {
+    const json = await apiFetch('/api/jobs/cron');
+    const d = json.data;
+    document.getElementById('cron-last').textContent = d.lastSeedAt ? fmtDate(d.lastSeedAt) : 'Not yet (startup seeds on launch)';
+    document.getElementById('cron-next').textContent = fmtDate(d.nextApproxAt);
+    document.getElementById('cron-count').textContent = d.seedQueryCount;
+  } catch(e) { /* silent */ }
+}
+
+async function drainQueue(name) {
+  if (!confirm('Drain all waiting jobs in the ' + name + ' queue? Active jobs will finish.')) return;
+  try {
+    await apiDelete('/api/jobs/clear/' + name);
+    toast(name + ' queue drained');
+    loadQueueStats();
+  } catch(e) { toast('Failed: ' + e.message); }
+}
+
+async function loadSettings() {
+  try {
+    const json = await apiFetch('/api/settings');
+    const d = json.data;
+    const orPct = Math.round((d.originRatioThreshold || 0.60) * 100);
+    document.getElementById('s-origin-ratio').value = orPct;
+    document.getElementById('s-min-sample').value   = d.originRatioMinSample  || 10;
+    document.getElementById('s-hot-threshold').value  = d.leadScoreHotThreshold  || 65;
+    document.getElementById('s-warm-threshold').value = d.leadScoreWarmThreshold || 50;
+    document.getElementById('sample-display').textContent = d.originRatioMinSample || 10;
+    document.getElementById('hot-display').textContent    = d.leadScoreHotThreshold || 65;
+    document.getElementById('warm-display').textContent   = d.leadScoreWarmThreshold || 50;
+    updateRatioDisplay();
+  } catch(e) { /* silent */ }
+}
+
+function updateRatioDisplay() {
+  const val = parseInt(document.getElementById('s-origin-ratio').value);
+  document.getElementById('ratio-display').textContent = val + '%';
+  const n = Math.round(10 / (val / 100));
+  document.getElementById('ratio-desc').innerHTML =
+    'At least <strong>' + val + '%</strong> — roughly <strong>' + Math.round(100/val) + ' in ' + Math.round(100/val * (val/100)*10).toFixed(0) + '</strong>... ' +
+    '<strong>1 in ' + Math.round(100/val) + ' devs</strong> must be of Indian origin';
+}
+
+async function saveSettings() {
+  const btn = document.getElementById('save-settings-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const ratio = parseInt(document.getElementById('s-origin-ratio').value) / 100;
+    await apiPatch('/api/settings', {
+      originRatioThreshold:  ratio,
+      originRatioMinSample:  parseInt(document.getElementById('s-min-sample').value),
+      leadScoreHotThreshold: parseInt(document.getElementById('s-hot-threshold').value),
+      leadScoreWarmThreshold:parseInt(document.getElementById('s-warm-threshold').value),
+    });
+    const el = document.getElementById('settings-saved');
+    el.classList.remove('hidden');
+    toast('Settings saved');
+    setTimeout(() => el.classList.add('hidden'), 4000);
+  } catch(e) {
+    toast('Save failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save Settings';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LOGS TAB
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function loadLogs() {
+  const scraper = document.getElementById('log-filter-scraper').value;
+  const limit   = document.getElementById('log-filter-limit').value;
+  const params  = new URLSearchParams({ limit });
+  if (scraper) params.set('scraper', scraper);
+
+  try {
+    const [logsJson, statsJson] = await Promise.all([
+      apiFetch('/api/jobs/logs?' + params),
+      apiFetch('/api/jobs/stats'),
+    ]);
+    const logs  = logsJson.data || [];
+    const stats = statsJson.data || {};
+    document.getElementById('log-total').textContent   = stats.total   || 0;
+    document.getElementById('log-success').textContent = stats.success || 0;
+    document.getElementById('log-partial').textContent = stats.partial || 0;
+    document.getElementById('log-failed').textContent  = stats.failed  || 0;
+
+    const tbody = document.getElementById('logs-tbody');
+    if (!logs.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No scrape logs yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = logs.map(function(l) {
+      const errCount = (l.errors || []).length;
+      return '<tr class="border-b border-gray-100 hover:bg-gray-50">' +
+        '<td class="px-4 py-2 text-gray-400 whitespace-nowrap">' + fmtTime(l.startedAt) + '</td>' +
+        '<td class="px-4 py-2"><span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px] font-medium">' + esc(l.scraper||'—') + '</span></td>' +
+        '<td class="px-4 py-2"><span class="badge badge-' + esc(l.status||'processing') + '">' + esc(l.status||'—') + '</span></td>' +
+        '<td class="px-4 py-2 font-medium ' + (l.companiesFound > 0 ? 'text-green-600' : 'text-gray-400') + '">' + (l.companiesFound || 0) + '</td>' +
+        '<td class="px-4 py-2 text-gray-500">' + (l.contactsFound || 0) + '</td>' +
+        '<td class="px-4 py-2 text-gray-500">' + (l.jobsFound || 0) + '</td>' +
+        '<td class="px-4 py-2 text-gray-400 whitespace-nowrap">' + fmtDuration(l.durationMs) + '</td>' +
+        '<td class="px-4 py-2">' + (errCount > 0
+          ? '<span class="text-red-500 text-[10px] cursor-pointer hover:underline" title="' + esc((l.errors||[]).slice(0,3).join('; ')) + '">' + errCount + ' error' + (errCount>1?'s':'') + '</span>'
+          : '<span class="text-gray-300">—</span>') + '</td>' +
+      '</tr>';
+    }).join('');
+  } catch(e) { /* silent */ }
+}
+
+function toggleLogRefresh() {
+  const on = document.getElementById('log-autorefresh').checked;
+  if (logRefreshId) { clearInterval(logRefreshId); logRefreshId = null; }
+  if (on) logRefreshId = setInterval(loadLogs, 10000);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ANALYTICS TAB
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function loadAnalytics() {
+  try {
+    const [statsJson, leadsJson, logsJson] = await Promise.all([
+      apiFetch('/api/stats'),
+      apiFetch('/api/leads?limit=250&sortBy=score&sortDir=desc'),
+      apiFetch('/api/jobs/stats'),
+    ]);
+    const s     = statsJson.data;
+    const leads = leadsJson.data || [];
+
+    // Funnel bars
+    const funnelData = [
+      { label: 'Total Companies', val: s.total, color: 'bg-gray-400' },
+      { label: '⏳ Pending (not yet scored)', val: s.pending, color: 'bg-purple-400' },
+      { label: '🔥 Hot Verified (≥80)', val: s.hot_verified, color: 'bg-orange-500' },
+      { label: '🔥 Hot (65–79)',         val: s.hot,          color: 'bg-red-400' },
+      { label: '🌡 Warm (50–64)',        val: s.warm,         color: 'bg-yellow-400' },
+      { label: '❄ Cold (35–49)',         val: s.cold,         color: 'bg-blue-400' },
+      { label: '✗ Disqualified (<35)',   val: s.disqualified, color: 'bg-gray-300' },
+    ];
+    const maxVal = s.total || 1;
+    document.getElementById('funnel-bars').innerHTML = funnelData.map(function(f) {
+      const pct = Math.round(((f.val||0) / maxVal) * 100);
+      return '<div class="flex items-center gap-3 text-xs">' +
+        '<span class="w-44 text-gray-600 shrink-0">' + f.label + '</span>' +
+        '<div class="prog-bar flex-1"><div class="prog-fill ' + f.color + '" style="width:' + pct + '%"></div></div>' +
+        '<span class="w-10 text-right font-semibold text-gray-700">' + (f.val||0) + '</span>' +
+        '<span class="w-10 text-right text-gray-400">' + pct + '%</span>' +
+      '</div>';
+    }).join('');
+
+    // Tech stack frequency from leads
+    const techCount = {};
+    leads.forEach(function(c) {
+      (c.techStack || []).forEach(function(t) { techCount[t] = (techCount[t]||0) + 1; });
+    });
+    const topTech = Object.entries(techCount).sort((a,b) => b[1]-a[1]).slice(0,10);
+    const maxTech = topTech[0] ? topTech[0][1] : 1;
+    document.getElementById('tech-bars').innerHTML = topTech.length
+      ? topTech.map(function(e) {
+          const pct = Math.round((e[1] / maxTech) * 100);
+          return '<div class="flex items-center gap-2 text-xs">' +
+            '<span class="w-24 text-gray-600 truncate shrink-0">' + esc(e[0]) + '</span>' +
+            '<div class="prog-bar flex-1"><div class="prog-fill bg-indigo-400" style="width:'+pct+'%"></div></div>' +
+            '<span class="w-8 text-right font-medium text-gray-600">' + e[1] + '</span>' +
+          '</div>';
+        }).join('')
+      : '<div class="text-gray-300 text-xs py-4 text-center">No data yet</div>';
+
+    // Scraper performance from logs
+    const scrapeStats = logsJson.data;
+    const scraperPerf = {};
+    (leadsJson.data || []).forEach(function(c) {
+      (c.sources || []).forEach(function(s) {
+        scraperPerf[s] = (scraperPerf[s]||0) + 1;
+      });
+    });
+    const topScrapers = Object.entries(scraperPerf).sort((a,b) => b[1]-a[1]).slice(0, 8);
+    const maxScraper = topScrapers[0] ? topScrapers[0][1] : 1;
+    document.getElementById('scraper-bars').innerHTML = topScrapers.length
+      ? topScrapers.map(function(e) {
+          const pct = Math.round((e[1] / maxScraper) * 100);
+          return '<div class="flex items-center gap-2 text-xs">' +
+            '<span class="w-24 text-gray-600 truncate shrink-0">' + esc(e[0]) + '</span>' +
+            '<div class="prog-bar flex-1"><div class="prog-fill bg-teal-400" style="width:'+pct+'%"></div></div>' +
+            '<span class="w-8 text-right font-medium text-gray-600">' + e[1] + '</span>' +
+          '</div>';
+        }).join('')
+      : '<div class="text-gray-300 text-xs py-4 text-center">No data yet</div>';
+
+    // Score histogram (0–100 in 10-point buckets)
+    const buckets = new Array(10).fill(0);
+    leads.forEach(function(c) {
+      if (c.score != null && c.score >= 0) {
+        const b = Math.min(Math.floor(c.score / 10), 9);
+        buckets[b]++;
+      }
+    });
+    const maxBucket = Math.max(...buckets, 1);
+    const bucketColors = ['bg-gray-200','bg-gray-300','bg-blue-200','bg-blue-300','bg-blue-400','bg-yellow-300','bg-yellow-400','bg-orange-400','bg-red-400','bg-orange-500'];
+    document.getElementById('score-hist').innerHTML = buckets.map(function(count, i) {
+      const h = Math.round((count / maxBucket) * 100);
+      return '<div class="flex flex-col items-center flex-1" title="Score ' + (i*10) + '–' + (i*10+9) + ': ' + count + ' companies">' +
+        '<span class="text-[9px] text-gray-400 mb-0.5">' + (count||'') + '</span>' +
+        '<div class="' + bucketColors[i] + ' w-full rounded-t-sm" style="height:' + h + '%"></div>' +
+      '</div>';
+    }).join('');
+
+  } catch(e) { /* silent */ }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FILTER / PAGINATION CONTROLS
+// ══════════════════════════════════════════════════════════════════════════════
+
 function applyFilters() { currentPage = 1; loadCompanies(); }
 function resetFilters() {
-  ['f-status','f-tech','f-funding','f-source'].forEach(id =>
-    document.getElementById(id).value = '');
-  document.getElementById('f-score').value = '';
-  document.getElementById('f-limit').value = '50';
+  ['f-status','f-tech','f-funding','f-source'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('f-minscore').value = '';
+  document.getElementById('f-maxscore').value = '';
+  document.getElementById('f-search').value   = '';
+  document.getElementById('f-limit').value    = '50';
+  activeSegment = 'all';
+  sortCol = 'score'; sortDir = 'desc';
+  document.querySelectorAll('.stat-pill').forEach(p => p.classList.remove('active-seg'));
+  document.getElementById('seg-all').classList.add('active-seg');
+  document.querySelectorAll('[id^="si-"]').forEach(el => { el.textContent = '↕'; });
+  document.querySelectorAll('.sort-th').forEach(el => el.classList.remove('sorted'));
+  document.getElementById('si-score').textContent = '↓';
+  document.querySelector('[onclick="setSort(\\'score\\')"]').classList.add('sorted');
   currentPage = 1;
   loadCompanies();
 }
+
 function changePage(dir) {
   const next = currentPage + dir;
   if (next < 1 || next > totalPages) return;
   currentPage = next;
   loadCompanies();
 }
+
 function hardRefresh() { loadStats(); loadCompanies(); }
-function scoreColor(s) {
-  if (!s || s < 1) return 'text-gray-400';
-  if (s >= 80) return 'text-orange-600';
-  if (s >= 65) return 'text-yellow-600';
-  if (s >= 50) return 'text-blue-500';
-  return 'text-gray-400';
-}
-function ratioColor(r) {
-  if (r == null) return 'text-gray-400';
-  if (r >= 0.75) return 'text-green-600';
-  if (r >= 0.60) return 'text-yellow-600';
-  return 'text-gray-400';
-}
-function esc(s) {
-  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+function exportCSV() {
+  const status  = document.getElementById('f-status').value;
+  const minsc   = document.getElementById('f-minscore').value;
+  const p = new URLSearchParams();
+  if (activeSegment === 'qualified')    p.set('status', 'hot');
+  else if (activeSegment === 'disqualified') p.set('status', 'disqualified');
+  else if (status) p.set('status', status);
+  if (minsc) p.set('minScore', minsc);
+  window.location.href = '/api/export/csv?' + p;
 }
 
-// ── Init ─────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════════════════
+
 loadStats();
 loadCompanies();
-setInterval(() => { loadStats(); loadCompanies(); }, 30000);
+loadSettings();
+
+// Sort score column by default
+document.getElementById('si-score').textContent = '↓';
+document.querySelector('[onclick="setSort(\\'score\\')"]').classList.add('sorted');
+
+// Auto-refresh leads + stats every 30s
+setInterval(function() {
+  loadStats();
+  if (document.getElementById('tab-leads').classList.contains('active')) loadCompanies();
+}, 30000);
+
+// Start log auto-refresh when logs tab is shown
+logRefreshId = setInterval(function() {
+  if (document.getElementById('tab-logs').classList.contains('active')) loadLogs();
+}, 10000);
+
+// Queue stats auto-refresh
+setInterval(function() {
+  if (document.getElementById('tab-control').classList.contains('active')) loadQueueStats();
+}, 8000);
 </script>
 </body>
 </html>`;

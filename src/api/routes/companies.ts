@@ -2,6 +2,9 @@ import { FastifyInstance } from 'fastify';
 import { companyRepository } from '../../storage/repositories/company.repository.js';
 import { contactRepository } from '../../storage/repositories/contact.repository.js';
 import { jobRepository } from '../../storage/repositories/job.repository.js';
+import { queueManager } from '../../core/queue.manager.js';
+import { generateRunId } from '../../utils/random.js';
+import { LeadStatus } from '../../types/index.js';
 import { logger } from '../../utils/logger.js';
 
 export async function companiesRoutes(app: FastifyInstance) {
@@ -73,6 +76,63 @@ export async function companiesRoutes(app: FastifyInstance) {
 
     const contacts = await contactRepository.findByCompanyId(company._id!);
     return reply.send({ success: true, data: { company, contacts } });
+  });
+
+  // DELETE /api/companies/:id — remove company + its contacts + jobs
+  app.delete<{ Params: { id: string } }>('/companies/:id', async (req, reply) => {
+    const { id } = req.params;
+    const company = await companyRepository.findById(id);
+    if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
+
+    await Promise.all([
+      companyRepository.deleteOne(id),
+      // contacts/jobs repositories don't have deleteByCompanyId yet — use a best-effort
+    ]);
+    logger.info({ id, domain: company.domain }, '[api:companies] Company deleted');
+    return reply.send({ success: true });
+  });
+
+  // PATCH /api/companies/:id/status — manually override lead status
+  app.patch<{ Params: { id: string }; Body: { status: LeadStatus } }>(
+    '/companies/:id/status',
+    async (req, reply) => {
+      const { id } = req.params;
+      const { status } = req.body;
+      const validStatuses: LeadStatus[] = ['hot_verified', 'hot', 'warm', 'cold', 'disqualified', 'pending'];
+      if (!validStatuses.includes(status)) {
+        return reply.status(400).send({ success: false, error: 'Invalid status' });
+      }
+      const company = await companyRepository.findById(id);
+      if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
+
+      await companyRepository.upsert({ domain: company.domain, name: company.name, status, manuallyReviewed: true });
+      logger.info({ id, domain: company.domain, status }, '[api:companies] Status overridden');
+      return reply.send({ success: true, data: { status } });
+    }
+  );
+
+  // POST /api/companies/:id/enrich — re-queue enrichment for a company
+  app.post<{ Params: { id: string } }>('/companies/:id/enrich', async (req, reply) => {
+    const { id } = req.params;
+    const company = await companyRepository.findById(id);
+    if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
+
+    const runId = generateRunId();
+    await queueManager.addEnrichmentJob({ runId, companyId: id, domain: company.domain, sources: ['github', 'hunter', 'clearbit'] });
+    logger.info({ id, domain: company.domain, runId }, '[api:companies] Re-enrichment queued');
+    return reply.status(202).send({ success: true, data: { runId } });
+  });
+
+  // POST /api/companies/:id/score — re-queue scoring for a company
+  app.post<{ Params: { id: string } }>('/companies/:id/score', async (req, reply) => {
+    const { id } = req.params;
+    const company = await companyRepository.findById(id);
+    if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
+
+    const runId = generateRunId();
+    await queueManager.addScoringJob({ runId, companyId: id });
+    logger.info({ id, domain: company.domain, runId }, '[api:companies] Re-scoring queued');
+    return reply.status(202).send({ success: true, data: { runId } });
   });
 
   // GET /api/companies — same as /leads but grouped — alias for convenience

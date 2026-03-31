@@ -12,6 +12,7 @@ import { deduplicateContacts } from '../enrichment/deduplicator.js';
 import { githubScraper } from '../scrapers/github.scraper.js';
 import { hunterScraper } from '../scrapers/hunter.scraper.js';
 import { clearbitScraper } from '../scrapers/clearbit.scraper.js';
+import { settingsRepository } from '../storage/repositories/settings.repository.js';
 import { logger } from '../utils/logger.js';
 
 async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> {
@@ -114,7 +115,10 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
       .filter(c => c.fullName)
       .map(c => ({ firstName: c.firstName, lastName: c.lastName, fullName: c.fullName }));
 
-    const minSample = parseInt(process.env['ORIGIN_RATIO_MIN_SAMPLE'] ?? '10');
+    const appSettings = await settingsRepository.get();
+    const minSample   = appSettings.originRatioMinSample;
+    const threshold   = appSettings.originRatioThreshold;
+
     if (nameList.length >= minSample) {
       const ratioResult = await devOriginAnalyzer.analyzeNames(nameList);
       logger.info(
@@ -127,7 +131,6 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
         '[enrichment.worker] Origin ratio computed'
       );
 
-      const threshold = parseFloat(process.env['ORIGIN_RATIO_THRESHOLD'] ?? '0.60');
       await companyRepository.upsert({
         domain,
         name:              company.name,

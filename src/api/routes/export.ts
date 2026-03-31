@@ -31,7 +31,13 @@ export async function exportRoutes(app: FastifyInstance) {
       const contactMap = new Map<string, Awaited<ReturnType<typeof contactRepository.findByCompanyId>>>();
       await Promise.all(
         companies.map(async c => {
-          if (c._id) contactMap.set(c._id, await contactRepository.findByCompanyId(c._id));
+          if (!c._id) return;
+          try {
+            contactMap.set(c._id, await contactRepository.findByCompanyId(c._id));
+          } catch (err) {
+            logger.warn({ err, domain: c.domain }, '[api:export] Could not fetch contacts — row will have empty contact fields');
+            contactMap.set(c._id, []);
+          }
         })
       );
 
