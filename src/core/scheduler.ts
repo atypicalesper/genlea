@@ -51,6 +51,10 @@ const SEED_QUERIES: Array<{
   { source: 'surelyremote', keywords: 'saas startup backend typescript nestjs',      techStack: ['nodejs', 'nestjs', 'typescript'] },
 ];
 
+// ── Configurable thresholds ────────────────────────────────────────────────────
+const DISCOVERY_BACKLOG_THRESHOLD = parseInt(process.env['DISCOVERY_BACKLOG_THRESHOLD'] ?? '200', 10);
+const STALE_JOB_DAYS              = parseInt(process.env['STALE_JOB_DAYS']              ?? '90',  10);
+
 // ── Track last seed time (readable by API) ─────────────────────────────────────
 let _lastSeedAt: Date | null = null;
 export function getLastSeedAt(): Date | null { return _lastSeedAt; }
@@ -63,8 +67,8 @@ export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: st
   if (label === 'cron' || label === 'scheduled') {
     const counts = await discoveryQueue.getJobCounts();
     const waiting = counts.waiting ?? 0;
-    if (waiting > 200) {
-      logger.warn({ waiting, label }, '[scheduler] Discovery backlog too large — skipping seed round');
+    if (waiting > DISCOVERY_BACKLOG_THRESHOLD) {
+      logger.warn({ waiting, threshold: DISCOVERY_BACKLOG_THRESHOLD, label }, '[scheduler] Discovery backlog too large — skipping seed round');
       return { runId: 'skipped', queries: 0 };
     }
   }
@@ -118,7 +122,7 @@ export async function startScheduler(): Promise<void> {
   // Nightly at 03:00 — deactivate jobs older than 90 days
   cron.schedule('0 3 * * *', async () => {
     logger.info('[scheduler] 🧹 Stale job cleanup starting');
-    const count = await jobRepository.deactivateStale(90).catch(err => {
+    const count = await jobRepository.deactivateStale(STALE_JOB_DAYS).catch(err => {
       logger.error({ err }, '[scheduler] Stale job cleanup failed');
       return 0;
     });

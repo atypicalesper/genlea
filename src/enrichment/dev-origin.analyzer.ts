@@ -1,6 +1,15 @@
 import axios from 'axios';
+import { z } from 'zod';
 import { logger } from '../utils/logger.js';
 import { groq, GROQ_MODEL } from '../utils/groq.client.js';
+
+const GroqResponseSchema = z.object({
+  results: z.array(z.object({
+    index:      z.number(),
+    isIndian:   z.boolean(),
+    confidence: z.number().min(0).max(1),
+  })),
+});
 
 export interface NameOriginResult {
   name: string;
@@ -60,15 +69,21 @@ async function classifyWithGroq(names: NameInput[]): Promise<RatioResult> {
     });
 
     const raw = response.choices[0]?.message?.content ?? '{}';
-    let parsed: { results?: Array<{ index: number; isIndian: boolean; confidence: number }> };
+    let jsonParsed: unknown;
     try {
-      parsed = JSON.parse(raw);
+      jsonParsed = JSON.parse(raw);
     } catch {
       logger.warn({ raw: raw.slice(0, 200) }, '[dev-origin] Groq returned invalid JSON — skipping batch');
       continue;
     }
 
-    for (const r of parsed.results ?? []) {
+    const parsed = GroqResponseSchema.safeParse(jsonParsed);
+    if (!parsed.success) {
+      logger.warn({ issues: parsed.error.issues, raw: raw.slice(0, 200) }, '[dev-origin] Groq response failed schema validation — skipping batch');
+      continue;
+    }
+
+    for (const r of parsed.data.results) {
       if (r.isIndian && r.confidence >= MIN_CONFIDENCE) {
         indianCount++;
       }
@@ -136,6 +151,32 @@ function classifyWithRegex(names: NameInput[]): RatioResult {
   };
 }
 
+// ── Strategy pattern — ordered list of name classifiers ───────────────────────
+
+interface NameClassifier {
+  name:        string;
+  isAvailable: () => boolean;
+  classify:    (names: NameInput[]) => Promise<RatioResult>;
+}
+
+const NAME_CLASSIFIERS: NameClassifier[] = [
+  {
+    name:        'groq',
+    isAvailable: () => !!process.env['GROQ_API_KEY'],
+    classify:    classifyWithGroq,
+  },
+  {
+    name:        'ethnicolr',
+    isAvailable: () => true, // always attempt; classify() throws on failure
+    classify:    classifyWithPython,
+  },
+  {
+    name:        'regex',
+    isAvailable: () => true,
+    classify:    async (names) => classifyWithRegex(names),
+  },
+];
+
 // ── Public analyzer ────────────────────────────────────────────────────────────
 
 export const indianRatioAnalyzer = {
@@ -144,39 +185,23 @@ export const indianRatioAnalyzer = {
       return { indianCount: 0, totalCount: 0, ratio: 0, reliable: false };
     }
 
-    // 1. Groq (primary — fast, no infra needed)
-    if (process.env['GROQ_API_KEY']) {
+    for (const classifier of NAME_CLASSIFIERS) {
+      if (!classifier.isAvailable()) continue;
       try {
-        const result = await classifyWithGroq(names);
+        const result = await classifier.classify(names);
         logger.info(
-          { provider: 'groq', total: result.totalCount, indian: result.indianCount },
-          '[dev-origin] Groq classification complete'
+          { provider: classifier.name, total: result.totalCount, indian: result.indianCount },
+          '[dev-origin] Classification complete'
         );
         return result;
       } catch (err) {
-        logger.warn({ err }, '[dev-origin] Groq failed — falling back to Python service');
+        logger.warn({ err, provider: classifier.name }, `[dev-origin] ${classifier.name} failed — trying next provider`);
       }
     }
 
-    // 2. Python microservice (secondary)
-    try {
-      const result = await classifyWithPython(names);
-      logger.info(
-        { provider: 'ethnicolr', total: result.totalCount, indian: result.indianCount },
-        '[dev-origin] Python service classification complete'
-      );
-      return result;
-    } catch (err) {
-      logger.warn({ err }, '[dev-origin] Python service unavailable — using regex fallback');
-    }
-
-    // 3. Regex (last resort)
-    const result = classifyWithRegex(names);
-    logger.info(
-      { provider: 'regex', total: result.totalCount, indian: result.indianCount },
-      '[dev-origin] Regex fallback classification complete'
-    );
-    return result;
+    // Should never reach here — regex never throws
+    logger.error('[dev-origin] All classifiers failed — returning zero result');
+    return { indianCount: 0, totalCount: names.length, ratio: 0, reliable: false };
   },
 
   async isServiceAvailable(): Promise<boolean> {

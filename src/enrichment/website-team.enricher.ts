@@ -96,8 +96,11 @@ export const websiteTeamScraper = {
           );
           break; // stop at first successful path
         }
-      } catch {
-        // 404s and timeouts are expected — just try the next path
+      } catch (err) {
+        // 404s, redirects, timeouts are expected — log anything unexpected
+        if (axios.isAxiosError(err) && (err.response?.status ?? 0) >= 500) {
+          logger.debug({ err, domain, path }, '[website.scraper] Server error on team page — trying next path');
+        }
       }
     }
 

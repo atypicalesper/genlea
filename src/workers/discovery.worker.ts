@@ -70,7 +70,7 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
         companiesFound: 0, contactsFound: 0, jobsFound: 0,
         errors: [`Scraper ${source} unavailable — missing credentials`],
         durationMs: Date.now() - startedAt.getTime(),
-      }).catch(() => {});
+      }).catch(e => logger.warn({ e }, '[discovery.worker] Could not write skipped log'));
       return; // complete job without retry
     }
 
@@ -139,34 +139,41 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
           '[discovery.worker] Company upserted — queuing enrichment'
         );
 
-        // ── Save contacts & jobs from raw scraper output ────────────────────
+        // ── Save contacts & jobs from raw scraper output (all in parallel) ───
         const rawForDomain = domainToRaw.get(saved.domain) ?? [];
+        const contactSaves: Promise<unknown>[] = [];
+        const jobSaves:     Promise<unknown>[] = [];
+
         for (const raw of rawForDomain) {
           for (const rawContact of raw.contacts ?? []) {
             const contact = normalizer.normalizeContact(rawContact, raw.source);
             if (!contact?.fullName) continue;
-            await contactRepository.upsert({
-              ...contact,
-              companyId: saved._id!,
-              fullName:  contact.fullName,
-              role:      contact.role ?? 'Unknown',
-            }).catch(() => {}); // ignore dupes
-            contactsFound++;
+            contactSaves.push(
+              contactRepository.upsert({
+                ...contact,
+                companyId: saved._id!,
+                fullName:  contact.fullName,
+                role:      contact.role ?? 'Unknown',
+              }).catch(err => logger.debug({ err, domain: saved.domain }, '[discovery.worker] Contact dupe — skipped'))
+            );
           }
 
           for (const rawJob of raw.jobs ?? []) {
             const j = normalizer.normalizeJob(rawJob, raw.source);
             if (!j?.title) continue;
-            await jobRepository.upsert({
-              ...j,
-              companyId: saved._id!,
-              title:     j.title,
-            }).catch((err) => {
-              errors.push(`job:${saved.domain}:${err instanceof Error ? err.message : String(err)}`);
-            });
-            jobsFound++;
+            jobSaves.push(
+              jobRepository.upsert({
+                ...j,
+                companyId: saved._id!,
+                title:     j.title,
+              }).catch(err => errors.push(`job:${saved.domain}:${err instanceof Error ? err.message : String(err)}`))
+            );
           }
         }
+
+        await Promise.allSettled([...contactSaves, ...jobSaves]);
+        contactsFound += contactSaves.length;
+        jobsFound     += jobSaves.length;
 
         await queueManager.addEnrichmentJob({
           runId,
