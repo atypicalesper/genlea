@@ -46,7 +46,13 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     );
 
     // ── Sync openRoles from active job titles ─────────────────────────────────
-    const openRoles = [...new Set(jobs.filter(j => j.isActive).map(j => j.title))];
+    // Deduplicate by normalized key but preserve original casing of first occurrence
+    const seen = new Set<string>();
+    const openRoles: string[] = [];
+    for (const j of jobs.filter(j => j.isActive)) {
+      const key = j.title.trim().toLowerCase();
+      if (!seen.has(key)) { seen.add(key); openRoles.push(j.title.trim()); }
+    }
     if (openRoles.length > 0) {
       await companyRepository.setOpenRoles(companyId, openRoles);
     }

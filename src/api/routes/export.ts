@@ -22,10 +22,14 @@ export async function exportRoutes(app: FastifyInstance) {
       if (status)   filter['status'] = status;
       if (minScore) filter['score']  = { $gte: minScore };
 
-      const companies = await companyRepository.findMany(
-        filter,
-        { sort: { score: -1 }, limit: 5000 }
-      );
+      const EXPORT_LIMIT = 5000;
+      const [companies, total] = await Promise.all([
+        companyRepository.findMany(filter, { sort: { score: -1 }, limit: EXPORT_LIMIT }),
+        companyRepository.count(filter),
+      ]);
+      if (total > EXPORT_LIMIT) {
+        logger.warn({ total, limit: EXPORT_LIMIT }, '[api:export] Result set truncated — increase EXPORT_LIMIT or add filters');
+      }
 
       // Fetch all contacts in one query (avoids N+1 for large exports)
       const companyIds = companies.map(c => c._id).filter(Boolean) as string[];
@@ -76,6 +80,8 @@ export async function exportRoutes(app: FastifyInstance) {
       return reply
         .header('Content-Type', 'text/csv')
         .header('Content-Disposition', `attachment; filename="genlea-${status ?? 'all'}-leads.csv"`)
+        .header('X-Total-Count', String(total))
+        .header('X-Truncated',   String(total > EXPORT_LIMIT))
         .send(csv);
     }
   );

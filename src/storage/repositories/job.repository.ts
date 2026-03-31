@@ -70,13 +70,12 @@ export const jobRepository = {
   async deactivateStale(staleDays = 90): Promise<number> {
     const col = getCollection<JobRaw>(COLLECTIONS.JOBS);
     const cutoff = new Date(Date.now() - staleDays * 86_400_000);
-    const scrapedCutoff = new Date(Date.now() - staleDays * 86_400_000);
     const result = await col.updateMany(
       {
         isActive: true,
         $or: [
-          { postedAt: { $lt: cutoff } },                          // stale by post date
-          { postedAt: null, scrapedAt: { $lt: scrapedCutoff } },  // no post date — use scrape date
+          { postedAt: { $lt: cutoff } },                      // stale by post date
+          { postedAt: null, scrapedAt: { $lt: cutoff } },     // no post date — use scrape date
         ],
       } as any,
       { $set: { isActive: false } }

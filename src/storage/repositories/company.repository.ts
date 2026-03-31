@@ -125,6 +125,9 @@ export const companyRepository = {
         ...(data.originRatio !== undefined && { originRatio: data.originRatio }),
         ...(data.toleranceIncluded !== undefined && { toleranceIncluded: data.toleranceIncluded }),
         ...(data.lastEnrichedAt && { lastEnrichedAt: data.lastEnrichedAt }),
+        // Manual status overrides — only written when explicitly passed (status API, dashboard)
+        ...(data.status !== undefined && { status: data.status }),
+        ...(data.manuallyReviewed !== undefined && { manuallyReviewed: data.manuallyReviewed }),
       },
       $max: {
         // employeeCount/fundingTotalUsd: take the larger value across sources
