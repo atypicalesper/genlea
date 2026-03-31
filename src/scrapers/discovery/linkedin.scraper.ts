@@ -1,12 +1,12 @@
 import { Page, BrowserContext } from 'playwright';
 import {
   Scraper, ScrapeQuery, RawResult, RawCompany, RawContact, RawJob,
-} from '../types/index.js';
-import { browserManager } from '../core/browser.manager.js';
-import { sessionManager } from '../core/session.manager.js';
-import { proxyManager } from '../core/proxy.manager.js';
-import { logger } from '../utils/logger.js';
-import { randomBetween, generateRunId } from '../utils/random.js';
+} from '../../types/index.js';
+import { browserManager } from '../../core/browser.manager.js';
+import { sessionManager } from '../../core/session.manager.js';
+import { proxyManager } from '../../core/proxy.manager.js';
+import { logger } from '../../utils/logger.js';
+import { randomBetween, generateRunId } from '../../utils/random.js';
 
 // ── Selectors (update here if LinkedIn changes their DOM) ─────────────────────
 const SEL = {

@@ -1,11 +1,11 @@
 import { Page } from 'playwright';
 import {
   Scraper, ScrapeQuery, RawResult, RawCompany, RawContact,
-} from '../types/index.js';
-import { browserManager } from '../core/browser.manager.js';
-import { proxyManager } from '../core/proxy.manager.js';
-import { logger } from '../utils/logger.js';
-import { generateRunId, randomBetween } from '../utils/random.js';
+} from '../../types/index.js';
+import { browserManager } from '../../core/browser.manager.js';
+import { proxyManager } from '../../core/proxy.manager.js';
+import { logger } from '../../utils/logger.js';
+import { generateRunId, randomBetween } from '../../utils/random.js';
 
 /**
  * Wellfound (formerly AngelList Talent) scraper.
@@ -177,9 +177,9 @@ export class WellfoundScraper implements Scraper {
     page: Page,
     slug: string,
     domain: string
-  ): Promise<import('../types/index.js').RawJob[]> {
+  ): Promise<import('../../types/index.js').RawJob[]> {
     const jobCards = await page.$$('[data-test="JobListing"], [class*="job-listing"], [class*="jobCard"]');
-    const jobs: import('../types/index.js').RawJob[] = [];
+    const jobs: import('../../types/index.js').RawJob[] = [];
 
     for (const card of jobCards) {
       const titleEl  = await card.$('h3, h4, [class*="title"], [class*="role"]');
@@ -204,9 +204,9 @@ export class WellfoundScraper implements Scraper {
   private async scrapeFounders(
     page: Page,
     domain: string
-  ): Promise<Partial<import('../types/index.js').RawContact>[]> {
+  ): Promise<Partial<import('../../types/index.js').RawContact>[]> {
     const founderCards = await page.$$('[data-test="founder"], [class*="founder"], [class*="team-member"]');
-    const contacts: Partial<import('../types/index.js').RawContact>[] = [];
+    const contacts: Partial<import('../../types/index.js').RawContact>[] = [];
 
     for (const card of founderCards.slice(0, 5)) {
       const nameEl  = await card.$('h3, h4, [class*="name"]');
@@ -245,7 +245,7 @@ function parseEmployeeText(text: string): number | undefined {
   return undefined;
 }
 
-function mapStage(stage?: string): import('../types/index.js').FundingStage {
+function mapStage(stage?: string): import('../../types/index.js').FundingStage {
   if (!stage) return 'Unknown';
   const s = stage.toLowerCase();
   if (s.includes('series a')) return 'Series A';

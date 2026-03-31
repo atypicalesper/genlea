@@ -9,14 +9,10 @@ import { contactRepository } from '../storage/repositories/contact.repository.js
 import { jobRepository } from '../storage/repositories/job.repository.js';
 import { normalizer } from '../enrichment/normalizer.js';
 import { normalizeDomain } from '../utils/random.js';
-import { linkedInScraper } from '../scrapers/linkedin.scraper.js';
-import { apolloScraper } from '../scrapers/apollo.scraper.js';
-import { crunchbaseScraper } from '../scrapers/crunchbase.scraper.js';
-import { wellfoundScraper } from '../scrapers/wellfound.scraper.js';
-import { indeedScraper } from '../scrapers/indeed.scraper.js';
-import { zoomInfoScraper } from '../scrapers/zoominfo.scraper.js';
-import { glassdoorScraper } from '../scrapers/glassdoor.scraper.js';
-import { surelyRemoteScraper } from '../scrapers/surelyremote.scraper.js';
+import {
+  linkedInScraper, apolloScraper, crunchbaseScraper, wellfoundScraper,
+  indeedScraper, zoomInfoScraper, glassdoorScraper, surelyRemoteScraper,
+} from '../scrapers/discovery/index.js';
 import { deduplicateCompanies } from '../enrichment/deduplicator.js';
 import { logger } from '../utils/logger.js';
 import { generateRunId } from '../utils/random.js';

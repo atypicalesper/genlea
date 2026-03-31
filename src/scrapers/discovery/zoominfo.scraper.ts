@@ -1,11 +1,11 @@
 import { Page } from 'playwright';
 import {
   Scraper, ScrapeQuery, RawResult, RawCompany, RawContact,
-} from '../types/index.js';
-import { browserManager } from '../core/browser.manager.js';
-import { sessionManager } from '../core/session.manager.js';
-import { logger } from '../utils/logger.js';
-import { generateRunId } from '../utils/random.js';
+} from '../../types/index.js';
+import { browserManager } from '../../core/browser.manager.js';
+import { sessionManager } from '../../core/session.manager.js';
+import { logger } from '../../utils/logger.js';
+import { generateRunId } from '../../utils/random.js';
 
 /**
  * ZoomInfo scraper — Playwright stealth login + company/contact scraping.
@@ -290,7 +290,7 @@ export class ZoomInfoScraper implements Scraper {
   }
 }
 
-function resolveRole(title: string): import('../types/index.js').ContactRole {
+function resolveRole(title: string): import('../../types/index.js').ContactRole {
   const t = (title ?? '').toLowerCase();
   if (/ceo|chief executive|founder|co-founder/.test(t)) return 'CEO';
   if (/cto|chief tech/.test(t)) return 'CTO';

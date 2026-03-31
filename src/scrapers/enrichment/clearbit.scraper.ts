@@ -1,9 +1,9 @@
 import axios, { AxiosInstance } from 'axios';
 import { Page } from 'playwright';
-import { Scraper, ScrapeQuery, RawResult, RawCompany } from '../types/index.js';
-import { browserManager } from '../core/browser.manager.js';
-import { logger } from '../utils/logger.js';
-import { generateRunId } from '../utils/random.js';
+import { Scraper, ScrapeQuery, RawResult, RawCompany } from '../../types/index.js';
+import { browserManager } from '../../core/browser.manager.js';
+import { logger } from '../../utils/logger.js';
+import { generateRunId } from '../../utils/random.js';
 
 /**
  * Clearbit enricher — given a domain, returns company name, description,

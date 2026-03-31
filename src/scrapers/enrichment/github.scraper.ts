@@ -1,9 +1,9 @@
 import axios, { AxiosInstance } from 'axios';
 import {
   Scraper, ScrapeQuery, RawResult, RawCompany, RawContact,
-} from '../types/index.js';
-import { logger } from '../utils/logger.js';
-import { chunkArray } from '../utils/random.js';
+} from '../../types/index.js';
+import { logger } from '../../utils/logger.js';
+import { chunkArray } from '../../utils/random.js';
 
 export class GitHubScraper implements Scraper {
   name = 'github' as const;

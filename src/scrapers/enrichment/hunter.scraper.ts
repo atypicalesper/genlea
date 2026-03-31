@@ -1,12 +1,12 @@
 import axios, { AxiosInstance } from 'axios';
 import {
   Scraper, ScrapeQuery, RawResult, RawCompany, RawContact,
-} from '../types/index.js';
-import { browserManager } from '../core/browser.manager.js';
-import { proxyManager } from '../core/proxy.manager.js';
-import { emailVerifier } from '../enrichment/email.verifier.js';
-import { logger } from '../utils/logger.js';
-import { generateRunId } from '../utils/random.js';
+} from '../../types/index.js';
+import { browserManager } from '../../core/browser.manager.js';
+import { proxyManager } from '../../core/proxy.manager.js';
+import { emailVerifier } from '../../enrichment/email.verifier.js';
+import { logger } from '../../utils/logger.js';
+import { generateRunId } from '../../utils/random.js';
 
 // Common corporate email patterns, tried in order of frequency
 const EMAIL_PATTERNS = [
@@ -269,7 +269,7 @@ export class HunterScraper implements Scraper {
   }
 }
 
-function resolveRole(position: string): import('../types/index.js').ContactRole {
+function resolveRole(position: string): import('../../types/index.js').ContactRole {
   const p = (position ?? '').toLowerCase();
   if (/ceo|chief executive|founder/.test(p)) return 'CEO';
   if (/cto|chief tech/.test(p)) return 'CTO';

@@ -1,6 +1,6 @@
 import { Contact, ContactRole } from '../types/index.js';
 import { contactRepository } from '../storage/repositories/contact.repository.js';
-import { hunterScraper } from '../scrapers/hunter.scraper.js';
+import { hunterScraper } from '../scrapers/enrichment/index.js';
 import { emailVerifier } from './email.verifier.js';
 import { logger } from '../utils/logger.js';
 

@@ -1,11 +1,11 @@
 import { Page } from 'playwright';
 import {
   Scraper, ScrapeQuery, RawResult, RawCompany, RawJob,
-} from '../types/index.js';
-import { browserManager } from '../core/browser.manager.js';
-import { proxyManager } from '../core/proxy.manager.js';
-import { logger } from '../utils/logger.js';
-import { generateRunId } from '../utils/random.js';
+} from '../../types/index.js';
+import { browserManager } from '../../core/browser.manager.js';
+import { proxyManager } from '../../core/proxy.manager.js';
+import { logger } from '../../utils/logger.js';
+import { generateRunId } from '../../utils/random.js';
 
 /**
  * Indeed scraper — free job listings.

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { logger } from '../utils/logger.js';
-import { groq, GROQ_MODEL } from '../ai/groq.client.js';
+import { groq, GROQ_MODEL } from '../utils/groq.client.js';
 
 export interface NameOriginResult {
   name: string;

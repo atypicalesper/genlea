@@ -9,10 +9,8 @@ import { normalizer } from '../enrichment/normalizer.js';
 import { indianRatioAnalyzer as devOriginAnalyzer } from '../enrichment/dev-origin.analyzer.js';
 import { contactResolver } from '../enrichment/contact.resolver.js';
 import { deduplicateContacts } from '../enrichment/deduplicator.js';
-import { githubScraper } from '../scrapers/github.scraper.js';
-import { hunterScraper } from '../scrapers/hunter.scraper.js';
-import { clearbitScraper } from '../scrapers/clearbit.scraper.js';
-import { websiteTeamScraper } from '../enrichment/website.scraper.js';
+import { githubScraper, hunterScraper, clearbitScraper } from '../scrapers/enrichment/index.js';
+import { websiteTeamScraper } from '../enrichment/website-team.enricher.js';
 import { settingsRepository } from '../storage/repositories/settings.repository.js';
 import { logger } from '../utils/logger.js';
 
