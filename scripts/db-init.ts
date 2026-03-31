@@ -15,15 +15,21 @@ async function main() {
   await companies.createIndex({ status: 1 }, { name: 'status' });
   await companies.createIndex({ originRatio: -1 }, { name: 'origin_ratio' });
   await companies.createIndex({ techStack: 1 }, { name: 'tech_stack' });
+  await companies.createIndex({ sources: 1 }, { name: 'sources' });        // for source filter
   await companies.createIndex({ fundingStage: 1 }, { name: 'funding_stage' });
   await companies.createIndex({ lastScrapedAt: -1 }, { name: 'last_scraped' });
   await companies.createIndex({ 'hqCountry': 1, 'hqState': 1 }, { name: 'location' });
+  // Text index for name/domain search — replaces full-scan regex
+  await companies.createIndex({ name: 'text', domain: 'text' }, { name: 'name_domain_text', weights: { name: 2, domain: 1 } });
   logger.info('[db:init] ✅ companies indexes created');
 
   // ── contacts ───────────────────────────────────────────────────────────────
   logger.info('[db:init] Creating contacts indexes...');
   const contacts = db.collection('contacts');
-  await contacts.createIndex({ email: 1 }, { unique: true, sparse: true, name: 'email_unique' });
+  // Unique on (email, companyId) — allows the same email across different companies (job changes)
+  // sparse so contacts with no email don't conflict
+  await contacts.createIndex({ email: 1, companyId: 1 }, { unique: true, sparse: true, name: 'email_company_unique' });
+  await contacts.createIndex({ email: 1 }, { sparse: true, name: 'email' }); // for findByEmail lookups
   await contacts.createIndex({ companyId: 1 }, { name: 'company_id' });
   await contacts.createIndex({ companyId: 1, role: 1 }, { name: 'company_role' });
   await contacts.createIndex({ emailVerified: 1 }, { name: 'email_verified' });
