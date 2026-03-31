@@ -24,6 +24,10 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
     .badge-pending{background:#f5f3ff;color:#7c3aed;border:1px solid #ddd6fe;}
     .badge-skipped{background:#fafafa;color:#9ca3af;border:1px solid #e5e7eb;}
     .badge-processing{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;}
+    .badge-enriching{background:#ecfdf5;color:#059669;border:1px solid #6ee7b7;}
+    .badge-scoring{background:#fdf4ff;color:#9333ea;border:1px solid #e9d5ff;}
+    @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+    .live-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor;margin-right:3px;animation:pulse-dot 1.2s ease-in-out infinite;}
     .badge-success{background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;}
     .badge-failed{background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;}
     .badge-partial{background:#fefce8;color:#ca8a04;border:1px solid #fde047;}
@@ -564,6 +568,8 @@ let activeSegment = 'all';
 let searchTimer   = null;
 let logRefreshId  = null;
 let modalCompanyId = null;
+let activeJobMap  = new Map(); // companyId → 'enriching'|'scoring'
+let activeJobsTimer = null;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // UTILITIES
@@ -769,7 +775,19 @@ async function loadCompanies() {
     '</td></tr>';
 
   try {
-    const json = await apiFetch('/api/leads?' + params);
+    // Fetch companies + active pipeline jobs in parallel
+    const [json, activeJson] = await Promise.all([
+      apiFetch('/api/leads?' + params),
+      apiFetch('/api/jobs/active').catch(() => ({ data: [] })),
+    ]);
+
+    // Build a map of companyId → pipeline phase for live overlay
+    activeJobMap = new Map();
+    for (const job of (activeJson.data || [])) {
+      if (job.companyId && job.queue === 'enrichment') activeJobMap.set(String(job.companyId), 'enriching');
+      if (job.companyId && job.queue === 'scoring')    activeJobMap.set(String(job.companyId), 'scoring');
+    }
+
     const { data, meta } = json;
     totalPages = meta.pages || 1;
     document.getElementById('page-info').textContent =
@@ -793,6 +811,7 @@ async function loadCompanies() {
       const ratio  = c.originRatio != null ? Math.round(c.originRatio * 100) + '%' : '—';
       const score  = c.score != null && c.score > 0 ? c.score : '—';
       const status = c.status || 'pending';
+      const livePhase = activeJobMap.get(String(c._id));
       const tags   = (c.techStack || []).slice(0, 4).map(function(t) {
         return '<span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">' + esc(t) + '</span>';
       }).join(' ');
@@ -803,13 +822,18 @@ async function loadCompanies() {
         return '<span class="bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded text-[10px]">' + esc(s) + '</span>';
       }).join(' ');
 
-      return '<tr class="data-row border-b border-gray-100 cursor-pointer" onclick="openCompany(\\''+c._id+'\\')"> ' +
+      const statusBadge = livePhase
+        ? '<span class="badge badge-' + esc(status) + ' opacity-50 mr-1">' + esc(status) + '</span>' +
+          '<span class="badge badge-' + livePhase + '"><span class="live-dot"></span>⚙ ' + livePhase + '</span>'
+        : '<span class="badge badge-' + esc(status) + '">' + esc(status) + '</span>';
+
+      return '<tr class="data-row border-b border-gray-100 cursor-pointer' + (livePhase ? ' bg-emerald-50/30' : '') + '" onclick="openCompany(\\''+c._id+'\\')"> ' +
         '<td class="px-4 py-2.5 max-w-[200px]">' +
           '<div class="font-medium text-gray-900 truncate">' + esc(c.name || '—') + '</div>' +
           '<div class="text-[10px] text-blue-500 truncate">' + esc(c.domain || '') + '</div>' +
         '</td>' +
         '<td class="px-4 py-2.5 font-bold ' + scoreColor(c.score) + '">' + score + '</td>' +
-        '<td class="px-4 py-2.5"><span class="badge badge-' + esc(status) + '">' + esc(status) + '</span></td>' +
+        '<td class="px-4 py-2.5">' + statusBadge + '</td>' +
         '<td class="px-4 py-2.5 font-semibold ' + ratioColor(c.originRatio) + '">' + ratio + '</td>' +
         '<td class="px-4 py-2.5 text-gray-500">' + esc(c.fundingStage || '—') + '</td>' +
         '<td class="px-4 py-2.5 text-gray-600">' + esc(c.employeeCount || '—') + '</td>' +
@@ -1442,6 +1466,13 @@ setInterval(function() {
 
 // Always poll active jobs for the global activity bar (even on other tabs)
 setInterval(loadActiveJobs, 8000);
+
+// Fast-refresh leads table when pipeline is actively processing (every 10s)
+setInterval(function() {
+  if (activeJobMap.size > 0 && document.getElementById('tab-leads').classList.contains('active')) {
+    loadCompanies();
+  }
+}, 10000);
 </script>
 </body>
 </html>`;

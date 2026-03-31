@@ -79,6 +79,7 @@ export class QueueManager {
     name: string;
     source?: string;
     domain?: string;
+    companyId?: string;
     runId?: string;
     startedAt: Date | null;
   }>> {
@@ -98,10 +99,12 @@ export class QueueManager {
       }
       if (queue === 'enrichment') {
         // name format: "enrich:${domain}:${runId}"
-        return { queue, jobId: j.id, name: j.name, domain: parts[1], runId: parts[2], startedAt };
+        const d = j.data as EnrichmentJobData;
+        return { queue, jobId: j.id, name: j.name, domain: parts[1], companyId: d.companyId, runId: parts[2], startedAt };
       }
       // scoring: "score:${companyId}:${runId}"
-      return { queue, jobId: j.id, name: j.name, runId: parts[2], startedAt };
+      const d = j.data as ScoringJobData;
+      return { queue, jobId: j.id, name: j.name, companyId: d.companyId ?? parts[1], runId: parts[2], startedAt };
     });
 
     return [
