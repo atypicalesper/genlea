@@ -20,6 +20,20 @@ export const contactRepository = {
     return docs.map(toContact);
   },
 
+  /** Batch fetch contacts for many companies in a single query — avoids N+1 on export */
+  async findByCompanyIds(ids: string[]): Promise<Map<string, Contact[]>> {
+    if (ids.length === 0) return new Map();
+    const col = getCollection<ContactRaw>(COLLECTIONS.CONTACTS);
+    const docs = await col.find({ companyId: { $in: ids } } as any).toArray();
+    const map = new Map<string, Contact[]>();
+    for (const doc of docs) {
+      const id = doc.companyId;
+      if (!map.has(id)) map.set(id, []);
+      map.get(id)!.push(toContact(doc));
+    }
+    return map;
+  },
+
   async findByEmail(email: string): Promise<Contact | null> {
     const col = getCollection<ContactRaw>(COLLECTIONS.CONTACTS);
     const doc = await col.findOne({ email: normalizeEmail(email) } as any);

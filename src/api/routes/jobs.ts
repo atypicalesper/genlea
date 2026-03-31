@@ -76,6 +76,18 @@ export async function jobsRoutes(app: FastifyInstance) {
     });
   });
 
+  // POST /api/jobs/retry/:queue — retry all failed jobs in a queue
+  app.post<{ Params: { queue: string } }>('/jobs/retry/:queue', async (req, reply) => {
+    const { queue } = req.params;
+    const validQueues = ['discovery', 'enrichment', 'scoring'] as const;
+    if (!validQueues.includes(queue as any)) {
+      return reply.status(400).send({ success: false, error: 'Invalid queue. Valid: discovery, enrichment, scoring' });
+    }
+    logger.info({ queue }, '[api:jobs] Retry failed jobs requested');
+    const retried = await queueManager.retryFailed(queue as 'discovery' | 'enrichment' | 'scoring');
+    return reply.send({ success: true, data: { queue, retried, message: `${retried} failed jobs re-queued` } });
+  });
+
   // DELETE /api/jobs/clear/:queue — drain a queue (for dev/reset)
   app.delete<{ Params: { queue: string } }>('/jobs/clear/:queue', async (req, reply) => {
     const { queue } = req.params;

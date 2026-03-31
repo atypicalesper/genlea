@@ -101,7 +101,8 @@ export const companyRepository = {
     const update: UpdateFilter<CompanyDoc> = {
       $set: {
         updatedAt: now,
-        lastScrapedAt: now,
+        // Only bump lastScrapedAt when a discovery scraper is contributing new source data
+        ...(data.sources?.length && { lastScrapedAt: now }),
         ...(data.name && { name: data.name }),
         ...(data.linkedinUrl && { linkedinUrl: data.linkedinUrl }),
         ...(data.description && { description: data.description }),

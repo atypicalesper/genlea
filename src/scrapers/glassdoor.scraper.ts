@@ -163,7 +163,7 @@ export class GlassdoorScraper implements Scraper {
       employeeCount: parseEmployeeCount(sizeText),
       industry:      '',
       techTags:      extractTechTags(jobTitle + ' ' + salaryText),
-      postedAt:      new Date(),
+      postedAt:      undefined, // Glassdoor card doesn't expose post date — leave blank
     };
   }
 }
@@ -185,7 +185,7 @@ interface GlassdoorListing {
   employeeCount: number | undefined;
   industry:      string;
   techTags:      string[];
-  postedAt:      Date;
+  postedAt?:     Date;
 }
 
 function isUSLocation(location: string): boolean {

@@ -111,6 +111,19 @@ export class QueueManager {
     ];
   }
 
+  async retryFailed(queueName: 'discovery' | 'enrichment' | 'scoring'): Promise<number> {
+    const queueMap = {
+      discovery:  discoveryQueue,
+      enrichment: enrichmentQueue,
+      scoring:    scoringQueue,
+    };
+    const queue = queueMap[queueName];
+    const failedJobs = await queue.getFailed();
+    await Promise.all(failedJobs.map(j => j.retry()));
+    logger.info({ queue: queueName, retried: failedJobs.length }, 'Failed jobs retried');
+    return failedJobs.length;
+  }
+
   async drainAll(): Promise<void> {
     await Promise.all([
       discoveryQueue.drain(),

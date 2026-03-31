@@ -342,7 +342,12 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
         <div class="queue-card"><div class="text-xs text-gray-400 mb-2 font-medium uppercase tracking-wide">Enrichment</div><div id="q-enrichment" class="text-xs text-gray-400">Loading…</div></div>
         <div class="queue-card"><div class="text-xs text-gray-400 mb-2 font-medium uppercase tracking-wide">Scoring</div><div id="q-scoring" class="text-xs text-gray-400">Loading…</div></div>
       </div>
-      <div class="flex gap-2 mt-3">
+      <div class="flex flex-wrap gap-2 mt-3">
+        <button onclick="retryFailed('discovery')" class="action-btn text-xs" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;">↺ Retry Discovery</button>
+        <button onclick="retryFailed('enrichment')" class="action-btn text-xs" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;">↺ Retry Enrichment</button>
+        <button onclick="retryFailed('scoring')" class="action-btn text-xs" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;">↺ Retry Scoring</button>
+      </div>
+      <div class="flex flex-wrap gap-2 mt-2">
         <button onclick="drainQueue('discovery')" class="action-btn danger text-xs">✕ Drain Discovery</button>
         <button onclick="drainQueue('enrichment')" class="action-btn danger text-xs">✕ Drain Enrichment</button>
         <button onclick="drainQueue('scoring')" class="action-btn danger text-xs">✕ Drain Scoring</button>
@@ -1146,6 +1151,14 @@ async function loadCronInfo() {
     document.getElementById('cron-next').textContent = fmtDate(d.nextApproxAt);
     document.getElementById('cron-count').textContent = d.seedQueryCount;
   } catch(e) { /* silent */ }
+}
+
+async function retryFailed(name) {
+  try {
+    const res = await apiPost('/api/jobs/retry/' + name, {});
+    toast(res.data.message);
+    loadQueueStats();
+  } catch(e) { toast('Retry failed: ' + e.message); }
 }
 
 async function drainQueue(name) {

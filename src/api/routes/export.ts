@@ -27,19 +27,9 @@ export async function exportRoutes(app: FastifyInstance) {
         { sort: { score: -1 }, limit: 5000 }
       );
 
-      // Fetch contacts for all companies in one pass
-      const contactMap = new Map<string, Awaited<ReturnType<typeof contactRepository.findByCompanyId>>>();
-      await Promise.all(
-        companies.map(async c => {
-          if (!c._id) return;
-          try {
-            contactMap.set(c._id, await contactRepository.findByCompanyId(c._id));
-          } catch (err) {
-            logger.warn({ err, domain: c.domain }, '[api:export] Could not fetch contacts — row will have empty contact fields');
-            contactMap.set(c._id, []);
-          }
-        })
-      );
+      // Fetch all contacts in one query (avoids N+1 for large exports)
+      const companyIds = companies.map(c => c._id).filter(Boolean) as string[];
+      const contactMap = await contactRepository.findByCompanyIds(companyIds);
 
       const rows = companies.flatMap(c => {
         const contacts = contactMap.get(c._id ?? '') ?? [];
