@@ -98,34 +98,40 @@ export const contactResolver = {
       }
     }
 
-    // ── Step 3: Try Hunter email-finder for CEO/HR by name ───────────────────
-    for (const contact of existingContacts) {
-      if (contact.email || !contact.firstName || !contact.lastName) continue;
-      if (!PRIORITY_ROLES.includes(contact.role)) continue;
-      if (!contact._id) continue;
+    // ── Step 3: Try Hunter email-finder for CEO/HR by name (parallel) ────────
+    const nameOnlyPriority = existingContacts.filter(c =>
+      !c.email && c.firstName && c.lastName && PRIORITY_ROLES.includes(c.role) && c._id
+    );
 
-      logger.debug({ name: contact.fullName, domain }, '[contact.resolver] Trying Hunter email finder');
-      const found = await hunterScraper.findEmail(contact.firstName, contact.lastName, domain);
-
-      if (found && found.confidence >= 0.50) {
-        // Verify before saving
-        const verification = await emailVerifier.verify(found.email).catch(() => null);
-        const verified_now = !!(verification && verification.confidence > 0.6);
-        await contactRepository.upsert({
-          companyId,
-          fullName: contact.fullName,
-          role:     contact.role,
-          email:    found.email,
-          emailConfidence: verification ? verification.confidence : found.confidence,
-          emailVerified:   verified_now,
-          sources:  ['hunter'],
+    const HUNTER_CONCURRENCY = 2; // Hunter rate-limits aggressively — keep low
+    for (let i = 0; i < nameOnlyPriority.length; i += HUNTER_CONCURRENCY) {
+      const batch = nameOnlyPriority.slice(i, i + HUNTER_CONCURRENCY);
+      await Promise.all(batch.map(async contact => {
+        logger.debug({ name: contact.fullName, domain }, '[contact.resolver] Trying Hunter email finder');
+        const found = await hunterScraper.findEmail(contact.firstName!, contact.lastName!, domain).catch(err => {
+          logger.warn({ err, name: contact.fullName, domain }, '[contact.resolver] Hunter email finder failed');
+          return null;
         });
-        enriched++;
-        logger.info(
-          { email: found.email, confidence: found.confidence, verified: verified_now, name: contact.fullName },
-          '[contact.resolver] Email found via Hunter name search'
-        );
-      }
+
+        if (found && found.confidence >= 0.50) {
+          const verification = await emailVerifier.verify(found.email).catch(() => null);
+          const verified_now = !!(verification && verification.confidence > 0.6);
+          await contactRepository.upsert({
+            companyId,
+            fullName: contact.fullName,
+            role:     contact.role,
+            email:    found.email,
+            emailConfidence: verification ? verification.confidence : found.confidence,
+            emailVerified:   verified_now,
+            sources:  ['hunter'],
+          });
+          enriched++;
+          logger.info(
+            { email: found.email, confidence: found.confidence, verified: verified_now, name: contact.fullName },
+            '[contact.resolver] Email found via Hunter name search'
+          );
+        }
+      }));
     }
 
     logger.info(

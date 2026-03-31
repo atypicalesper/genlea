@@ -141,9 +141,18 @@ export class WellfoundScraper implements Scraper {
     const stage       = (await stageEl?.textContent())?.trim() ?? undefined;
 
     const locParts = location.split(',').map(s => s.trim());
-    const domain = websiteUrl
-      ? new URL(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`).hostname.replace(/^www\./, '')
-      : `${co.slug}.com`;
+    let domain: string | undefined;
+    if (websiteUrl) {
+      try {
+        domain = new URL(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`).hostname.replace(/^www\./, '');
+      } catch {
+        logger.debug({ slug: co.slug, websiteUrl }, '[wellfound] Malformed websiteUrl — skipping domain extraction');
+      }
+    }
+    if (!domain) {
+      // No real domain available — skip rather than invent a slug-based one
+      logger.debug({ slug: co.slug }, '[wellfound] No domain found — company will be filtered downstream');
+    }
 
     const rawCompany: Partial<RawCompany> = {
       name:          co.name,
@@ -158,11 +167,11 @@ export class WellfoundScraper implements Scraper {
     };
 
     // ── Open jobs on the company page ───────────────────────────────────────
-    const jobs = await this.scrapeCompanyJobs(page, co.slug, domain);
+    const jobs = domain ? await this.scrapeCompanyJobs(page, co.slug, domain) : [];
     logger.info({ company: co.name, domain, jobs: jobs.length }, '[wellfound:company] Page scraped');
 
     // ── Founders / team (visible without auth) ──────────────────────────────
-    const contacts = await this.scrapeFounders(page, domain);
+    const contacts = domain ? await this.scrapeFounders(page, domain) : [];
 
     return {
       source: 'wellfound',
