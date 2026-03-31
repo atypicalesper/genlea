@@ -1,7 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import { queueManager, discoveryQueue, enrichmentQueue, scoringQueue } from '../../core/queue.manager.js';
 import { scrapeLogRepository } from '../../storage/repositories/scrape-log.repository.js';
+import { companyRepository } from '../../storage/repositories/company.repository.js';
 import { getLastSeedAt, getSeedQueryCount } from '../../core/scheduler.js';
+import { generateRunId } from '../../utils/random.js';
 import { logger } from '../../utils/logger.js';
 
 export async function jobsRoutes(app: FastifyInstance) {
@@ -11,6 +13,23 @@ export async function jobsRoutes(app: FastifyInstance) {
     logger.debug('[api:jobs] GET /jobs/status request');
     const stats = await queueManager.getQueueStats();
     return reply.send({ success: true, data: stats });
+  });
+
+  // POST /api/jobs/rescore-all — queue a scoring job for every company in the DB
+  app.post('/jobs/rescore-all', async (_req, reply) => {
+    const runId = generateRunId();
+    logger.info({ runId }, '[api:jobs] Rescore-all requested');
+
+    const companies = await companyRepository.findMany({}, { projection: { _id: 1 } as any });
+    await Promise.all(
+      companies.map(c => queueManager.addScoringJob({ runId, companyId: c._id! }))
+    );
+
+    logger.info({ runId, queued: companies.length }, '[api:jobs] Rescore-all queued');
+    return reply.status(202).send({
+      success: true,
+      data: { runId, queued: companies.length, message: `${companies.length} scoring jobs queued` },
+    });
   });
 
   // GET /api/jobs/active — what is currently being processed

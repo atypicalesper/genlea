@@ -275,10 +275,17 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
           <h2 class="font-semibold text-gray-900">Pipeline Seeding</h2>
           <p class="text-xs text-gray-400 mt-0.5">Enqueue all 26 discovery queries across every scraper</p>
         </div>
-        <button id="seed-btn" onclick="triggerSeed()"
-          class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition">
-          🚀 Seed Now
-        </button>
+        <div class="flex gap-2">
+          <button id="seed-btn" onclick="triggerSeed()"
+            class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition">
+            🚀 Seed Now
+          </button>
+          <button id="rescore-btn" onclick="triggerRescoreAll()"
+            class="bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition"
+            title="Re-score every company with current threshold settings">
+            ⚖️ Rescore All
+          </button>
+        </div>
       </div>
       <div class="text-xs text-gray-500 space-y-1" id="cron-info">
         <div class="flex justify-between"><span>Schedule</span><span class="font-medium text-gray-700">Every 2 hours (cron)</span></div>
@@ -1004,6 +1011,23 @@ async function triggerSeed() {
   } finally {
     btn.disabled = false;
     btn.textContent = '🚀 Seed Now';
+  }
+}
+
+async function triggerRescoreAll() {
+  const btn = document.getElementById('rescore-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Queuing…';
+  try {
+    const json = await apiPost('/api/jobs/rescore-all', {});
+    const d = json.data;
+    toast('Rescore queued: ' + d.queued + ' companies');
+    loadQueueStats();
+  } catch(e) {
+    toast('Rescore failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⚖️ Rescore All';
   }
 }
 

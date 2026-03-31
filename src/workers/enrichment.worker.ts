@@ -16,10 +16,10 @@ import { settingsRepository } from '../storage/repositories/settings.repository.
 import { logger } from '../utils/logger.js';
 
 async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> {
-  const { runId, companyId, domain } = job.data;
+  const { runId, companyId, domain, force } = job.data;
   const startedAt = Date.now();
 
-  logger.info({ runId, companyId, domain }, '[enrichment.worker] Job started');
+  logger.info({ runId, companyId, domain, force }, '[enrichment.worker] Job started');
 
   try {
     const company = await companyRepository.findById(companyId);
@@ -29,8 +29,9 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
     }
 
     // ── Enrichment cooldown — skip full re-enrichment if done within 24h ────────
+    // Bypass with force=true (set by manual /api/companies/:id/enrich trigger)
     const COOLDOWN_MS = 24 * 60 * 60 * 1000;
-    if (company.lastEnrichedAt) {
+    if (!force && company.lastEnrichedAt) {
       const ageMs = Date.now() - new Date(company.lastEnrichedAt).getTime();
       if (ageMs < COOLDOWN_MS) {
         logger.info(

@@ -119,7 +119,7 @@ export async function companiesRoutes(app: FastifyInstance) {
     if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
 
     const runId = generateRunId();
-    await queueManager.addEnrichmentJob({ runId, companyId: id, domain: company.domain, sources: ['github', 'hunter', 'clearbit'] });
+    await queueManager.addEnrichmentJob({ runId, companyId: id, domain: company.domain, sources: ['github', 'hunter', 'clearbit'], force: true });
     logger.info({ id, domain: company.domain, runId }, '[api:companies] Re-enrichment queued');
     return reply.status(202).send({ success: true, data: { runId } });
   });

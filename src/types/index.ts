@@ -236,6 +236,8 @@ export interface EnrichmentJobData {
   companyId: string;
   domain: string;
   sources: ScraperSource[];
+  /** Skip the 24h cooldown — set when triggered manually via API */
+  force?: boolean;
 }
 
 export interface ScoringJobData {

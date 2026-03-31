@@ -66,6 +66,17 @@ export const jobRepository = {
     await col.updateMany({ companyId } as any, { $set: { isActive: false } });
   },
 
+  /** Mark all jobs older than `staleDays` days as inactive. Returns count updated. */
+  async deactivateStale(staleDays = 90): Promise<number> {
+    const col = getCollection<JobRaw>(COLLECTIONS.JOBS);
+    const cutoff = new Date(Date.now() - staleDays * 86_400_000);
+    const result = await col.updateMany(
+      { isActive: true, postedAt: { $lt: cutoff } } as any,
+      { $set: { isActive: false } }
+    );
+    return result.modifiedCount;
+  },
+
   async daysSinceLastPosting(companyId: string): Promise<number | null> {
     const col = getCollection<JobRaw>(COLLECTIONS.JOBS);
     const latest = await col.findOne(

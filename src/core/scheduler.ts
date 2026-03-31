@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { discoveryQueue } from './queue.manager.js';
 import { generateRunId } from '../utils/random.js';
 import { logger } from '../utils/logger.js';
+import { jobRepository } from '../storage/repositories/job.repository.js';
 import { ScraperSource } from '../types/index.js';
 
 // ── Seed queries ──────────────────────────────────────────────────────────────
@@ -103,6 +104,16 @@ export async function startScheduler(): Promise<void> {
     await enqueueSeedRound('cron').catch(err =>
       logger.error({ err }, '[scheduler] Cron seed failed')
     );
+  });
+
+  // Nightly at 03:00 — deactivate jobs older than 90 days
+  cron.schedule('0 3 * * *', async () => {
+    logger.info('[scheduler] 🧹 Stale job cleanup starting');
+    const count = await jobRepository.deactivateStale(90).catch(err => {
+      logger.error({ err }, '[scheduler] Stale job cleanup failed');
+      return 0;
+    });
+    logger.info({ deactivated: count }, '[scheduler] ✅ Stale job cleanup complete');
   });
 
   logger.info('[scheduler] ✅ Cron scheduler started — runs every 2 hours');
