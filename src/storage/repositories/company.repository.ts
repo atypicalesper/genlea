@@ -96,7 +96,7 @@ export const companyRepository = {
       return toCompany({ ...doc, _id: result.insertedId });
     }
 
-    // Merge: union arrays, keep max of numeric fields
+    // Merge: union arrays, keep max of numeric fields, always $set fresh ratio data
     const update: UpdateFilter<CompanyDoc> = {
       $set: {
         updatedAt: now,
@@ -108,13 +108,17 @@ export const companyRepository = {
         ...(data.hqCity && { hqCity: data.hqCity }),
         ...(data.hqState && { hqState: data.hqState }),
         ...(data.fundingStage && { fundingStage: data.fundingStage }),
-      },
-      $max: {
-        ...(data.employeeCount !== undefined && { employeeCount: data.employeeCount }),
-        ...(data.fundingTotalUsd !== undefined && { fundingTotalUsd: data.fundingTotalUsd }),
+        // Origin ratio is freshly computed each enrichment run — always overwrite with latest
         ...(data.originDevCount !== undefined && { originDevCount: data.originDevCount }),
         ...(data.totalDevCount !== undefined && { totalDevCount: data.totalDevCount }),
         ...(data.originRatio !== undefined && { originRatio: data.originRatio }),
+        ...(data.toleranceIncluded !== undefined && { toleranceIncluded: data.toleranceIncluded }),
+      },
+      $max: {
+        // employeeCount/fundingTotalUsd: take the larger value across sources
+        ...(data.employeeCount !== undefined && { employeeCount: data.employeeCount }),
+        ...(data.fundingTotalUsd !== undefined && { fundingTotalUsd: data.fundingTotalUsd }),
+        // score: prevent the normalizer's initial score:0 from overwriting a real scored value
         ...(data.score !== undefined && { score: data.score }),
       },
       $addToSet: {
@@ -140,9 +144,16 @@ export const companyRepository = {
     scoreBreakdown: Company['scoreBreakdown']
   ): Promise<void> {
     const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
+    const oid = new ObjectId(id);
+    // Always update the numeric score + breakdown so the dashboard shows current data
     await col.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { score, status, scoreBreakdown, updatedAt: new Date() } }
+      { _id: oid },
+      { $set: { score, scoreBreakdown, updatedAt: new Date() } }
+    );
+    // Only overwrite status if the user hasn't manually reviewed this company
+    await col.updateOne(
+      { _id: oid, manuallyReviewed: { $ne: true } },
+      { $set: { status } }
     );
     logger.info({ id, score, status }, '[company.repository] Score updated');
   },
