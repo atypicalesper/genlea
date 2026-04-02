@@ -26,9 +26,13 @@ async function main() {
   // ── contacts ───────────────────────────────────────────────────────────────
   logger.info('[db:init] Creating contacts indexes...');
   const contacts = db.collection('contacts');
-  // Unique on (email, companyId) — allows the same email across different companies (job changes)
-  // sparse so contacts with no email don't conflict
-  await contacts.createIndex({ email: 1, companyId: 1 }, { unique: true, sparse: true, name: 'email_company_unique' });
+  // Drop old email_company_unique if it exists with a different spec (sparse vs partialFilter)
+  await contacts.dropIndex('email_company_unique').catch(() => { /* not yet created — ok */ });
+  // Unique on (email, companyId) only when email is an actual string — null/missing emails are excluded
+  await contacts.createIndex(
+    { email: 1, companyId: 1 },
+    { unique: true, partialFilterExpression: { email: { $type: 'string' } }, name: 'email_company_unique' },
+  );
   await contacts.createIndex({ email: 1 }, { sparse: true, name: 'email' }); // for findByEmail lookups
   await contacts.createIndex({ companyId: 1 }, { name: 'company_id' });
   await contacts.createIndex({ companyId: 1, role: 1 }, { name: 'company_role' });
@@ -39,6 +43,17 @@ async function main() {
   logger.info('[db:init] Creating jobs indexes...');
   const jobs = db.collection('jobs');
   await jobs.createIndex({ companyId: 1, isActive: 1 }, { name: 'company_active' });
+  // Deduplicate existing jobs by (companyId, title, source) — keep the latest _id
+  const jobDups = await jobs.aggregate([
+    { $group: { _id: { companyId: '$companyId', title: '$title', source: '$source' }, ids: { $push: '$_id' }, count: { $sum: 1 } } },
+    { $match: { count: { $gt: 1 } } },
+  ]).toArray();
+  for (const dup of jobDups) {
+    const [, ...toDelete] = dup.ids; // keep first, delete rest
+    await jobs.deleteMany({ _id: { $in: toDelete } });
+  }
+  if (jobDups.length) logger.info({ removed: jobDups.length }, '[db:init] Removed duplicate jobs');
+  await jobs.dropIndex('dedup').catch(() => { /* not yet created — ok */ });
   await jobs.createIndex({ companyId: 1, title: 1, source: 1 }, { unique: true, name: 'dedup' });
   await jobs.createIndex({ postedAt: -1 }, { name: 'posted_at' });
   await jobs.createIndex({ techTags: 1 }, { name: 'tech_tags' });
