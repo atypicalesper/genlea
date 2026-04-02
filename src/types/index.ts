@@ -20,7 +20,14 @@ export type ScraperSource =
   | 'surelyremote'
   | 'website';
 
-export type ContactRole = 'CEO' | 'CTO' | 'COO' | 'Founder' | 'HR' | 'Recruiter' | 'Head of Talent' | 'Engineering Manager' | 'Unknown';
+export type ContactRole =
+  | 'CEO' | 'Founder' | 'Co-Founder'
+  | 'CTO' | 'COO' | 'CPO' | 'CFO'
+  | 'VP of Engineering' | 'VP Engineering'
+  | 'Head of Engineering' | 'Director of Engineering'
+  | 'Engineering Manager'
+  | 'HR' | 'Head of HR' | 'VP of HR' | 'Recruiter' | 'Head of Talent' | 'Talent Acquisition'
+  | 'Unknown';
 
 export type FundingStage =
   | 'Pre-seed'
@@ -165,6 +172,7 @@ export interface Contact {
   twitterUrl?: string;
   location?: string;
   isIndianOrigin?: boolean;
+  forOriginRatio?: boolean; // name collected only for Indian-dev ratio analysis — not shown in UI
   sources: ScraperSource[];
   createdAt: Date;
   updatedAt: Date;

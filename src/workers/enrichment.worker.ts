@@ -128,6 +128,7 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
               companyId,
               fullName: contact.fullName!,
               role: contact.role ?? 'Unknown',
+              forOriginRatio: true,
             })
           )
       );
@@ -149,13 +150,14 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
           teamMembers.map(person =>
             contactRepository.upsert({
               companyId,
-              fullName:    person.fullName,
-              firstName:   person.fullName.split(' ')[0],
-              lastName:    person.fullName.split(' ').at(-1),
-              role:        'Unknown',
-              linkedinUrl: person.linkedinUrl,
-              email:       person.email,
-              sources:     ['website'],
+              fullName:       person.fullName,
+              firstName:      person.fullName.split(' ')[0],
+              lastName:       person.fullName.split(' ').at(-1),
+              role:           'Unknown',
+              linkedinUrl:    person.linkedinUrl,
+              email:          person.email,
+              sources:        ['website'],
+              forOriginRatio: true,
             })
           )
         );
@@ -206,10 +208,8 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
 
     // ── 6. Dev Origin Ratio — analyse employee name list ───────────────────────
     logger.debug({ domain, companyId }, '[enrichment.worker] Origin ratio analysis');
-    const allContacts = await contactRepository.findByCompanyId(companyId);
-    const nameList = allContacts
-      .filter(c => c.fullName)
-      .map(c => ({ firstName: c.firstName, lastName: c.lastName, fullName: c.fullName }));
+    const allNames = await contactRepository.findAllNamesForOriginRatio(companyId);
+    const nameList = allNames.filter(n => n.fullName);
 
     const appSettings = await settingsRepository.get();
     const minSample   = appSettings.originRatioMinSample;

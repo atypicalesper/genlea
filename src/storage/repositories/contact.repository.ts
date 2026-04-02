@@ -14,10 +14,20 @@ export const contactRepository = {
     return doc ? toContact(doc) : null;
   },
 
+  /** Returns only real decision-maker contacts — excludes forOriginRatio-only names */
   async findByCompanyId(companyId: string): Promise<Contact[]> {
     const col = getCollection<ContactRaw>(COLLECTIONS.CONTACTS);
-    const docs = await col.find({ companyId } as any).toArray();
+    const docs = await col.find({ companyId, forOriginRatio: { $ne: true } } as any).toArray();
     return docs.map(toContact);
+  },
+
+  /** Returns ALL names including forOriginRatio samples — used only by origin ratio analysis */
+  async findAllNamesForOriginRatio(companyId: string): Promise<Pick<Contact, 'firstName' | 'lastName' | 'fullName'>[]> {
+    const col = getCollection<ContactRaw>(COLLECTIONS.CONTACTS);
+    const docs = await col.find({ companyId } as any, {
+      projection: { firstName: 1, lastName: 1, fullName: 1 },
+    }).toArray();
+    return docs.map(d => ({ firstName: d.firstName, lastName: d.lastName, fullName: d.fullName }));
   },
 
   /** Batch fetch contacts for many companies in a single query — avoids N+1 on export */
@@ -47,7 +57,7 @@ export const contactRepository = {
   },
 
   async upsert(
-    data: Partial<Contact> & { companyId: string; fullName: string; role: ContactRole }
+    data: Partial<Contact> & { companyId: string; fullName: string; role: ContactRole; forOriginRatio?: boolean }
   ): Promise<Contact> {
     const col = getCollection<ContactRaw>(COLLECTIONS.CONTACTS);
     const now = new Date();
@@ -72,10 +82,11 @@ export const contactRepository = {
         linkedinUrl:   data.linkedinUrl,
         twitterUrl:    data.twitterUrl,
         location:      data.location,
-        isIndianOrigin: data.isIndianOrigin,
-        sources:       data.sources ?? [],
-        createdAt:     now,
-        updatedAt:     now,
+        isIndianOrigin:  data.isIndianOrigin,
+        forOriginRatio:  data.forOriginRatio ?? false,
+        sources:         data.sources ?? [],
+        createdAt:       now,
+        updatedAt:       now,
       };
       const result = await col.insertOne(doc as any);
       logger.debug({ email, role: data.role }, '[contact.repository] Contact inserted');

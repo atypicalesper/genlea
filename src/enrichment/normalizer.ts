@@ -1,4 +1,4 @@
-import { RawResult, Company, Contact, Job, ScraperSource } from '../types/index.js';
+import { RawResult, Company, Contact, ContactRole, Job, ScraperSource } from '../types/index.js';
 import { normalizeDomain, normalizeEmail } from '../utils/random.js';
 import { logger } from '../utils/logger.js';
 
@@ -59,7 +59,7 @@ export const normalizer = {
       fullName,
       firstName: raw.firstName?.trim(),
       lastName: raw.lastName?.trim(),
-      role: raw.role ?? 'Unknown',
+      role: normalizeRole(raw.role),
       companyId: '', // filled in after company upsert
       email,
       emailVerified: false,
@@ -153,6 +153,29 @@ function normalizePhone(phone?: string): string | undefined {
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+}
+
+export function normalizeRole(raw?: string): ContactRole {
+  if (!raw) return 'Unknown';
+  const t = raw.toLowerCase().trim();
+
+  if (/\bco[\s-]?founder\b/.test(t))                          return 'Co-Founder';
+  if (/\bfounder\b/.test(t))                                  return 'Founder';
+  if (/\bchief\s+executive|^\s*ceo\b/.test(t))               return 'CEO';
+  if (/\bchief\s+technology|\bcto\b/.test(t))                return 'CTO';
+  if (/\bchief\s+product|\bcpo\b/.test(t))                   return 'CPO';
+  if (/\bchief\s+operating|\bcoo\b/.test(t))                 return 'COO';
+  if (/\bchief\s+financial|\bcfo\b/.test(t))                 return 'CFO';
+  if (/\bvp[\s,]+of\s+eng|\bvp[\s,]+eng|\bvice\s+president.{0,20}engineer/.test(t)) return 'VP of Engineering';
+  if (/\bvp[\s,]+of\s+hr|\bvp[\s,]+hr|\bvice\s+president.{0,20}(human\s+res|people)/.test(t)) return 'VP of HR';
+  if (/\bhead\s+of\s+engineer|\bhead\s+of\s+tech\b/.test(t)) return 'Head of Engineering';
+  if (/\bdirector.{0,15}engineer/.test(t))                   return 'Director of Engineering';
+  if (/\bengineering\s+manager|\beng\s+manager/.test(t))     return 'Engineering Manager';
+  if (/\bhead\s+of\s+(talent|recruiting|people|hr)/.test(t)) return 'Head of Talent';
+  if (/\btalent\s+acquisition|\brecruit/.test(t))            return 'Recruiter';
+  if (/\bhuman\s+res|\bhr\s+(manager|lead|director|head|partner)|\bpeople\s+(ops|partner|manager)/.test(t)) return 'HR';
+
+  return 'Unknown';
 }
 
 function dedupeArray(arr: string[]): string[] {

@@ -234,12 +234,13 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
           for (const rawContact of raw.contacts ?? []) {
             const contact = normalizer.normalizeContact(rawContact, raw.source);
             if (!contact?.fullName) continue;
+            if (!contact.role || contact.role === 'Unknown') continue; // only save decision-makers
             contactSaves.push(
               contactRepository.upsert({
                 ...contact,
                 companyId: saved._id!,
                 fullName:  contact.fullName,
-                role:      contact.role ?? 'Unknown',
+                role:      contact.role,
               }).catch(err => logger.debug({ err, domain: saved.domain }, '[discovery.worker] Contact dupe — skipped'))
             );
           }
