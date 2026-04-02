@@ -3,10 +3,19 @@
  *
  * AGENT_LLM_PROVIDER=groq        → uses groq-sdk  (default, GROQ_API_KEY required)
  * AGENT_LLM_PROVIDER=anthropic   → uses @anthropic-ai/sdk (ANTHROPIC_API_KEY required)
+ * AGENT_LLM_PROVIDER=ollama      → local Ollama server (free, no API key, install Ollama first)
  *
  * AGENT_LLM_MODEL overrides the default model for the selected provider.
- * Groq default  : llama-3.1-8b-instant (500k TPD free tier; set AGENT_LLM_MODEL to override)
+ * Groq default    : llama-3.1-8b-instant (500k TPD free tier)
  * Anthropic default: claude-haiku-4-5-20251001
+ * Ollama default  : llama3.1:8b  (good tool-use; needs ~6GB RAM)
+ *                   alternatives: qwen2.5:7b (stronger tool-use), mistral-nemo
+ *
+ * Ollama setup:
+ *   brew install ollama
+ *   ollama pull llama3.1:8b     # or qwen2.5:7b
+ *   ollama serve                # starts on http://localhost:11434
+ *   Set AGENT_LLM_PROVIDER=ollama in .env (no API key needed)
  */
 
 import Groq from 'groq-sdk';
@@ -84,6 +93,70 @@ async function groqChat(
     toolCalls,
     stopReason: choice.finish_reason === 'tool_calls' ? 'tool_use'
               : choice.finish_reason === 'length'     ? 'max_tokens'
+              : 'end_turn',
+  };
+}
+
+// ── Provider: Ollama (local, OpenAI-compatible) ───────────────────────────────
+
+async function ollamaChat(
+  messages: LLMMessage[],
+  tools: ToolDef[],
+  model: string,
+): Promise<LLMResponse> {
+  const baseUrl = (process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434').replace(/\/$/, '');
+
+  const ollamaMessages = messages.map(m => {
+    if (m.role === 'tool') {
+      return { role: 'tool', content: m.content, tool_call_id: m.tool_call_id, name: m.name };
+    }
+    if (m.role === 'assistant' && m.tool_calls?.length) {
+      return { role: 'assistant', content: m.content ?? '', tool_calls: m.tool_calls };
+    }
+    return { role: m.role, content: m.content };
+  });
+
+  const body: Record<string, unknown> = {
+    model,
+    messages: ollamaMessages,
+    stream: false,
+    options: { temperature: 0.2, num_predict: 800 },
+  };
+
+  if (tools.length) {
+    body['tools'] = tools.map(t => ({
+      type: 'function',
+      function: { name: t.name, description: t.description, parameters: t.parameters },
+    }));
+  }
+
+  const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => res.statusText);
+    throw new Error(`Ollama error ${res.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const json: any = await res.json();
+  const choice = json.choices?.[0];
+  const msg = choice?.message ?? {};
+  const rawCalls: any[] = msg.tool_calls ?? [];
+
+  const toolCalls: ToolCall[] = rawCalls.map((tc: any) => ({
+    id: tc.id ?? `tc_${Math.random().toString(36).slice(2)}`,
+    name: tc.function.name,
+    args: (() => { try { return typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : tc.function.arguments; } catch { return {}; } })(),
+  }));
+
+  return {
+    content: msg.content ?? '',
+    toolCalls,
+    stopReason: choice?.finish_reason === 'tool_calls' ? 'tool_use'
+              : choice?.finish_reason === 'length'     ? 'max_tokens'
               : 'end_turn',
   };
 }
@@ -172,9 +245,10 @@ const PROVIDER = (process.env['AGENT_LLM_PROVIDER'] ?? 'groq').toLowerCase();
 const DEFAULT_MODELS: Record<string, string> = {
   groq:      'llama-3.1-8b-instant',   // 500k TPD free tier (vs 100k for 70b)
   anthropic: 'claude-haiku-4-5-20251001',
+  ollama:    'llama3.1:8b',            // free, local — needs ollama serve
 };
 
-export const MODEL = process.env['AGENT_LLM_MODEL'] ?? DEFAULT_MODELS[PROVIDER] ?? 'llama-3.3-70b-versatile';
+export const MODEL = process.env['AGENT_LLM_MODEL'] ?? DEFAULT_MODELS[PROVIDER] ?? 'llama-3.1-8b-instant';
 
 export async function llmChat(
   messages: LLMMessage[],
@@ -182,6 +256,7 @@ export async function llmChat(
 ): Promise<LLMResponse> {
   logger.debug({ provider: PROVIDER, model: MODEL, tools: tools.map(t => t.name) }, '[llm] chat');
   if (PROVIDER === 'anthropic') return anthropicChat(messages, tools, MODEL);
+  if (PROVIDER === 'ollama')    return ollamaChat(messages, tools, MODEL);
   return groqChat(messages, tools, MODEL);
 }
 
