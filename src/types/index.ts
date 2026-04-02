@@ -18,7 +18,8 @@ export type ScraperSource =
   | 'clearbit'
   | 'indeed'
   | 'surelyremote'
-  | 'website';
+  | 'website'
+  | 'agent';
 
 export type ContactRole =
   | 'CEO' | 'Founder' | 'Co-Founder'
