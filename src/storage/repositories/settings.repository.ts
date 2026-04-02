@@ -7,6 +7,9 @@ export interface AppSettings {
   leadScoreHotThreshold: number;        // score to become hot — default 55
   leadScoreWarmThreshold: number;       // score to become warm — default 38
   leadScoreColdThreshold: number;       // score to become cold (below = disqualified) — default 20
+  workerConcurrencyDiscovery: number;   // concurrent discovery jobs — default 10
+  workerConcurrencyEnrichment: number;  // concurrent enrichment jobs — default 15
+  workerConcurrencyScoring: number;     // concurrent scoring jobs — default 30
   updatedAt: Date;
 }
 
@@ -19,6 +22,9 @@ const DEFAULTS: AppSettings = {
   leadScoreHotThreshold:        55,
   leadScoreWarmThreshold:       38,
   leadScoreColdThreshold:       20,
+  workerConcurrencyDiscovery:   10,
+  workerConcurrencyEnrichment:  15,
+  workerConcurrencyScoring:     30,
   updatedAt: new Date(),
 };
 

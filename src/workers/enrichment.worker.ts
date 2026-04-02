@@ -211,12 +211,24 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
 
 export async function startEnrichmentWorker(): Promise<void> {
   await connectMongo();
+  const initialSettings = await settingsRepository.get();
   const worker = createWorker<EnrichmentJobData>(
     QUEUE_NAMES.ENRICHMENT,
     processEnrichmentJob,
-    3 // 3 concurrent enrichment jobs
+    initialSettings.workerConcurrencyEnrichment,
   );
-  logger.info('[enrichment.worker] Worker started — listening for enrichment jobs');
+  logger.info({ concurrency: initialSettings.workerConcurrencyEnrichment }, '[enrichment.worker] Worker started — listening for enrichment jobs');
+
+  setInterval(async () => {
+    try {
+      const s = await settingsRepository.get();
+      const target = s.workerConcurrencyEnrichment;
+      if (worker.concurrency !== target) {
+        worker.concurrency = target;
+        logger.info({ concurrency: target }, '[enrichment.worker] Concurrency updated');
+      }
+    } catch { /* ignore */ }
+  }, 10_000);
 
   process.on('SIGTERM', async () => {
     logger.info('[enrichment.worker] SIGTERM received — draining and shutting down');

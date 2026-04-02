@@ -14,6 +14,7 @@ import {
   indeedScraper, zoomInfoScraper, glassdoorScraper, surelyRemoteScraper,
 } from '../scrapers/discovery/index.js';
 import { deduplicateCompanies } from '../enrichment/deduplicator.js';
+import { settingsRepository } from '../storage/repositories/settings.repository.js';
 import { logger } from '../utils/logger.js';
 import { generateRunId } from '../utils/random.js';
 
@@ -219,12 +220,24 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 export async function startDiscoveryWorker(): Promise<void> {
   await connectMongo();
+  const initialSettings = await settingsRepository.get();
   const worker = createWorker<DiscoveryJobData>(
     QUEUE_NAMES.DISCOVERY,
     processDiscoveryJob,
-    2 // max 2 concurrent discovery jobs
+    initialSettings.workerConcurrencyDiscovery,
   );
-  logger.info('[discovery.worker] Worker started');
+  logger.info({ concurrency: initialSettings.workerConcurrencyDiscovery }, '[discovery.worker] Worker started');
+
+  setInterval(async () => {
+    try {
+      const s = await settingsRepository.get();
+      const target = s.workerConcurrencyDiscovery;
+      if (worker.concurrency !== target) {
+        worker.concurrency = target;
+        logger.info({ concurrency: target }, '[discovery.worker] Concurrency updated');
+      }
+    } catch { /* ignore */ }
+  }, 10_000);
 
   process.on('SIGTERM', async () => {
     logger.info('[discovery.worker] SIGTERM received — shutting down');

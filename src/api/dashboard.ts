@@ -359,6 +359,48 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Worker Concurrency -->
+    <div class="bg-white border border-gray-200 rounded-xl p-5 md:col-span-2">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="font-semibold text-gray-900">Worker Concurrency</h2>
+          <p class="text-xs text-gray-400 mt-0.5">Live — applied within 10 seconds, no restart needed</p>
+        </div>
+        <button onclick="saveSettings()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition">
+          Save
+        </button>
+      </div>
+      <div class="grid grid-cols-3 gap-6">
+        <div>
+          <div class="flex justify-between items-baseline mb-1">
+            <label class="text-xs font-medium text-gray-600">Discovery</label>
+            <span class="text-xs font-bold text-blue-600" id="concurrency-discovery-display">10</span>
+          </div>
+          <input type="range" id="s-concurrency-discovery" min="1" max="20" step="1" value="10"
+            oninput="document.getElementById('concurrency-discovery-display').textContent=this.value" class="w-full"/>
+          <div class="flex justify-between text-[10px] text-gray-400 mt-0.5"><span>1</span><span>10</span><span>20</span></div>
+        </div>
+        <div>
+          <div class="flex justify-between items-baseline mb-1">
+            <label class="text-xs font-medium text-gray-600">Enrichment</label>
+            <span class="text-xs font-bold text-indigo-600" id="concurrency-enrichment-display">15</span>
+          </div>
+          <input type="range" id="s-concurrency-enrichment" min="1" max="30" step="1" value="15"
+            oninput="document.getElementById('concurrency-enrichment-display').textContent=this.value" class="w-full"/>
+          <div class="flex justify-between text-[10px] text-gray-400 mt-0.5"><span>1</span><span>15</span><span>30</span></div>
+        </div>
+        <div>
+          <div class="flex justify-between items-baseline mb-1">
+            <label class="text-xs font-medium text-gray-600">Scoring</label>
+            <span class="text-xs font-bold text-emerald-600" id="concurrency-scoring-display">30</span>
+          </div>
+          <input type="range" id="s-concurrency-scoring" min="1" max="50" step="1" value="30"
+            oninput="document.getElementById('concurrency-scoring-display').textContent=this.value" class="w-full"/>
+          <div class="flex justify-between text-[10px] text-gray-400 mt-0.5"><span>1</span><span>25</span><span>50</span></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Currently Processing -->
     <div class="bg-white border border-gray-200 rounded-xl p-5 md:col-span-2">
       <div class="flex items-center justify-between mb-3">
@@ -1219,6 +1261,15 @@ async function loadSettings() {
     document.getElementById('hotv-display').textContent   = d.leadScoreHotVerifiedThreshold  || 80;
     document.getElementById('hot-display').textContent    = d.leadScoreHotThreshold          || 55;
     document.getElementById('warm-display').textContent   = d.leadScoreWarmThreshold         || 38;
+    const cd = d.workerConcurrencyDiscovery  || 10;
+    const ce = d.workerConcurrencyEnrichment || 15;
+    const cs = d.workerConcurrencyScoring    || 30;
+    document.getElementById('s-concurrency-discovery').value  = cd;
+    document.getElementById('s-concurrency-enrichment').value = ce;
+    document.getElementById('s-concurrency-scoring').value    = cs;
+    document.getElementById('concurrency-discovery-display').textContent  = cd;
+    document.getElementById('concurrency-enrichment-display').textContent = ce;
+    document.getElementById('concurrency-scoring-display').textContent    = cs;
     updateRatioDisplay();
   } catch(e) { /* silent */ }
 }
@@ -1244,6 +1295,9 @@ async function saveSettings() {
       leadScoreHotVerifiedThreshold: parseInt(document.getElementById('s-hotv-threshold').value),
       leadScoreHotThreshold:         parseInt(document.getElementById('s-hot-threshold').value),
       leadScoreWarmThreshold:        parseInt(document.getElementById('s-warm-threshold').value),
+      workerConcurrencyDiscovery:    parseInt(document.getElementById('s-concurrency-discovery').value),
+      workerConcurrencyEnrichment:   parseInt(document.getElementById('s-concurrency-enrichment').value),
+      workerConcurrencyScoring:      parseInt(document.getElementById('s-concurrency-scoring').value),
     });
     const el = document.getElementById('settings-saved');
     el.classList.remove('hidden');

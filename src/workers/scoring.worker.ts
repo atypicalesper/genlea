@@ -97,12 +97,24 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
 
 export async function startScoringWorker(): Promise<void> {
   await connectMongo();
+  const initialSettings = await settingsRepository.get();
   const worker = createWorker<ScoringJobData>(
     QUEUE_NAMES.SCORING,
     processScoringJob,
-    5 // scoring is cheap, can run more concurrently
+    initialSettings.workerConcurrencyScoring,
   );
-  logger.info('[scoring.worker] Worker started');
+  logger.info({ concurrency: initialSettings.workerConcurrencyScoring }, '[scoring.worker] Worker started');
+
+  setInterval(async () => {
+    try {
+      const s = await settingsRepository.get();
+      const target = s.workerConcurrencyScoring;
+      if (worker.concurrency !== target) {
+        worker.concurrency = target;
+        logger.info({ concurrency: target }, '[scoring.worker] Concurrency updated');
+      }
+    } catch { /* ignore */ }
+  }, 10_000);
 
   process.on('SIGTERM', async () => {
     logger.info('[scoring.worker] SIGTERM received — shutting down');
