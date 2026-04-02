@@ -684,6 +684,7 @@ function switchTab(name) {
   if (name === 'control')   { loadQueueStats(); loadCronInfo(); loadActiveJobs(); }
   if (name === 'logs')      loadLogs();
   if (name === 'analytics') loadAnalytics();
+  location.hash = name;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1449,8 +1450,15 @@ function exportCSV() {
 // INIT
 // ══════════════════════════════════════════════════════════════════════════════
 
+const _validTabs = ['leads','control','logs','analytics','queues'];
+const _hashTab = location.hash.replace('#','');
+if (_validTabs.includes(_hashTab)) {
+  switchTab(_hashTab);
+  if (_hashTab !== 'leads') loadCompanies(); // keep data warm in background
+} else {
+  loadCompanies();
+}
 loadStats();
-loadCompanies();
 loadSettings();
 loadActiveJobs();
 
