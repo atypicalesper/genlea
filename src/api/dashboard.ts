@@ -909,8 +909,9 @@ async function loadCompanies() {
       const contactChips = rowContacts.slice(0, 3).map(function(p) {
         const cls = roleColors[p.role] || 'bg-gray-100 text-gray-600';
         const emailDot = p.email ? (p.emailVerified ? ' <span class="text-green-500">●</span>' : ' <span class="text-yellow-400">●</span>') : '';
+        const firstName = p.fullName ? esc(p.fullName.split(' ')[0]) : '?';
         return '<div class="' + cls + ' px-1.5 py-0.5 rounded text-[10px] flex items-center gap-0.5 leading-tight">' +
-          esc(p.fullName.split(' ')[0]) + ' · ' + esc(p.role) + emailDot +
+          firstName + ' · ' + esc(p.role || '?') + emailDot +
         '</div>';
       }).join('');
       const contactsCell = rowContacts.length
