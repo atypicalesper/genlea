@@ -72,7 +72,7 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
 
     // ── Enrichment cooldown — skip full re-enrichment if done within 24h ────────
     // Bypass with force=true (set by manual /api/companies/:id/enrich trigger)
-    const COOLDOWN_MS = 24 * 60 * 60 * 1000;
+    const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — manual force=true to bypass
     if (!force && company.lastEnrichedAt) {
       const ageMs = Date.now() - new Date(company.lastEnrichedAt).getTime();
       if (ageMs < COOLDOWN_MS) {
