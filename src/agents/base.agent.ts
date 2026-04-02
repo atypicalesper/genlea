@@ -41,6 +41,34 @@ const DONE_TOOL_DEF: ToolDef = {
   },
 };
 
+const TOOL_RESULT_MAX_CHARS = 600;
+
+/**
+ * Slim down a tool result before appending to message history.
+ * The LLM already reasoned over the full result — subsequent iterations
+ * only need a short summary to maintain context, not the full payload.
+ */
+function truncateToolResult(result: unknown, toolName: string): unknown {
+  const json = typeof result === 'string' ? result : JSON.stringify(result);
+  if (json.length <= TOOL_RESULT_MAX_CHARS) return result;
+
+  // For scrape_source: keep counts + first 3 company names only
+  if (toolName === 'scrape_source' && typeof result === 'object' && result !== null) {
+    const r = result as Record<string, unknown>;
+    const companies = (r['companies'] as unknown[]) ?? [];
+    return {
+      source:         r['source'],
+      rawCount:       r['rawCount'],
+      filteredCount:  r['filteredCount'],
+      companies:      companies.slice(0, 3).map((c: any) => ({ name: c.name, domain: c.domain })),
+      truncated:      `${companies.length} companies total — first 3 shown`,
+    };
+  }
+
+  // Generic fallback: truncate JSON string
+  return { _truncated: json.slice(0, TOOL_RESULT_MAX_CHARS) + `… [${json.length} chars total]` };
+}
+
 export async function runAgent(
   config: AgentConfig,
   userMessage: string,
@@ -113,7 +141,10 @@ export async function runAgent(
       }
 
       toolCallLog.push({ tool: call.name, args: call.args, result });
-      messages.push(toolResult(call.id, call.name, result));
+      // Truncate large tool results in message history — LLM already reasoned over
+      // the full result; keeping a slim summary prevents history bloat across iterations.
+      const resultForHistory = truncateToolResult(result, call.name);
+      messages.push(toolResult(call.id, call.name, resultForHistory));
     }
   }
 

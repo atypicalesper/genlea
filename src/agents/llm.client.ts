@@ -66,7 +66,7 @@ async function groqChat(
     tools: groqTools.length ? groqTools : undefined,
     tool_choice: groqTools.length ? 'auto' : undefined,
     temperature: 0.2,
-    max_tokens: 2048,
+    max_tokens: 800,
   });
 
   const choice = res.choices[0]!;
@@ -141,7 +141,7 @@ async function anthropicChat(
     system: systemMsg,
     messages: chatMsgs,
     tools: anthropicTools.length ? anthropicTools : undefined,
-    max_tokens: 2048,
+    max_tokens: 800,
     temperature: 0.2,
   });
 

@@ -190,18 +190,18 @@ function makeHandlers(job: DiscoveryJobData): Record<string, ToolHandler> {
         });
 
         logger.info({ source, raw: rawResults.length, filtered: filtered.length }, '[discovery.agent] Scraped');
+        // Return slim objects — LLM only needs name/domain/employees/stack to reason.
+        // Full data (linkedinUrl, hqCountry etc.) is passed through save_companies.
         return {
           source,
-          rawCount: rawResults.length,
+          rawCount:      rawResults.length,
           filteredCount: filtered.length,
           companies: filtered.map(c => ({
             name:          c.name,
             domain:        c.domain,
-            linkedinUrl:   c.linkedinUrl,
             employeeCount: c.employeeCount,
             fundingStage:  c.fundingStage,
-            techStack:     c.techStack,
-            hqCountry:     c.hqCountry,
+            techStack:     (c.techStack ?? []).slice(0, 4), // cap tags sent to LLM
             source,
           })),
         };
