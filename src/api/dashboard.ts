@@ -26,6 +26,7 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
     .badge-processing{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;}
     .badge-enriching{background:#ecfdf5;color:#059669;border:1px solid #6ee7b7;}
     .badge-scoring{background:#fdf4ff;color:#9333ea;border:1px solid #e9d5ff;}
+    .badge-watchlist{background:#fff7ed;color:#b45309;border:1px solid #fcd34d;}
     @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
     .live-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor;margin-right:3px;animation:pulse-dot 1.2s ease-in-out infinite;}
     .badge-success{background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;}

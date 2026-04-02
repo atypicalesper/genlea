@@ -26,9 +26,12 @@ export type ContactRole =
   | 'CEO' | 'Founder' | 'Co-Founder'
   | 'CTO' | 'COO' | 'CPO' | 'CFO'
   | 'VP of Engineering' | 'VP Engineering'
+  | 'VP of Product' | 'VP of Technology'
   | 'Head of Engineering' | 'Director of Engineering'
+  | 'Head of Product' | 'Director of Product'
+  | 'Head of Technology' | 'Director of Technology'
   | 'Engineering Manager'
-  | 'HR' | 'Head of HR' | 'VP of HR' | 'Recruiter' | 'Head of Talent' | 'Talent Acquisition'
+  | 'HR' | 'Head of HR' | 'VP of HR' | 'Head of People' | 'Recruiter' | 'Head of Talent' | 'Talent Acquisition'
   | 'Unknown';
 
 export type FundingStage =
@@ -45,7 +48,7 @@ export type FundingStage =
 
 export type LeadStatus = 'hot_verified' | 'hot' | 'warm' | 'cold' | 'disqualified' | 'pending';
 
-export type PipelineStatus = 'discovered' | 'enriching' | 'enriched' | 'scoring' | 'scored';
+export type PipelineStatus = 'discovered' | 'watchlist' | 'enriching' | 'enriched' | 'scoring' | 'scored';
 
 export type ScrapeJobStatus = 'queued' | 'processing' | 'success' | 'failed' | 'partial' | 'skipped';
 

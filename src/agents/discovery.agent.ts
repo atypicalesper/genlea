@@ -68,23 +68,29 @@ Your goal: find tech companies with 10–200 employees that are actively hiring 
 Target profile:
 - Company size: 10–200 employees
 - Age: founded within the last 7 years (2018–present) — includes seed-stage startups AND growth-stage companies 4–7 years old
-- Hiring: actively posting software engineering roles
-- Verticals: SaaS, AI/ML, Fintech, HealthTech, DevTools, B2B software
+- Hiring: actively posting software engineering roles in the target tech stack
+- Verticals (include variety): SaaS, AI/ML, Fintech, HealthTech, DevTools, B2B Software, EdTech, LegalTech, PropTech, InsurTech, Cybersecurity, MarTech, HRTech, CleanTech, LogisticsTech, E-commerce Tech, Data & Analytics, API Platforms, CRMTech, AgriTech
 - Funding: pre-seed to Series C (not bootstrapped micro-businesses or Series D+ mega-rounds)
 
 Available sources: explorium, wellfound, linkedin, indeed, crunchbase, apollo, glassdoor, surelyremote
+
+Hiring status — set hiringInStack per company:
+- Job board sources (wellfound, linkedin, indeed, glassdoor, surelyremote): companies returned ARE actively hiring → hiringInStack: true
+- Database sources (explorium, crunchbase, apollo): hiring status is unknown → hiringInStack: false (enrichment will verify later)
+- If a result includes job titles/open roles that match the target tech stack keywords: hiringInStack: true regardless of source
 
 Decision rules:
 1. Always start with the source specified in the task. If it returns < 5 results, automatically try 2–3 other sources with the same or adapted keywords.
 2. If a source returns an error or is unavailable, skip it and try the next best source.
 3. Good fallback order: explorium → wellfound → linkedin → indeed → glassdoor → crunchbase → apollo → surelyremote
 4. explorium uses API-based company search — very reliable, no browser needed. Prefer it when available.
-4. Adapt keywords when expanding — e.g. if "startup backend engineer" returns little, try "growth stage tech company software engineer" or "series b saas engineer".
-5. Stop when you have ≥ 15 valid companies OR have tried all available sources.
-6. Never return large enterprises (banks, consulting firms, FAANG, >200 employees) — the blocklist handles most, but use your judgment.
-7. A 5–7 year old company with strong engineering hiring is a better lead than a 1-year-old startup with zero team.
+5. Adapt keywords when expanding — e.g. if "startup backend engineer" returns little, try "growth stage tech company software engineer" or "series b saas engineer".
+6. Stop when you have ≥ 15 valid companies OR have tried all available sources.
+7. Never return large enterprises (banks, consulting firms, FAANG, >200 employees) — the blocklist handles most, but use your judgment.
+8. A 5–7 year old company with strong engineering hiring is a better lead than a 1-year-old startup with zero team.
+9. Save ALL valid companies — even if not currently hiring in the target stack. These go on a watchlist and will be refreshed automatically.
 
-After collecting results, call save_companies with all discovered companies and signal_done.`;
+After collecting results, call save_companies with all discovered companies (set hiringInStack accurately per company) and signal_done.`;
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
 
@@ -116,7 +122,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'save_companies',
-    description: 'Save all valid discovered companies to the database and queue them for enrichment. Call once when done collecting.',
+    description: 'Save all valid discovered companies to the database. Companies actively hiring in the target stack are queued for enrichment; others go on a watchlist for later refresh. Call once when done collecting.',
     parameters: {
       type: 'object',
       properties: {
@@ -126,14 +132,15 @@ const TOOLS: ToolDef[] = [
           items: {
             type: 'object',
             properties: {
-              name:          { type: 'string' },
-              domain:        { type: 'string' },
-              linkedinUrl:   { type: 'string' },
-              employeeCount: { type: 'number' },
-              fundingStage:  { type: 'string' },
-              techStack:     { type: 'array', items: { type: 'string' } },
-              hqCountry:     { type: 'string' },
-              source:        { type: 'string' },
+              name:           { type: 'string' },
+              domain:         { type: 'string' },
+              linkedinUrl:    { type: 'string' },
+              employeeCount:  { type: 'number' },
+              fundingStage:   { type: 'string' },
+              techStack:      { type: 'array', items: { type: 'string' } },
+              hqCountry:      { type: 'string' },
+              source:         { type: 'string' },
+              hiringInStack:  { type: 'boolean', description: 'True if company is confirmed to be actively hiring in the target tech stack. False if unknown (database source) or not hiring.' },
             },
             required: ['name', 'domain'],
           },
@@ -208,11 +215,17 @@ function makeHandlers(job: DiscoveryJobData): Record<string, ToolHandler> {
     save_companies: async ({ companies }) => {
       const list = companies as Array<Record<string, unknown>>;
       let saved = 0;
+      let watchlisted = 0;
       let skipped = 0;
 
       for (const co of list) {
         const domain = normalizeDomain(String(co.domain ?? ''));
         if (!domain || !co.name) { skipped++; continue; }
+
+        // hiringInStack: true  → discovered + enqueue for enrichment
+        // hiringInStack: false → watchlist (no enrichment until refreshed)
+        const hiringInStack = co.hiringInStack !== false; // default true if omitted
+        const pipelineStatus = hiringInStack ? 'discovered' : 'watchlist';
 
         try {
           const company = await companyRepository.upsert({
@@ -224,45 +237,49 @@ function makeHandlers(job: DiscoveryJobData): Record<string, ToolHandler> {
             techStack:      co.techStack as string[] | undefined,
             hqCountry:      (co.hqCountry as string | undefined) ?? 'US',
             sources:        [co.source as string ?? job.source],
-            pipelineStatus: 'discovered',
+            pipelineStatus,
           } as any);
 
-          // Fire-and-forget Hunter contact pre-population — don't block the save
-          if (process.env['HUNTER_API_KEY']) {
-            hunterScraper.enrichDomain(domain).then(async result => {
-              if (!result?.contacts?.length) return;
-              for (const c of result.contacts) {
-                if (!c.fullName || !c.role) continue;
-                const role = normalizeRole(c.role as string);
-                if (role === 'Unknown') continue;
-                await contactRepository.upsert({
-                  companyId:       company._id!,
-                  fullName:        c.fullName,
-                  firstName:       c.firstName,
-                  lastName:        c.lastName,
-                  role,
-                  email:           c.email,
-                  emailConfidence: c.emailConfidence ?? 0,
-                  linkedinUrl:     c.linkedinUrl,
-                  sources:         ['hunter'],
-                  forOriginRatio:  false,
-                }).catch(() => {});
-              }
-            }).catch(() => {}); // silent — enrichment phase will retry
-          }
+          if (hiringInStack) {
+            // Fire-and-forget Hunter contact pre-population
+            if (process.env['HUNTER_API_KEY']) {
+              hunterScraper.enrichDomain(domain).then(async result => {
+                if (!result?.contacts?.length) return;
+                for (const c of result.contacts) {
+                  if (!c.fullName || !c.role) continue;
+                  const role = normalizeRole(c.role as string);
+                  if (role === 'Unknown') continue;
+                  await contactRepository.upsert({
+                    companyId:       company._id!,
+                    fullName:        c.fullName,
+                    firstName:       c.firstName,
+                    lastName:        c.lastName,
+                    role,
+                    email:           c.email,
+                    emailConfidence: c.emailConfidence ?? 0,
+                    linkedinUrl:     c.linkedinUrl,
+                    sources:         ['hunter'],
+                    forOriginRatio:  false,
+                  }).catch(() => {});
+                }
+              }).catch(() => {});
+            }
 
-          await queueManager.addEnrichmentJob({
-            runId:     job.runId,
-            companyId: company._id!,
-            domain:    company.domain,
-            sources:   ['github', 'hunter', 'clearbit'],
-          });
-          saved++;
+            await queueManager.addEnrichmentJob({
+              runId:     job.runId,
+              companyId: company._id!,
+              domain:    company.domain,
+              sources:   ['github', 'hunter', 'clearbit'],
+            });
+            saved++;
+          } else {
+            watchlisted++;
+          }
         } catch { skipped++; }
       }
 
-      logger.info({ saved, skipped }, '[discovery.agent] Companies saved');
-      return { saved, skipped, total: list.length };
+      logger.info({ saved, watchlisted, skipped }, '[discovery.agent] Companies saved');
+      return { saved, watchlisted, skipped, total: list.length };
     },
   };
 }
@@ -297,7 +314,7 @@ Location: ${query.location ?? 'United States'}
 Target limit: ${query.limit ?? 25} companies
 
 Start with ${source}. If you get fewer than 5 results or it fails, expand to other sources using similar keywords.
-Prefer companies in: SaaS, AI/ML, Fintech, HealthTech, DevTools.
+Prefer companies in: SaaS, AI/ML, BioTech,  Fintech, HealthTech, DevTools.
 Target size: 10–200 employees. Age: founded 2018–present (up to ~7 years old). Funding: pre-seed to Series C.
 A company founded 5–6 years ago that's actively hiring engineers is a perfect lead — do not skip it just because it's not "early stage".
 `.trim();

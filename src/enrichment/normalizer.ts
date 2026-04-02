@@ -167,11 +167,18 @@ export function normalizeRole(raw?: string): ContactRole {
   if (/\bchief\s+operating|\bcoo\b/.test(t))                 return 'COO';
   if (/\bchief\s+financial|\bcfo\b/.test(t))                 return 'CFO';
   if (/\bvp[\s,]+of\s+eng|\bvp[\s,]+eng|\bvice\s+president.{0,20}engineer/.test(t)) return 'VP of Engineering';
+  if (/\bvp[\s,]+of\s+product|\bvp[\s,]+product|\bvice\s+president.{0,20}product/.test(t)) return 'VP of Product';
+  if (/\bvp[\s,]+of\s+tech(?!nical)|\bvp[\s,]+tech\b|\bvice\s+president.{0,20}technolog/.test(t)) return 'VP of Technology';
   if (/\bvp[\s,]+of\s+hr|\bvp[\s,]+hr|\bvice\s+president.{0,20}(human\s+res|people)/.test(t)) return 'VP of HR';
-  if (/\bhead\s+of\s+engineer|\bhead\s+of\s+tech\b/.test(t)) return 'Head of Engineering';
+  if (/\bhead\s+of\s+engineer|\bhead\s+of\s+tech\b|\bdept\.?\s+(head|director).{0,15}engineer/.test(t)) return 'Head of Engineering';
+  if (/\bhead\s+of\s+product/.test(t))                       return 'Head of Product';
+  if (/\bhead\s+of\s+technolog/.test(t))                     return 'Head of Technology';
   if (/\bdirector.{0,15}engineer/.test(t))                   return 'Director of Engineering';
+  if (/\bdirector.{0,15}product/.test(t))                    return 'Director of Product';
+  if (/\bdirector.{0,15}technolog/.test(t))                  return 'Director of Technology';
   if (/\bengineering\s+manager|\beng\s+manager/.test(t))     return 'Engineering Manager';
-  if (/\bhead\s+of\s+(talent|recruiting|people|hr)/.test(t)) return 'Head of Talent';
+  if (/\bhead\s+of\s+people\b/.test(t))                      return 'Head of People';
+  if (/\bhead\s+of\s+(talent|recruiting|hr)/.test(t))        return 'Head of Talent';
   if (/\btalent\s+acquisition|\brecruit/.test(t))            return 'Recruiter';
   if (/\bhuman\s+res|\bhr\s+(manager|lead|director|head|partner)|\bpeople\s+(ops|partner|manager)/.test(t)) return 'HR';
 
