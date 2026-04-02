@@ -12,7 +12,43 @@ import { deduplicateContacts } from '../enrichment/deduplicator.js';
 import { githubScraper, hunterScraper, clearbitScraper } from '../scrapers/enrichment/index.js';
 import { websiteTeamScraper } from '../enrichment/website-team.enricher.js';
 import { settingsRepository } from '../storage/repositories/settings.repository.js';
+import axios from 'axios';
 import { logger } from '../utils/logger.js';
+
+// ── Defunct/shutdown company signals ─────────────────────────────────────────
+const DEFUNCT_HTML_PATTERNS = [
+  /domain\s+(is\s+)?for\s+sale/i,
+  /this\s+domain\s+has\s+(expired|been\s+suspended)/i,
+  /account\s+suspended/i,
+  /site\s+(is\s+)?coming\s+soon/i,
+  /under\s+construction/i,
+  /parked\s+(free\s+)?by\s+/i,
+  /buy\s+this\s+domain/i,
+  /this\s+page\s+(is\s+)?intentionally\s+left\s+blank/i,
+  /company\s+(has\s+)?(closed|shut\s+down|ceased\s+operations)/i,
+  /we\s+(are\s+|have\s+)?shut(ting)?\s+down/i,
+  /no\s+longer\s+in\s+(business|operation)/i,
+];
+
+async function isDefunct(domain: string, websiteUrl?: string): Promise<boolean> {
+  const url = websiteUrl || `https://${domain}`;
+  try {
+    const res = await axios.get<string>(url, {
+      timeout: 8000,
+      maxRedirects: 3,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' },
+      validateStatus: () => true, // don't throw on 4xx/5xx
+    });
+    // Hard 404 on the root domain — almost certainly dead
+    if (res.status === 404) return true;
+    const html = typeof res.data === 'string' ? res.data : '';
+    return DEFUNCT_HTML_PATTERNS.some(re => re.test(html));
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code ?? '';
+    // DNS failure or connection refused = domain is dead
+    return ['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET'].includes(code);
+  }
+}
 
 async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> {
   const { runId, companyId, domain, force } = job.data;
@@ -127,6 +163,14 @@ async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> 
         contactsFound += saved;
         logger.info({ domain, saved }, '[enrichment.worker] Website team members saved');
       }
+    }
+
+    // ── 3b. Defunct check — disqualify dead/shutdown companies ─────────────────
+    const defunct = await isDefunct(domain, company.websiteUrl).catch(() => false);
+    if (defunct) {
+      logger.info({ domain }, '[enrichment.worker] Company appears defunct — disqualifying');
+      await companyRepository.disqualify(companyId);
+      return;
     }
 
     // ── 4. Hunter — email pattern discovery ────────────────────────────────────
