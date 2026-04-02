@@ -622,10 +622,12 @@ let activeSegment = 'all';
 let searchTimer   = null;
 let logRefreshId  = null;
 let modalCompanyId = null;
-let activeJobMap  = new Map(); // companyId → 'enriching'|'scoring'
-let contactsMap   = {};       // companyId → Contact[]
-let _logsCache    = [];       // last loaded scrape logs (for error detail lookup)
+let activeJobMap    = new Map(); // companyId → 'enriching'|'scoring'
+let contactsMap     = {};        // companyId → Contact[]
+let _logsCache      = [];        // last loaded scrape logs (for error detail lookup)
 let activeJobsTimer = null;
+let _loadingCompanies = false;   // guard against concurrent loadCompanies calls
+let _freshActiveJobs  = false;   // true only when jobs started within last 5 min
 
 // ══════════════════════════════════════════════════════════════════════════════
 // UTILITIES
@@ -805,6 +807,8 @@ function debounceSearch() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function loadCompanies() {
+  if (_loadingCompanies) return; // prevent concurrent calls
+  _loadingCompanies = true;
   const status  = document.getElementById('f-status').value;
   const minsc   = document.getElementById('f-minscore').value;
   const maxsc   = document.getElementById('f-maxscore').value;
@@ -954,6 +958,8 @@ async function loadCompanies() {
       '<span class="font-medium">' + esc(msg) + '</span>' +
       '<button onclick="hardRefresh()" class="text-xs text-blue-600 hover:underline mt-1">Retry</button>' +
       '</div></td></tr>';
+  } finally {
+    _loadingCompanies = false;
   }
 }
 
@@ -1251,8 +1257,16 @@ async function loadActiveJobs() {
     if (!jobs.length) {
       panel.innerHTML = '<div class="text-gray-400 italic">No jobs currently running — pipeline is idle.</div>';
       bar.classList.add('hidden');
+      _freshActiveJobs = false;
       return;
     }
+
+    // Only treat jobs as "fresh" if started within the last 5 minutes
+    // Stale active jobs (workers crashed) shouldn't trigger continuous table reloads
+    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+    _freshActiveJobs = jobs.some(function(j) {
+      return j.startedAt && new Date(j.startedAt).getTime() > fiveMinAgo;
+    });
 
     // Group by queue stage
     const byStage = { discovery: [], enrichment: [], scoring: [] };
@@ -1666,9 +1680,9 @@ setInterval(function() {
   }
 }, 20000);
 
-// Fast-refresh leads table when pipeline is actively processing (every 10s)
+// Fast-refresh leads table only when pipeline has fresh active jobs (every 10s)
 setInterval(function() {
-  if (activeJobMap.size > 0 && document.getElementById('tab-leads').classList.contains('active')) {
+  if (_freshActiveJobs && document.getElementById('tab-leads').classList.contains('active')) {
     loadCompanies();
   }
 }, 10000);
