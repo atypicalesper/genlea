@@ -239,11 +239,12 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
             <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Tech Stack</th>
             <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Open Roles</th>
             <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Sources</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Contacts</th>
             <th class="px-4 py-2.5 text-gray-500 uppercase tracking-wide">Actions</th>
           </tr>
         </thead>
         <tbody id="companies-tbody">
-          <tr><td colspan="10" class="px-4 py-10 text-center text-gray-400">
+          <tr><td colspan="11" class="px-4 py-10 text-center text-gray-400">
             <div class="inline-flex flex-col items-center gap-2">
               <div class="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
               <span>Loading companies…</span>
@@ -587,7 +588,7 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
 
 <!-- ══════════════════════════════════════════════════════════ QUEUE MONITOR TAB -->
 <div class="tab-panel" id="tab-queues" style="height:calc(100vh - 110px)">
-  <iframe src="/queues" class="w-full h-full border-0" title="Queue Monitor"></iframe>
+  <iframe id="queues-iframe" src="" class="w-full h-full border-0" title="Queue Monitor"></iframe>
 </div>
 
 <!-- ══════════════════════════════════════════════════════════ COMPANY MODAL -->
@@ -621,6 +622,8 @@ let searchTimer   = null;
 let logRefreshId  = null;
 let modalCompanyId = null;
 let activeJobMap  = new Map(); // companyId → 'enriching'|'scoring'
+let contactsMap   = {};       // companyId → Contact[]
+let _logsCache    = [];       // last loaded scrape logs (for error detail lookup)
 let activeJobsTimer = null;
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -726,6 +729,10 @@ function switchTab(name) {
   if (name === 'control')   { loadQueueStats(); loadCronInfo(); loadActiveJobs(); }
   if (name === 'logs')      loadLogs();
   if (name === 'analytics') loadAnalytics();
+  if (name === 'queues') {
+    const iframe = document.getElementById('queues-iframe');
+    if (!iframe.src || iframe.src === window.location.href) iframe.src = '/queues';
+  }
   location.hash = name;
 }
 
@@ -823,7 +830,7 @@ async function loadCompanies() {
   if (search)  params.set('search', search);
 
   const tbody = document.getElementById('companies-tbody');
-  tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center text-gray-400">' +
+  tbody.innerHTML = '<tr><td colspan="11" class="px-4 py-8 text-center text-gray-400">' +
     '<div class="inline-flex gap-2 items-center"><div class="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>Loading…</div>' +
     '</td></tr>';
 
@@ -849,8 +856,17 @@ async function loadCompanies() {
     document.getElementById('btn-next').disabled = currentPage >= totalPages;
     hideError();
 
+    // Batch-fetch contacts for this page
+    if (data && data.length) {
+      const ids = data.map(function(c) { return c._id; }).filter(Boolean).join(',');
+      try {
+        const ctJson = await apiFetch('/api/contacts/for-companies?ids=' + ids, null, 8000);
+        contactsMap = ctJson.data || {};
+      } catch(e) { contactsMap = {}; }
+    }
+
     if (!data || !data.length) {
-      tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-12 text-center">' +
+      tbody.innerHTML = '<tr><td colspan="11" class="px-4 py-12 text-center">' +
         '<div class="flex flex-col items-center gap-2 text-gray-400">' +
         '<div class="text-3xl">📭</div>' +
         '<div class="font-medium text-gray-600">No companies found</div>' +
@@ -875,6 +891,28 @@ async function loadCompanies() {
         return '<span class="bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded text-[10px]">' + esc(s) + '</span>';
       }).join(' ');
 
+      const rowContacts = contactsMap[String(c._id)] || [];
+      const roleColors = {
+        'CEO':'bg-orange-50 text-orange-700','Founder':'bg-orange-50 text-orange-700',
+        'Co-Founder':'bg-orange-50 text-orange-700','CTO':'bg-purple-50 text-purple-700',
+        'VP of Engineering':'bg-indigo-50 text-indigo-700','VP Engineering':'bg-indigo-50 text-indigo-700',
+        'Head of Engineering':'bg-indigo-50 text-indigo-700','Director of Engineering':'bg-indigo-50 text-indigo-700',
+        'HR':'bg-green-50 text-green-700','Recruiter':'bg-green-50 text-green-700',
+        'Head of Talent':'bg-green-50 text-green-700','Talent Acquisition':'bg-green-50 text-green-700',
+        'Head of HR':'bg-green-50 text-green-700','VP of HR':'bg-green-50 text-green-700',
+      };
+      const contactChips = rowContacts.slice(0, 3).map(function(p) {
+        const cls = roleColors[p.role] || 'bg-gray-100 text-gray-600';
+        const emailDot = p.email ? (p.emailVerified ? ' <span class="text-green-500">●</span>' : ' <span class="text-yellow-400">●</span>') : '';
+        return '<div class="' + cls + ' px-1.5 py-0.5 rounded text-[10px] flex items-center gap-0.5 leading-tight">' +
+          esc(p.fullName.split(' ')[0]) + ' · ' + esc(p.role) + emailDot +
+        '</div>';
+      }).join('');
+      const contactsCell = rowContacts.length
+        ? '<div class="flex flex-col gap-0.5">' + contactChips +
+          (rowContacts.length > 3 ? '<span class="text-[10px] text-gray-400">+' + (rowContacts.length - 3) + ' more</span>' : '') + '</div>'
+        : '<span class="text-gray-300 text-[10px]">—</span>';
+
       const statusBadge = livePhase
         ? '<span class="badge badge-' + esc(status) + ' opacity-50 mr-1">' + esc(status) + '</span>' +
           '<span class="badge badge-' + livePhase + '"><span class="live-dot"></span>⚙ ' + livePhase + '</span>'
@@ -893,6 +931,7 @@ async function loadCompanies() {
         '<td class="px-4 py-2.5"><div class="flex flex-wrap gap-1">' + (tags || '<span class="text-gray-300">—</span>') + '</div></td>' +
         '<td class="px-4 py-2.5"><div class="flex flex-wrap gap-1">' + (roles || '<span class="text-gray-300">—</span>') + '</div></td>' +
         '<td class="px-4 py-2.5"><div class="flex flex-wrap gap-1">' + (sources || '<span class="text-gray-300">—</span>') + '</div></td>' +
+        '<td class="px-4 py-2.5">' + contactsCell + '</td>' +
         '<td class="px-4 py-2.5">' +
           '<div class="flex gap-1" onclick="event.stopPropagation()">' +
             '<button onclick="quickStatus(\\''+c._id+'\\',\\''+status+'\\')" class="action-btn" title="Change status">✎</button>' +
@@ -909,7 +948,7 @@ async function loadCompanies() {
       ? 'Request timed out — check that the API and MongoDB are running'
       : e.message;
     showError(msg);
-    tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-8 text-center">' +
+    tbody.innerHTML = '<tr><td colspan="11" class="px-4 py-8 text-center">' +
       '<div class="flex flex-col items-center gap-2 text-red-400"><span class="text-2xl">⚠</span>' +
       '<span class="font-medium">' + esc(msg) + '</span>' +
       '<button onclick="hardRefresh()" class="text-xs text-blue-600 hover:underline mt-1">Retry</button>' +
@@ -945,25 +984,44 @@ async function openCompany(id) {
   try {
     const json = await apiFetch('/api/companies/' + id, null, 10000);
     const { company: c, contacts: ct, jobs: jb, summary } = json.data;
-    const contactList = [ct.ceo, ct.cto, ct.hr, ...(ct.other||[])].filter(Boolean);
+    const contactList = Array.isArray(ct) ? ct : [ct.ceo, ct.cto, ct.hr, ...(ct.other||[])].filter(Boolean);
     const activeJobs  = (jb && jb.active) ? jb.active : [];
 
     document.getElementById('modal-title').innerHTML =
       esc(c.name || c.domain) +
       ' <span class="badge badge-' + esc(c.status||'pending') + ' ml-2 text-xs">' + esc(c.status||'pending') + '</span>';
 
+    const roleChipCls = function(role) {
+      if (['CEO','Founder','Co-Founder'].includes(role)) return 'bg-orange-50 text-orange-700 border border-orange-200';
+      if (['CTO','CPO','COO','CFO'].includes(role)) return 'bg-purple-50 text-purple-700 border border-purple-200';
+      if (['VP of Engineering','VP Engineering','Head of Engineering','Director of Engineering','Engineering Manager'].includes(role)) return 'bg-indigo-50 text-indigo-700 border border-indigo-200';
+      if (['HR','Head of HR','VP of HR','Recruiter','Head of Talent','Talent Acquisition'].includes(role)) return 'bg-green-50 text-green-700 border border-green-200';
+      return 'bg-gray-100 text-gray-600 border border-gray-200';
+    };
+
     const contactCard = function(p) {
-      return '<div class="border border-gray-100 rounded-lg p-3 mb-2 text-xs">' +
-        '<div class="flex justify-between items-start">' +
-          '<div><span class="font-semibold text-gray-900">' + esc(p.fullName||'—') + '</span>' +
-          ' <span class="text-gray-400">' + esc(p.role||'') + '</span></div>' +
-          '<span class="' + (p.emailVerified?'text-green-600':'text-gray-300') + ' shrink-0">' +
-            (p.emailVerified ? '✓ verified' : 'unverified') + '</span>' +
-        '</div>' +
-        (p.email ? '<div class="text-blue-500 mt-1">' + esc(p.email) + '</div>' : '') +
-        (p.phone ? '<div class="text-gray-400">' + esc(p.phone) + '</div>' : '') +
-        (p.linkedinUrl ? '<a href="' + esc(p.linkedinUrl) + '" target="_blank" class="text-blue-400 hover:underline">LinkedIn →</a>' : '') +
-      '</div>';
+      return '<tr class="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">' +
+        '<td class="py-2 pr-3">' +
+          '<div class="font-medium text-gray-900 text-xs">' + esc(p.fullName||'—') + '</div>' +
+        '</td>' +
+        '<td class="py-2 pr-3">' +
+          '<span class="badge text-[10px] ' + roleChipCls(p.role) + '">' + esc(p.role||'—') + '</span>' +
+        '</td>' +
+        '<td class="py-2 pr-3 text-xs">' +
+          (p.email
+            ? '<div class="flex items-center gap-1">' +
+                '<span class="text-blue-600 font-mono text-[11px]">' + esc(p.email) + '</span>' +
+                (p.emailVerified
+                  ? '<span class="text-green-500 text-[10px] font-semibold" title="Verified">✓</span>'
+                  : (p.emailConfidence > 0 ? '<span class="text-yellow-500 text-[10px]" title="Unverified — ' + Math.round(p.emailConfidence*100) + '% confidence">~' + Math.round(p.emailConfidence*100) + '%</span>' : '')) +
+              '</div>'
+            : '<span class="text-gray-300">—</span>') +
+        '</td>' +
+        '<td class="py-2 pr-3 text-xs text-gray-500">' + esc(p.phone||'') + '</td>' +
+        '<td class="py-2 text-xs">' +
+          (p.linkedinUrl ? '<a href="' + esc(p.linkedinUrl) + '" target="_blank" class="text-blue-500 hover:underline">LinkedIn ↗</a>' : '') +
+        '</td>' +
+      '</tr>';
     };
 
     const jobCard = function(j) {
@@ -1017,8 +1075,29 @@ async function openCompany(id) {
           '<div class="flex flex-wrap gap-1">' + c.techStack.map(t=>'<span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs">'+esc(t)+'</span>').join('') + '</div></div>'
         : '') +
       (c.description ? '<div class="mt-3 text-xs text-gray-400 italic border-l-2 border-gray-200 pl-3">' + esc(c.description.slice(0,300)) + (c.description.length>300?'…':'') + '</div>' : '') +
-      '<div class="mt-4"><div class="text-xs text-gray-500 mb-2 font-medium">Contacts (' + contactList.length + ')</div>' +
-        (contactList.length ? contactList.map(contactCard).join('') : '<div class="text-gray-300 text-xs py-3 text-center">No contacts enriched yet</div>') +
+      '<div class="mt-4">' +
+        '<div class="flex items-center justify-between mb-2">' +
+          '<div class="text-xs text-gray-500 font-medium">Contacts (' + contactList.length + ')</div>' +
+          (contactList.filter(function(p){return p.emailVerified;}).length
+            ? '<span class="text-[10px] text-green-600">✓ ' + contactList.filter(function(p){return p.emailVerified;}).length + ' verified email' + (contactList.filter(function(p){return p.emailVerified;}).length > 1 ? 's' : '') + '</span>'
+            : '') +
+        '</div>' +
+        (contactList.length
+          ? '<div class="border border-gray-100 rounded-lg overflow-hidden">' +
+              '<table class="w-full text-xs">' +
+                '<thead class="bg-gray-50 border-b border-gray-100">' +
+                  '<tr>' +
+                    '<th class="py-1.5 px-3 text-left text-[10px] text-gray-400 font-medium">Name</th>' +
+                    '<th class="py-1.5 px-3 text-left text-[10px] text-gray-400 font-medium">Role</th>' +
+                    '<th class="py-1.5 px-3 text-left text-[10px] text-gray-400 font-medium">Email</th>' +
+                    '<th class="py-1.5 px-3 text-left text-[10px] text-gray-400 font-medium">Phone</th>' +
+                    '<th class="py-1.5 px-3 text-left text-[10px] text-gray-400 font-medium">LinkedIn</th>' +
+                  '</tr>' +
+                '</thead>' +
+                '<tbody class="px-3">' + contactList.map(contactCard).join('') + '</tbody>' +
+              '</table>' +
+            '</div>'
+          : '<div class="text-gray-300 text-xs py-3 text-center border border-gray-100 rounded-lg">No contacts enriched yet — re-enrich to fetch decision-makers</div>') +
       '</div>' +
       '<div class="mt-3"><div class="text-xs text-gray-500 mb-2 font-medium">Active Jobs (' + activeJobs.length + ')</div>' +
         (activeJobs.length ? '<div class="border border-gray-100 rounded-lg px-3 py-1">' + activeJobs.map(jobCard).join('') + '</div>'
@@ -1333,12 +1412,13 @@ async function loadLogs() {
     document.getElementById('log-partial').textContent = stats.partial || 0;
     document.getElementById('log-failed').textContent  = stats.failed  || 0;
 
+    _logsCache = logs;
     const tbody = document.getElementById('logs-tbody');
     if (!logs.length) {
       tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No scrape logs yet</td></tr>';
       return;
     }
-    tbody.innerHTML = logs.map(function(l) {
+    tbody.innerHTML = logs.map(function(l, i) {
       const errCount = (l.errors || []).length;
       return '<tr class="border-b border-gray-100 hover:bg-gray-50">' +
         '<td class="px-4 py-2 text-gray-400 whitespace-nowrap">' + fmtTime(l.startedAt) + '</td>' +
@@ -1349,11 +1429,50 @@ async function loadLogs() {
         '<td class="px-4 py-2 text-gray-500">' + (l.jobsFound || 0) + '</td>' +
         '<td class="px-4 py-2 text-gray-400 whitespace-nowrap">' + fmtDuration(l.durationMs) + '</td>' +
         '<td class="px-4 py-2">' + (errCount > 0
-          ? '<span class="text-red-500 text-[10px] cursor-pointer hover:underline" title="' + esc((l.errors||[]).slice(0,3).join('; ')) + '">' + errCount + ' error' + (errCount>1?'s':'') + '</span>'
+          ? '<button onclick="showLogErrors(event,' + i + ')" class="text-red-500 text-[10px] hover:underline font-medium">' + errCount + ' error' + (errCount>1?'s':'') + '</button>'
           : '<span class="text-gray-300">—</span>') + '</td>' +
       '</tr>';
     }).join('');
   } catch(e) { /* silent */ }
+}
+
+function showLogErrors(event, idx) {
+  event.stopPropagation();
+  const log = _logsCache[idx];
+  if (!log) return;
+  const errors = log.errors || [];
+  // Remove any existing error popover
+  document.getElementById('log-error-popover')?.remove();
+
+  const btn = event.currentTarget;
+  const rect = btn.getBoundingClientRect();
+
+  const pop = document.createElement('div');
+  pop.id = 'log-error-popover';
+  pop.style.cssText = 'position:fixed;z-index:9999;background:#1e293b;color:#f8fafc;border-radius:8px;padding:12px 14px;font-size:11px;font-family:ui-monospace,monospace;max-width:520px;min-width:260px;box-shadow:0 8px 32px rgba(0,0,0,.35);line-height:1.5;';
+  pop.style.top  = (rect.bottom + 6) + 'px';
+  pop.style.left = Math.min(rect.left, window.innerWidth - 540) + 'px';
+
+  const header = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+    '<span style="font-weight:700;color:#f87171;">' + errors.length + ' error' + (errors.length > 1 ? 's' : '') + ' — ' + esc(log.scraper || '?') + '</span>' +
+    '<button onclick="document.getElementById(\'log-error-popover\').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">✕</button>' +
+  '</div>';
+
+  const items = errors.map(function(e) {
+    return '<div style="border-top:1px solid #334155;padding:6px 0;word-break:break-all;color:#fca5a5;">' + esc(String(e)) + '</div>';
+  }).join('');
+
+  pop.innerHTML = header + items;
+  document.body.appendChild(pop);
+
+  // Close on outside click
+  function onOutside(ev) {
+    if (!pop.contains(ev.target) && ev.target !== btn) {
+      pop.remove();
+      document.removeEventListener('click', onOutside, true);
+    }
+  }
+  setTimeout(function() { document.addEventListener('click', onOutside, true); }, 0);
 }
 
 function toggleLogRefresh() {
@@ -1531,16 +1650,20 @@ logRefreshId = setInterval(function() {
   if (document.getElementById('tab-logs').classList.contains('active')) loadLogs();
 }, 10000);
 
-// Queue stats + active jobs auto-refresh
+// Queue stats + active jobs auto-refresh (control tab only)
 setInterval(function() {
   if (document.getElementById('tab-control').classList.contains('active')) {
     loadQueueStats();
     loadActiveJobs();
   }
-}, 5000);
+}, 8000);
 
-// Always poll active jobs for the global activity bar (even on other tabs)
-setInterval(loadActiveJobs, 8000);
+// Activity bar: poll active jobs every 20s (non-control tabs only)
+setInterval(function() {
+  if (!document.getElementById('tab-control').classList.contains('active')) {
+    loadActiveJobs();
+  }
+}, 20000);
 
 // Fast-refresh leads table when pipeline is actively processing (every 10s)
 setInterval(function() {

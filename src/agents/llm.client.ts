@@ -5,7 +5,7 @@
  * AGENT_LLM_PROVIDER=anthropic   → uses @anthropic-ai/sdk (ANTHROPIC_API_KEY required)
  *
  * AGENT_LLM_MODEL overrides the default model for the selected provider.
- * Groq default  : llama-3.3-70b-versatile
+ * Groq default  : llama-3.1-8b-instant (500k TPD free tier; set AGENT_LLM_MODEL to override)
  * Anthropic default: claude-haiku-4-5-20251001
  */
 
@@ -170,7 +170,7 @@ async function anthropicChat(
 const PROVIDER = (process.env['AGENT_LLM_PROVIDER'] ?? 'groq').toLowerCase();
 
 const DEFAULT_MODELS: Record<string, string> = {
-  groq:      'llama-3.3-70b-versatile',
+  groq:      'llama-3.1-8b-instant',   // 500k TPD free tier (vs 100k for 70b)
   anthropic: 'claude-haiku-4-5-20251001',
 };
 

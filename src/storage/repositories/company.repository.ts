@@ -1,5 +1,5 @@
 import { ObjectId, Filter, FindOptions, UpdateFilter } from 'mongodb';
-import { Company, LeadStatus } from '../../types/index.js';
+import { Company, LeadStatus, PipelineStatus } from '../../types/index.js';
 import { getCollection, COLLECTIONS } from '../mongo.client.js';
 import { normalizeDomain } from '../../utils/random.js';
 import { logger } from '../../utils/logger.js';
@@ -87,6 +87,7 @@ export const companyRepository = {
         sources: data.sources ?? [],
         score: data.score ?? 0,
         status: data.status ?? 'pending',
+        pipelineStatus: data.pipelineStatus ?? 'discovered',
         manuallyReviewed: false,
         sourcesCount: data.sources?.length ?? 0,
         createdAt: now,
@@ -127,6 +128,7 @@ export const companyRepository = {
         ...(data.lastEnrichedAt && { lastEnrichedAt: data.lastEnrichedAt }),
         // Manual status overrides — only written when explicitly passed (status API, dashboard)
         ...(data.status !== undefined && { status: data.status }),
+        ...(data.pipelineStatus !== undefined && { pipelineStatus: data.pipelineStatus }),
         ...(data.manuallyReviewed !== undefined && { manuallyReviewed: data.manuallyReviewed }),
       },
       $max: {
@@ -166,6 +168,7 @@ export const companyRepository = {
         $set: {
           score,
           scoreBreakdown,
+          pipelineStatus: 'scored',
           updatedAt: new Date(),
           status: {
             $cond: {
@@ -188,6 +191,15 @@ export const companyRepository = {
       { $set: { status: 'disqualified', updatedAt: new Date() } }
     );
     logger.info({ id }, '[company.repository] Company disqualified');
+  },
+
+  /** Update pipeline stage — called at each phase transition */
+  async setPipelineStatus(id: string, pipelineStatus: PipelineStatus): Promise<void> {
+    const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
+    await col.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { pipelineStatus, updatedAt: new Date() } }
+    );
   },
 
   /** Overwrite openRoles with current active job titles — called from scoring worker */

@@ -30,11 +30,11 @@ export const contactRepository = {
     return docs.map(d => ({ firstName: d.firstName, lastName: d.lastName, fullName: d.fullName }));
   },
 
-  /** Batch fetch contacts for many companies in a single query — avoids N+1 on export */
+  /** Batch fetch decision-maker contacts for many companies — avoids N+1 on export/dashboard */
   async findByCompanyIds(ids: string[]): Promise<Map<string, Contact[]>> {
     if (ids.length === 0) return new Map();
     const col = getCollection<ContactRaw>(COLLECTIONS.CONTACTS);
-    const docs = await col.find({ companyId: { $in: ids } } as any).toArray();
+    const docs = await col.find({ companyId: { $in: ids }, forOriginRatio: { $ne: true } } as any).toArray();
     const map = new Map<string, Contact[]>();
     for (const doc of docs) {
       const id = doc.companyId;

@@ -22,7 +22,7 @@ import { contactResolver } from '../enrichment/contact.resolver.js';
 import { websiteTeamScraper } from '../enrichment/website-team.enricher.js';
 import { normalizer, normalizeRole } from '../enrichment/normalizer.js';
 import { deduplicateContacts } from '../enrichment/deduplicator.js';
-import { githubScraper, hunterScraper, clearbitScraper } from '../scrapers/enrichment/index.js';
+import { githubScraper, hunterScraper, clearbitScraper, exploriumScraper } from '../scrapers/enrichment/index.js';
 import { settingsRepository } from '../storage/repositories/settings.repository.js';
 import { browserManager } from '../core/browser.manager.js';
 import { proxyManager } from '../core/proxy.manager.js';
@@ -46,34 +46,34 @@ Your job: given a company domain, gather comprehensive data about:
 4. Indian-origin developer ratio (what fraction of their engineers appear to be of Indian origin)
 5. Whether the company is still active and worth pursuing
 
-Decision rules:
-- ALWAYS start by checking current state (get_company_state) to avoid redundant work.
-- If ANY critical data is missing or insufficient, try ALL available sources before giving up:
-  * GitHub → tech stack + contributor names (free, no rate limit)
-  * Clearbit → company metadata (employee count, funding, industry)
-  * Website team page → names of team members
-  * Hunter → emails for the domain
-  * Contact resolver → SMTP verify + fill gaps
-  * Playwright stealth → use when APIs fail, rate-limited, or return nothing
-- If tech stack is unknown after GitHub: try website's /careers, /jobs, /stack pages via Playwright.
-- If contacts are empty after Hunter: use Playwright to scrape the company's /team or /about page directly.
-- Mark company as DEFUNCT and stop immediately if: DNS failure, 404 on root domain, parked page, or shutdown language on the website.
-- Mark company as DISQUALIFIED if: employee count > 1000, or HQ is in India/non-target country.
-- When data is sufficient (has tech stack + ≥5 names for ratio OR clear ratio + at least 1 contact), proceed to scoring.
-- Always save partial data even if some steps fail — partial data is better than nothing.
+CRITICAL — availability rule:
+If a tool returns { available: false }, skip it immediately — do NOT retry it. Some tools require API keys that may not be configured. In that case, playwright_scrape_url is your primary data source; it requires no API key and works for any URL.
 
-Available sources to try (in roughly this order, but adapt based on what's missing):
+Decision rules:
+- ALWAYS start with get_company_state.
+- enrich_github is free and always worth trying — great for tech stack + dev names.
+- scrape_website_team is free — always try it.
+- If enrich_clearbit returns available:false → skip it; use playwright_scrape_url on the company homepage to find employee count, funding info, description instead.
+- If enrich_hunter returns available:false → skip it; use playwright_scrape_url on /team, /about, /contact, /people pages to collect emails and names.
+- If tech stack is still missing → playwright_scrape_url on /careers, /jobs, /stack, /engineering pages.
+- Mark DEFUNCT and stop if: DNS failure, 404, parked page, or shutdown language detected.
+- Mark DISQUALIFIED if: employee count > 1000, or HQ is India/non-target country.
+- When sufficient data is collected (tech stack + ≥5 names for ratio OR 1+ contact), proceed to scoring.
+- Always save partial data — partial data is better than nothing.
+
+Source order (skip if available:false):
 1. get_company_state — always first
-2. enrich_github — free, great for tech stack + developer names
-3. enrich_clearbit — company metadata
-4. scrape_website_team — /team /about pages, names + emails
-5. enrich_hunter — email patterns for the domain
-6. verify_contacts — SMTP verify + fill missing CEO/HR
-7. playwright_scrape_url — stealth browser fallback, use when above fail
-8. compute_origin_ratio — after gathering enough names
-9. save_company_data — save partial enrichment results at any point
-10. disqualify_company — if company should be excluded
-11. queue_for_scoring — when enrichment is complete`;
+2. enrich_explorium — best single source: returns company metadata + contacts with email/phone/LinkedIn in one call (requires EXPLORIUM_API_KEY)
+3. enrich_github — free, no key required — great for tech stack + dev names
+4. enrich_clearbit — requires CLEARBIT_API_KEY — skip if Explorium already returned metadata
+5. scrape_website_team — free, no key required
+6. playwright_scrape_url — free, no key required — use aggressively on /team /about /careers /contact
+7. enrich_hunter — requires HUNTER_API_KEY — skip if Explorium already returned contacts
+8. verify_contacts — SMTP verify + fill gaps
+9. compute_origin_ratio — after gathering names
+10. save_company_data — save partial results anytime
+11. disqualify_company — if company should be excluded
+12. queue_for_scoring — when enrichment is complete`;
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
 
@@ -102,6 +102,18 @@ const TOOLS: ToolDef[] = [
     parameters: {
       type: 'object',
       properties: { domain: { type: 'string' } },
+      required: ['domain'],
+    },
+  },
+  {
+    name: 'enrich_explorium',
+    description: 'Fetch company metadata AND decision-maker contacts (with email, phone, LinkedIn) from Explorium. Returns tech stack, funding, employee count, and verified contacts in one call. Prefer this over Clearbit + Hunter combined when available.',
+    parameters: {
+      type: 'object',
+      properties: {
+        domain: { type: 'string' },
+        name:   { type: 'string', description: 'Company name (improves match accuracy)' },
+      },
       required: ['domain'],
     },
   },
@@ -288,7 +300,56 @@ function makeHandlers(job: EnrichmentJobData): Record<string, ToolHandler> {
       };
     },
 
+    enrich_explorium: async ({ name: companyName }) => {
+      if (!process.env['EXPLORIUM_API_KEY']) {
+        return { available: false, reason: 'EXPLORIUM_API_KEY not configured' };
+      }
+      const result = await exploriumScraper.enrichDomain(domain, companyName as string | undefined).catch(() => null);
+      if (!result) return { found: false };
+
+      const company = await companyRepository.findById(companyId);
+      if (result.company) {
+        await companyRepository.upsert({ ...result.company, domain, name: company?.name ?? '' });
+      }
+
+      let contactsSaved = 0;
+      if (result.contacts?.length) {
+        for (const c of result.contacts) {
+          if (!c.fullName || !c.role || c.role === 'Unknown') continue;
+          await contactRepository.upsert({
+            companyId,
+            fullName:        c.fullName,
+            firstName:       c.firstName,
+            lastName:        c.lastName,
+            role:            c.role,
+            email:           c.email,
+            emailConfidence: c.emailConfidence ?? 0,
+            phone:           c.phone,
+            linkedinUrl:     c.linkedinUrl,
+            sources:         ['explorium'],
+            forOriginRatio:  false,
+          }).catch(() => {});
+          contactsSaved++;
+        }
+      }
+
+      return {
+        found:          true,
+        employeeCount:  result.company?.employeeCount,
+        fundingStage:   result.company?.fundingStage,
+        hqCountry:      result.company?.hqCountry,
+        techStack:      result.company?.techStack ?? [],
+        contactsSaved,
+        contacts: result.contacts?.map(c => ({
+          name: c.fullName, role: c.role, email: c.email, phone: c.phone, linkedin: c.linkedinUrl,
+        })),
+      };
+    },
+
     enrich_clearbit: async () => {
+      if (!process.env['CLEARBIT_API_KEY']) {
+        return { available: false, reason: 'CLEARBIT_API_KEY not configured — use playwright_scrape_url on the company homepage instead' };
+      }
       const result = await clearbitScraper.enrichDomain(domain).catch(() => null);
       if (!result?.company) return { found: false };
 
@@ -310,6 +371,7 @@ function makeHandlers(job: EnrichmentJobData): Record<string, ToolHandler> {
 
       if (!members.length) return { found: false, count: 0 };
 
+      // Save ALL members for origin ratio analysis
       await Promise.allSettled(
         members.map(p =>
           contactRepository.upsert({
@@ -317,19 +379,39 @@ function makeHandlers(job: EnrichmentJobData): Record<string, ToolHandler> {
             fullName:       p.fullName,
             firstName:      p.fullName.split(' ')[0],
             lastName:       p.fullName.split(' ').at(-1),
-            role:           'Unknown',
+            role:           normalizeRole(p.role),
             linkedinUrl:    p.linkedinUrl,
             email:          p.email,
+            phone:          p.phone,
             sources:        ['website'],
             forOriginRatio: true,
           })
         )
       );
 
-      return { found: true, count: members.length, names: members.map(m => m.fullName) };
+      // Also surface members that have a known decision-maker role for the agent to save via save_contacts
+      const decisionMakers = members
+        .filter(p => p.role && normalizeRole(p.role) !== 'Unknown')
+        .map(p => ({
+          name:     p.fullName,
+          role:     p.role,
+          email:    p.email ?? null,
+          phone:    p.phone ?? null,
+          linkedin: p.linkedinUrl ?? null,
+        }));
+
+      return {
+        found: true,
+        count: members.length,
+        names: members.map(m => m.fullName),
+        decisionMakers,
+      };
     },
 
     enrich_hunter: async () => {
+      if (!process.env['HUNTER_API_KEY']) {
+        return { available: false, reason: 'HUNTER_API_KEY not configured — use playwright_scrape_url on /team or /contact pages instead' };
+      }
       const result = await hunterScraper.enrichDomain(domain);
       if (!result?.contacts?.length) return { found: false };
 
@@ -349,6 +431,9 @@ function makeHandlers(job: EnrichmentJobData): Record<string, ToolHandler> {
     },
 
     verify_contacts: async () => {
+      if (!process.env['HUNTER_API_KEY'] && !process.env['SMTP_HOST']) {
+        return { available: false, reason: 'No HUNTER_API_KEY or SMTP_HOST configured — skipping contact verification' };
+      }
       await contactResolver.resolveForCompany(companyId, domain).catch(err =>
         logger.warn({ err, domain }, '[enrichment.agent] Contact resolution failed — continuing')
       );
@@ -381,31 +466,114 @@ function makeHandlers(job: EnrichmentJobData): Record<string, ToolHandler> {
           return { defunct: true, reason: 'Shutdown/parked signals detected' };
         }
 
-        // Extract emails from page
-        const emails = [...html.matchAll(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g)]
+        // ── Structured person extraction ──────────────────────────────────────
+
+        // 1. JSON-LD Person schema — most reliable source
+        const jsonldPeople: Array<{ name?: string; email?: string; telephone?: string; url?: string; jobTitle?: string }> = [];
+        const jsonldBlocks = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+        for (const block of jsonldBlocks) {
+          try {
+            const parsed = JSON.parse(block[1]!);
+            const items = Array.isArray(parsed) ? parsed : [parsed];
+            for (const item of items) {
+              if (item['@type'] === 'Person') jsonldPeople.push(item);
+              if (item['@type'] === 'Organization' && Array.isArray(item.employee)) {
+                jsonldPeople.push(...item.employee.filter((e: any) => e['@type'] === 'Person'));
+              }
+            }
+          } catch { /* ignore malformed JSON-LD */ }
+        }
+
+        // 2. LinkedIn link + surrounding context — name near linkedin link
+        type PersonCandidate = { name: string; role?: string; email?: string; phone?: string; linkedin?: string };
+        const candidates = new Map<string, PersonCandidate>(); // keyed by lowercased name
+
+        // From JSON-LD
+        for (const p of jsonldPeople) {
+          if (!p.name) continue;
+          const key = p.name.toLowerCase();
+          candidates.set(key, {
+            name:     p.name,
+            role:     p.jobTitle,
+            email:    p.email,
+            phone:    p.telephone,
+            linkedin: p.url?.includes('linkedin.com') ? p.url : undefined,
+          });
+        }
+
+        // 3. LinkedIn anchor + nearby text (name + role in the surrounding 300 chars)
+        const liMatches = [...html.matchAll(/<a[^>]+href=["'](https?:\/\/(?:www\.)?linkedin\.com\/in\/[^/"']+)[^>]*>([^<]{3,60})<\/a>/gi)];
+        for (const m of liMatches) {
+          const liUrl   = m[1]!;
+          const nameRaw = m[2]!.trim().replace(/\s+/g, ' ');
+          if (/follow|connect|view|profile|linkedin|click|here|share/i.test(nameRaw)) continue;
+          if (!/^[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+){1,3}$/.test(nameRaw)) continue;
+
+          const key = nameRaw.toLowerCase();
+          if (!candidates.has(key)) candidates.set(key, { name: nameRaw });
+          candidates.get(key)!.linkedin = liUrl;
+
+          // Find role in surrounding 400 chars before/after the link
+          const matchIdx = (m as any).index ?? 0;
+          const ctx = html.slice(Math.max(0, matchIdx - 400), matchIdx + 400);
+          // Look for title/role text in <p> or <span> near the name (stripped of tags)
+          const ctxText = ctx.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+          const roleMatch = ctxText.match(/\b(CEO|CTO|COO|CFO|CPO|Founder|Co-?Founder|Head of [\w ]+|VP(?: of)? [\w ]+|Director of [\w ]+|Engineering Manager|Recruiter|Talent|HR)\b/i);
+          if (roleMatch && !candidates.get(key)!.role) candidates.get(key)!.role = roleMatch[0];
+        }
+
+        // 4. Extract emails scoped to the domain
+        const domainStr = domain as string;
+        const emailRegex = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+        const allEmails = [...html.matchAll(emailRegex)]
           .map(m => m[0]!.toLowerCase())
-          .filter(e => e.includes(domain as string))
-          .slice(0, 20);
+          .filter(e => e.includes(domainStr));
 
-        // Extract LinkedIn profile links
-        const linkedinUrls = [...html.matchAll(/https:\/\/www\.linkedin\.com\/in\/[a-zA-Z0-9\-_]+/g)]
-          .map(m => m[0])
-          .slice(0, 20);
+        // Try to attach emails to candidates by name prefix match
+        for (const email of allEmails) {
+          const prefix = email.split('@')[0]!.replace(/[._\-]/g, ' ').toLowerCase();
+          let matched = false;
+          for (const [key, cand] of candidates) {
+            if (!cand.email && (key.startsWith(prefix) || prefix.startsWith(key.split(' ')[0]!))) {
+              cand.email = email;
+              matched = true;
+              break;
+            }
+          }
+          // Unmatched domain emails — keep them for the LLM to use
+          if (!matched) candidates.set(`__email_${email}`, { name: '', email });
+        }
 
-        // Extract tech keywords
+        // 5. Extract phone numbers
+        const phoneRegex = /(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}|\+\d{1,3}[-.\s]\d{2,4}[-.\s]\d{3,4}[-.\s]\d{3,4}/g;
+        const phones = [...new Set([...text.matchAll(phoneRegex)].map(m => m[0]!.trim()))].slice(0, 10);
+
+        // 6. Tech keywords
         const techKeywords = ['react','vue','angular','node','nodejs','python','django','flask','fastapi',
-          'ruby','rails','golang','go','java','spring','kotlin','swift','typescript','nextjs',
-          'aws','gcp','azure','docker','kubernetes','postgres','mongodb','redis','graphql']
+          'ruby','rails','golang','go','java','spring','kotlin','swift','typescript','nextjs','nestjs',
+          'aws','gcp','azure','docker','kubernetes','postgres','mongodb','redis','graphql','rust','elixir']
           .filter(kw => text.toLowerCase().includes(kw));
+
+        // Build final people list — exclude placeholder email-only entries
+        const people = [...candidates.values()]
+          .filter(p => p.name && p.name.length > 1)
+          .map(p => ({
+            name:     p.name,
+            role:     p.role ?? null,
+            email:    p.email ?? null,
+            phone:    p.phone ?? null,
+            linkedin: p.linkedin ?? null,
+          }));
 
         return {
           defunct:      false,
           purpose,
           textLength:   text.length,
-          emails:       [...new Set(emails)],
-          linkedinUrls: [...new Set(linkedinUrls)],
+          people,                                     // structured per-person objects
+          emails:       [...new Set(allEmails)],      // all domain emails (backup)
+          phones:       phones,                       // phone numbers found on page
           techKeywords: [...new Set(techKeywords)],
-          excerpt:      text.slice(0, 800),
+          excerpt:      text.slice(0, 600),
         };
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code ?? '';
@@ -491,7 +659,8 @@ function makeHandlers(job: EnrichmentJobData): Record<string, ToolHandler> {
     },
 
     queue_for_scoring: async () => {
-      await companyRepository.upsert({ domain, name: '', lastEnrichedAt: new Date() });
+      await companyRepository.upsert({ domain, name: '', lastEnrichedAt: new Date(), pipelineStatus: 'enriched' } as any);
+      await companyRepository.setPipelineStatus(companyId, 'scoring');
       await queueManager.addScoringJob({ runId, companyId });
       return { queued: true };
     },
@@ -515,6 +684,8 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
     await companyRepository.disqualify(companyId);
     return;
   }
+
+  await companyRepository.setPipelineStatus(companyId, 'enriching');
 
   // Cooldown guard — 7 days
   const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;

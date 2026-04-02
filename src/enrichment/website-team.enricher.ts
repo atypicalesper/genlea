@@ -26,7 +26,9 @@ const HTTP_OPTS = {
 
 export interface WebsitePerson {
   fullName:    string;
+  role?:       string;
   email?:      string;
+  phone?:      string;
   linkedinUrl?: string;
 }
 
@@ -49,43 +51,65 @@ export const websiteTeamScraper = {
           .map(m => m[1]!.toLowerCase())
           .filter(e => e.endsWith(`@${domain}`) || e.endsWith(`.${domain}`));
 
-        // Extract names + LinkedIn from anchor tags around LinkedIn profile links
+        // Extract phone numbers from visible text
+        const textContent = html.replace(/<[^>]+>/g, ' ');
+        const phoneMatches = [...textContent.matchAll(/(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}|\+\d{1,3}[-.\s]\d{2,4}[-.\s]\d{3,4}[-.\s]\d{3,4}/g)]
+          .map(m => m[0]!.trim());
+
+        // Extract names + LinkedIn + role from anchor tags around LinkedIn profile links
         // Pattern: <a href="https://linkedin.com/in/slug">Name Here</a>
         const liMatches = [...html.matchAll(/<a[^>]+href=["']https?:\/\/(?:www\.)?linkedin\.com\/in\/([^/"']+)[^>]*>([^<]{3,60})<\/a>/gi)];
         for (const m of liMatches) {
-          const slug       = m[1]!;
-          const nameRaw    = m[2]!.trim().replace(/\s+/g, ' ');
+          const slug        = m[1]!;
+          const nameRaw     = m[2]!.trim().replace(/\s+/g, ' ');
           const linkedinUrl = `https://linkedin.com/in/${slug}`;
 
-          // Filter out generic link text
           if (/follow|connect|view|profile|linkedin|click|here/i.test(nameRaw)) continue;
-          // Must look like a person name (2+ words, mostly letters)
           if (!looksLikeName(nameRaw)) continue;
 
           const key = nameRaw.toLowerCase();
           if (!found.has(key)) found.set(key, { fullName: nameRaw, linkedinUrl });
           else found.get(key)!.linkedinUrl = linkedinUrl;
+
+          // Look for role/title in surrounding 400 chars
+          const matchIdx = (m as RegExpExecArray).index ?? 0;
+          const ctx = html.slice(Math.max(0, matchIdx - 400), matchIdx + 400)
+            .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+          const roleMatch = ctx.match(/\b(CEO|CTO|COO|CFO|CPO|Founder|Co-?Founder|Head of [\w ]{3,30}|VP(?: of)? [\w ]{3,25}|Director of [\w ]{3,25}|Engineering Manager|Product Manager|Recruiter|Talent|Head of HR|HR)\b/i);
+          if (roleMatch && !found.get(key)!.role) found.get(key)!.role = roleMatch[0]!.trim();
         }
 
         // Extract names from structured name patterns in headings near team sections
-        // Pattern: h2/h3/h4 with 2-4 words that look like a person name
         const headingMatches = [...html.matchAll(/<h[234][^>]*>\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s*<\/h[234]>/g)];
         for (const m of headingMatches) {
           const nameRaw = m[1]!.trim();
           if (!looksLikeName(nameRaw)) continue;
           const key = nameRaw.toLowerCase();
           if (!found.has(key)) found.set(key, { fullName: nameRaw });
+
+          // Look for role in the 300 chars after the heading
+          const matchIdx = (m as RegExpExecArray).index ?? 0;
+          const ctx = html.slice(matchIdx, matchIdx + 300)
+            .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+          const roleMatch = ctx.match(/\b(CEO|CTO|COO|CFO|CPO|Founder|Co-?Founder|Head of [\w ]{3,30}|VP(?: of)? [\w ]{3,25}|Director of [\w ]{3,25}|Engineering Manager|Product Manager|Recruiter|Talent|Head of HR|HR)\b/i);
+          if (roleMatch && !found.get(key)!.role) found.get(key)!.role = roleMatch[0]!.trim();
         }
 
-        // Attach domain emails to people where possible (just save them separately)
+        // Attach domain emails to people by name-prefix matching
         for (const email of domainEmails) {
-          // Try to match email prefix to a found name
           const prefix = email.split('@')[0]!.replace(/[._-]/g, ' ').toLowerCase();
           for (const [key, person] of found) {
             if (!person.email && key.includes(prefix.split(' ')[0]!)) {
               person.email = email;
               break;
             }
+          }
+        }
+
+        // Attach a single phone number to people when there's only one (likely the contact's)
+        if (phoneMatches.length === 1) {
+          for (const person of found.values()) {
+            if (!person.phone) { person.phone = phoneMatches[0]; break; }
           }
         }
 

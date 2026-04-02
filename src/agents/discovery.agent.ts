@@ -11,7 +11,7 @@
  */
 
 import { runAgent, AgentConfig, ToolDef, ToolHandler } from './base.agent.js';
-import { normalizer } from '../enrichment/normalizer.js';
+import { normalizer, normalizeRole } from '../enrichment/normalizer.js';
 import { deduplicateCompanies } from '../enrichment/deduplicator.js';
 import { companyRepository } from '../storage/repositories/company.repository.js';
 import { contactRepository } from '../storage/repositories/contact.repository.js';
@@ -19,10 +19,11 @@ import { jobRepository } from '../storage/repositories/job.repository.js';
 import { scrapeLogRepository } from '../storage/repositories/scrape-log.repository.js';
 import { queueManager } from '../core/queue.manager.js';
 import { normalizeDomain } from '../utils/random.js';
+import { hunterScraper } from '../scrapers/enrichment/index.js';
 import { logger } from '../utils/logger.js';
 import {
   linkedInScraper, apolloScraper, crunchbaseScraper, wellfoundScraper,
-  indeedScraper, glassdoorScraper, surelyRemoteScraper,
+  indeedScraper, glassdoorScraper, surelyRemoteScraper, exploriumScraper,
 } from '../scrapers/discovery/index.js';
 import type { DiscoveryJobData, Scraper } from '../types/index.js';
 
@@ -50,6 +51,7 @@ const BLOCKED_NAME_PATTERNS = [
 ];
 
 const SCRAPERS: Record<string, Scraper> = {
+  explorium:    exploriumScraper,
   wellfound:    wellfoundScraper,
   linkedin:     linkedInScraper,
   indeed:       indeedScraper,
@@ -59,20 +61,28 @@ const SCRAPERS: Record<string, Scraper> = {
   surelyremote: surelyRemoteScraper,
 };
 
-const SYSTEM_PROMPT = `You are a B2B lead generation discovery agent for a software agency that sells offshore Indian developer talent to US/UK/CA/AU/EU tech startups.
+const SYSTEM_PROMPT = `You are a B2B lead generation discovery agent for a software agency that sells offshore Indian developer talent to US/UK/CA/AU/EU tech companies.
 
-Your goal: find early-stage tech startups (seed, series A, series B) with 10–200 employees that are hiring software engineers. These companies are pre-qualified leads because they are actively hiring and in a growth phase.
+Your goal: find tech companies with 10–200 employees that are actively hiring software engineers. These are pre-qualified leads because they are in a growth phase and have engineering demand.
 
-Available sources: wellfound, linkedin, indeed, crunchbase, apollo, glassdoor, surelyremote
+Target profile:
+- Company size: 10–200 employees
+- Age: founded within the last 7 years (2018–present) — includes seed-stage startups AND growth-stage companies 4–7 years old
+- Hiring: actively posting software engineering roles
+- Verticals: SaaS, AI/ML, Fintech, HealthTech, DevTools, B2B software
+- Funding: pre-seed to Series C (not bootstrapped micro-businesses or Series D+ mega-rounds)
+
+Available sources: explorium, wellfound, linkedin, indeed, crunchbase, apollo, glassdoor, surelyremote
 
 Decision rules:
 1. Always start with the source specified in the task. If it returns < 5 results, automatically try 2–3 other sources with the same or adapted keywords.
 2. If a source returns an error or is unavailable, skip it and try the next best source.
-3. Good fallback order: wellfound → linkedin → indeed → glassdoor → crunchbase → apollo → surelyremote
-4. Adapt keywords when expanding — e.g. if "YC startup backend engineer" returns little, try "seed stage startup software engineer" or "early stage saas startup engineer".
+3. Good fallback order: explorium → wellfound → linkedin → indeed → glassdoor → crunchbase → apollo → surelyremote
+4. explorium uses API-based company search — very reliable, no browser needed. Prefer it when available.
+4. Adapt keywords when expanding — e.g. if "startup backend engineer" returns little, try "growth stage tech company software engineer" or "series b saas engineer".
 5. Stop when you have ≥ 15 valid companies OR have tried all available sources.
-6. Never return large enterprises (banks, consulting firms, FAANG, etc.) — the blocklist handles most, but use your judgment.
-7. Prefer companies that match: SaaS, AI/ML, Fintech, HealthTech, DevTools — these are the best leads.
+6. Never return large enterprises (banks, consulting firms, FAANG, >200 employees) — the blocklist handles most, but use your judgment.
+7. A 5–7 year old company with strong engineering hiring is a better lead than a 1-year-old startup with zero team.
 
 After collecting results, call save_companies with all discovered companies and signal_done.`;
 
@@ -162,15 +172,13 @@ function makeHandlers(job: DiscoveryJobData): Record<string, ToolHandler> {
         const { companies } = normalizer.processResults(rawResults);
         const deduped = deduplicateCompanies(companies);
 
-        // Apply filters
+        // Apply filters — keep loose: enrich phase handles disqualification
+        // Don't filter by missing tech stack — enrichment will fill it in
         const filtered = deduped.filter(c => {
           if (!c.domain || !c.name) return false;
           if (BLOCKED_DOMAINS.has(c.domain)) return false;
           if (c.name && BLOCKED_NAME_PATTERNS.some(re => re.test(c.name!))) return false;
           if (c.employeeCount && c.employeeCount > 1000) return false;
-          const hasTech = (c.techStack?.length ?? 0) > 0;
-          const hasJob  = rawResults.some(r => r.company?.domain && normalizeDomain(r.company.domain) === c.domain && r.jobs?.some(j => j.techTags?.length));
-          if (!hasTech && !hasJob) return false;
           return true;
         });
 
@@ -208,15 +216,40 @@ function makeHandlers(job: DiscoveryJobData): Record<string, ToolHandler> {
 
         try {
           const company = await companyRepository.upsert({
-            name:          String(co.name),
+            name:           String(co.name),
             domain,
-            linkedinUrl:   co.linkedinUrl as string | undefined,
-            employeeCount: co.employeeCount as number | undefined,
-            fundingStage:  co.fundingStage as string | undefined,
-            techStack:     co.techStack as string[] | undefined,
-            hqCountry:     (co.hqCountry as string | undefined) ?? 'US',
-            sources:       [co.source as string ?? job.source],
+            linkedinUrl:    co.linkedinUrl as string | undefined,
+            employeeCount:  co.employeeCount as number | undefined,
+            fundingStage:   co.fundingStage as string | undefined,
+            techStack:      co.techStack as string[] | undefined,
+            hqCountry:      (co.hqCountry as string | undefined) ?? 'US',
+            sources:        [co.source as string ?? job.source],
+            pipelineStatus: 'discovered',
           } as any);
+
+          // Fire-and-forget Hunter contact pre-population — don't block the save
+          if (process.env['HUNTER_API_KEY']) {
+            hunterScraper.enrichDomain(domain).then(async result => {
+              if (!result?.contacts?.length) return;
+              for (const c of result.contacts) {
+                if (!c.fullName || !c.role) continue;
+                const role = normalizeRole(c.role as string);
+                if (role === 'Unknown') continue;
+                await contactRepository.upsert({
+                  companyId:       company._id!,
+                  fullName:        c.fullName,
+                  firstName:       c.firstName,
+                  lastName:        c.lastName,
+                  role,
+                  email:           c.email,
+                  emailConfidence: c.emailConfidence ?? 0,
+                  linkedinUrl:     c.linkedinUrl,
+                  sources:         ['hunter'],
+                  forOriginRatio:  false,
+                }).catch(() => {});
+              }
+            }).catch(() => {}); // silent — enrichment phase will retry
+          }
 
           await queueManager.addEnrichmentJob({
             runId:     job.runId,
@@ -256,7 +289,7 @@ export async function runDiscoveryAgent(job: DiscoveryJobData): Promise<void> {
   };
 
   const userMessage = `
-Find US tech startups for lead generation.
+Find tech companies for B2B lead generation.
 
 Primary source: ${source}
 Keywords: ${query.keywords}
@@ -265,7 +298,8 @@ Target limit: ${query.limit ?? 25} companies
 
 Start with ${source}. If you get fewer than 5 results or it fails, expand to other sources using similar keywords.
 Prefer companies in: SaaS, AI/ML, Fintech, HealthTech, DevTools.
-Target size: 10–200 employees, funding stage: pre-seed to Series B.
+Target size: 10–200 employees. Age: founded 2018–present (up to ~7 years old). Funding: pre-seed to Series C.
+A company founded 5–6 years ago that's actively hiring engineers is a perfect lead — do not skip it just because it's not "early stage".
 `.trim();
 
   try {

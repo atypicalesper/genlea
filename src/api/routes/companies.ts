@@ -25,13 +25,20 @@ export async function companiesRoutes(app: FastifyInstance) {
       return reply.status(404).send({ success: false, error: 'Company not found' });
     }
 
-    const ceo   = contacts.find(c => ['CEO', 'Founder'].includes(c.role));
-    const cto   = contacts.find(c => c.role === 'CTO');
-    const hr    = contacts.find(c => ['HR', 'Recruiter', 'Head of Talent'].includes(c.role));
-    const other = contacts.filter(c => !['CEO', 'Founder', 'CTO', 'HR', 'Recruiter', 'Head of Talent'].includes(c.role));
-
     const activeJobs   = jobs.filter(j => j.isActive);
     const inactiveJobs = jobs.filter(j => !j.isActive);
+
+    // Sort: CEO/Founder first, then CTO, then engineering/HR, then others
+    const roleOrder: Record<string, number> = {
+      'CEO': 0, 'Founder': 1, 'Co-Founder': 2, 'CTO': 3,
+      'VP of Engineering': 4, 'VP Engineering': 4, 'Head of Engineering': 5,
+      'Director of Engineering': 6, 'Engineering Manager': 7, 'CPO': 8, 'COO': 9, 'CFO': 10,
+      'Head of HR': 11, 'VP of HR': 11, 'HR': 12, 'Recruiter': 13,
+      'Head of Talent': 14, 'Talent Acquisition': 15, 'Unknown': 99,
+    };
+    const sortedContacts = [...contacts].sort((a, b) =>
+      (roleOrder[a.role] ?? 50) - (roleOrder[b.role] ?? 50)
+    );
 
     logger.info(
       { id, domain: company.domain, contacts: contacts.length, jobs: jobs.length },
@@ -42,12 +49,7 @@ export async function companiesRoutes(app: FastifyInstance) {
       success: true,
       data: {
         company,
-        contacts: {
-          ceo: ceo ?? null,
-          cto: cto ?? null,
-          hr:  hr  ?? null,
-          other,
-        },
+        contacts: sortedContacts,
         jobs: {
           active:   activeJobs,
           inactive: inactiveJobs,
@@ -134,6 +136,18 @@ export async function companiesRoutes(app: FastifyInstance) {
     await queueManager.addScoringJob({ runId, companyId: id });
     logger.info({ id, domain: company.domain, runId }, '[api:companies] Re-scoring queued');
     return reply.status(202).send({ success: true, data: { runId } });
+  });
+
+  // GET /api/contacts/for-companies?ids=id1,id2,... — batch fetch contacts for multiple companies
+  app.get('/contacts/for-companies', async (req, reply) => {
+    const idsParam = String((req.query as { ids?: string }).ids || '');
+    const ids = idsParam.split(',').map(s => s.trim()).filter(Boolean);
+    if (!ids.length) return reply.send({ success: true, data: {} });
+
+    const map = await contactRepository.findByCompanyIds(ids);
+    const obj: Record<string, import('../../types/index.js').Contact[]> = {};
+    for (const [k, v] of map.entries()) obj[k] = v;
+    return reply.send({ success: true, data: obj });
   });
 
   // GET /api/companies — same as /leads but grouped — alias for convenience

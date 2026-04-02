@@ -11,6 +11,14 @@ const SEED_QUERIES: Array<{
   keywords: string;
   techStack?: string[];
 }> = [
+  // ── Explorium — API-based, most reliable, no browser needed ─────────────
+  { source: 'explorium', keywords: 'nodejs typescript saas startup',                   techStack: ['nodejs', 'typescript'] },
+  { source: 'explorium', keywords: 'python ai ml generative startup',                  techStack: ['python', 'generative-ai', 'ai'] },
+  { source: 'explorium', keywords: 'react nextjs fullstack saas startup',              techStack: ['react', 'nextjs', 'typescript'] },
+  { source: 'explorium', keywords: 'python django fastapi backend startup',            techStack: ['python', 'django', 'fastapi'] },
+  { source: 'explorium', keywords: 'golang rust backend infrastructure startup',       techStack: ['golang', 'rust'] },
+  { source: 'explorium', keywords: 'nodejs nestjs backend saas startup',              techStack: ['nodejs', 'nestjs'] },
+
   // ── Wellfound — most reliable free source for funded US startups ──────────
   { source: 'wellfound', keywords: 'YC W24 startup software engineer',                techStack: ['nodejs', 'python', 'react'] },
   { source: 'wellfound', keywords: 'YC S24 startup software engineer',                techStack: ['nodejs', 'typescript'] },

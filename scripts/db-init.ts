@@ -18,6 +18,7 @@ async function main() {
   await companies.createIndex({ sources: 1 }, { name: 'sources' });        // for source filter
   await companies.createIndex({ fundingStage: 1 }, { name: 'funding_stage' });
   await companies.createIndex({ lastScrapedAt: -1 }, { name: 'last_scraped' });
+  await companies.createIndex({ pipelineStatus: 1 }, { name: 'pipeline_status' });
   await companies.createIndex({ 'hqCountry': 1, 'hqState': 1 }, { name: 'location' });
   // Text index for name/domain search — replaces full-scan regex
   await companies.createIndex({ name: 'text', domain: 'text' }, { name: 'name_domain_text', weights: { name: 2, domain: 1 } });
@@ -63,8 +64,10 @@ async function main() {
   logger.info('[db:init] Creating scrape_logs indexes...');
   const logs = db.collection('scrape_logs');
   await logs.createIndex({ startedAt: -1 }, { name: 'started_at' });
-  await logs.createIndex({ scraper: 1, status: 1 }, { name: 'scraper_status' });
-  await logs.createIndex({ runId: 1 }, { name: 'run_id' });
+  await logs.createIndex({ scraper: 1, startedAt: -1 }, { name: 'scraper_started' });   // scraper performance queries
+  await logs.createIndex({ status: 1, startedAt: -1 }, { name: 'status_started' });     // filter by failed/success sorted by time
+  await logs.createIndex({ runId: 1, scraper: 1 }, { name: 'run_scraper' });             // look up all logs for a run
+  await logs.createIndex({ errors: 1 }, { sparse: true, name: 'has_errors' });           // find logs with errors
   logger.info('[db:init] ✅ scrape_logs indexes created');
 
   // ── Verify ────────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ export type ScraperSource =
   | 'glassdoor'
   | 'wellfound'
   | 'clearbit'
+  | 'explorium'
   | 'indeed'
   | 'surelyremote'
   | 'website'
@@ -43,6 +44,8 @@ export type FundingStage =
   | 'Unknown';
 
 export type LeadStatus = 'hot_verified' | 'hot' | 'warm' | 'cold' | 'disqualified' | 'pending';
+
+export type PipelineStatus = 'discovered' | 'enriching' | 'enriched' | 'scoring' | 'scored';
 
 export type ScrapeJobStatus = 'queued' | 'processing' | 'success' | 'failed' | 'partial' | 'skipped';
 
@@ -149,6 +152,7 @@ export interface Company {
   score: number;
   scoreBreakdown?: ScoreBreakdown;
   status: LeadStatus;
+  pipelineStatus: PipelineStatus;
   manuallyReviewed: boolean;
   sourcesCount: number;
   lastJobPostedDays?: number;
