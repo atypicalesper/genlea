@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"http://localhost:4000/api/leads?page=1&limit=25&sortBy=score&sortDir=desc\")",
+      "Bash(curl -s \"http://localhost:4000/api/contacts/for-companies?ids=69ce4444d7acc4aab52d2364,69ce4699d7acc4aab52d2399\")",
+      "Bash(curl -s -w \"\\\\nTime: %{time_total}s\\\\n\" \"http://localhost:4000/api/jobs/active\")",
+      "Bash(curl -s -X DELETE \"http://localhost:4000/api/jobs/clear/discovery\")",
+      "Bash(curl -s -X DELETE \"http://localhost:4000/api/jobs/clear/enrichment\")",
+      "Bash(curl -s -X DELETE \"http://localhost:4000/api/jobs/clear/scoring\")",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code} Time: %{time_total}s\\\\n\" \"http://localhost:4000/api/leads?page=1&limit=50&sortBy=score&sortDir=desc\" -o /dev/null)",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code} Time: %{time_total}s\\\\n\" \"http://localhost:4000/api/jobs/active\" -o /dev/null)"
+    ]
+  }
+}
