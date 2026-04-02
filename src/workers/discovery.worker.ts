@@ -20,6 +20,7 @@ import { generateRunId } from '../utils/random.js';
 
 // ── Enterprise blocklist — never valid leads ──────────────────────────────────
 const BLOCKED_DOMAINS = new Set([
+  // Big Tech
   'google.com', 'amazon.com', 'microsoft.com', 'apple.com', 'meta.com',
   'facebook.com', 'netflix.com', 'salesforce.com', 'oracle.com', 'ibm.com',
   'sap.com', 'adobe.com', 'intuit.com', 'paypal.com', 'ebay.com',
@@ -30,7 +31,43 @@ const BLOCKED_DOMAINS = new Set([
   'twilio.com', 'cloudflare.com', 'okta.com', 'datadog.com', 'splunk.com',
   'crowdstrike.com', 'pagerduty.com', 'hashicorp.com', 'confluent.io',
   'stripe.com', 'plaid.com', 'braintree.com', 'square.com',
+  // Banks & Financial institutions
+  'jpmorganchase.com', 'jpmorgan.com', 'chase.com',
+  'bankofamerica.com', 'wellsfargo.com', 'citigroup.com', 'citi.com',
+  'goldmansachs.com', 'morganstanley.com', 'ubs.com', 'barclays.com',
+  'hsbc.com', 'deutschebank.com', 'creditsuisse.com', 'bnpparibas.com',
+  'capitalone.com', 'usbank.com', 'pnc.com', 'tdbank.com', 'truist.com',
+  'americanexpress.com', 'visa.com', 'mastercard.com', 'discover.com',
+  'blackrock.com', 'vanguard.com', 'fidelity.com', 'schwab.com',
+  // Consulting & Professional Services
+  'mckinsey.com', 'bcg.com', 'bain.com', 'deloitte.com', 'pwc.com',
+  'kpmg.com', 'ey.com', 'accenture.com', 'capgemini.com', 'infosys.com',
+  'tcs.com', 'wipro.com', 'cognizant.com', 'hcl.com', 'tech-mahindra.com',
+  // Telecom & Media
+  'att.com', 'verizon.com', 't-mobile.com', 'comcast.com', 'charter.com',
+  'disney.com', 'warnermedia.com', 'nbcuniversal.com', 'foxcorporation.com',
+  // Healthcare & Insurance
+  'unitedhealthgroup.com', 'anthem.com', 'aetna.com', 'humana.com', 'cigna.com',
+  'johnsonandjohnson.com', 'abbvie.com', 'pfizer.com', 'merck.com', 'lilly.com',
+  // Retail & CPG
+  'walmart.com', 'target.com', 'costco.com', 'homedepot.com', 'lowes.com',
+  'nike.com', 'adidas.com', 'pg.com', 'unilever.com', 'nestle.com',
+  // Other large enterprises
+  'boeing.com', 'lockheedmartin.com', 'raytheon.com', 'generaldynamics.com',
+  'ge.com', 'honeywell.com', 'siemens.com', 'caterpillar.com', 'ford.com',
+  'gm.com', 'tesla.com', 'toyota.com',
 ]);
+
+// ── Name-based large-enterprise keyword filter ────────────────────────────────
+// Catches big companies that slip through without a known domain or employee count
+const BLOCKED_NAME_PATTERNS = [
+  /\bbank\b/i, /\bchase\b/i, /\bmorgan\b/i, /\bfinancial\b/i,
+  /\binsurance\b/i, /\bhospital\b/i, /\bhealthcare\b/i, /\bhealth system\b/i,
+  /\bdeloitte\b/i, /\baccenture\b/i, /\bcognizant\b/i, /\binfosys\b/i,
+  /\bwipro\b/i, /\btata consultancy\b/i, /\btech mahindra\b/i,
+  /\bwalmart\b/i, /\bamazon\b/i, /\bmicrosoft\b/i, /\bgoogle\b/i,
+  /\bgovernment\b/i, /\bfederal\b/i, /\bdepartment of\b/i,
+];
 
 const SCRAPERS = {
   linkedin:   linkedInScraper,
@@ -120,6 +157,12 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
       // Skip known large enterprises — they will never be valid leads
       if (BLOCKED_DOMAINS.has(company.domain)) {
         logger.debug({ domain: company.domain }, '[discovery.worker] Blocked enterprise domain — skipping');
+        continue;
+      }
+
+      // Skip by name pattern (catches large enterprises without a known domain)
+      if (company.name && BLOCKED_NAME_PATTERNS.some(re => re.test(company.name!))) {
+        logger.debug({ domain: company.domain, name: company.name }, '[discovery.worker] Blocked enterprise name pattern — skipping');
         continue;
       }
 
