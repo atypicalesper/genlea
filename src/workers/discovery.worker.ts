@@ -58,6 +58,39 @@ const BLOCKED_DOMAINS = new Set([
   'gm.com', 'tesla.com', 'toyota.com',
 ]);
 
+// ── Target country allowlist — only companies HQ'd in developed markets ──────
+// ISO 3166-1 alpha-2 codes + common free-text variants scrapers may return
+const ALLOWED_COUNTRIES = new Set([
+  'US', 'USA', 'UNITED STATES', 'UNITED STATES OF AMERICA',
+  'GB', 'UK', 'UNITED KINGDOM', 'ENGLAND', 'SCOTLAND', 'WALES',
+  'CA', 'CANADA',
+  'AU', 'AUSTRALIA',
+  'NZ', 'NEW ZEALAND',
+  'IE', 'IRELAND',
+  'SG', 'SINGAPORE',
+  'DE', 'GERMANY',
+  'FR', 'FRANCE',
+  'NL', 'NETHERLANDS', 'HOLLAND',
+  'SE', 'SWEDEN',
+  'NO', 'NORWAY',
+  'DK', 'DENMARK',
+  'FI', 'FINLAND',
+  'CH', 'SWITZERLAND',
+  'AT', 'AUSTRIA',
+  'BE', 'BELGIUM',
+  'ES', 'SPAIN',
+  'IT', 'ITALY',
+  'PT', 'PORTUGAL',
+  'PL', 'POLAND',
+  'CZ', 'CZECH REPUBLIC', 'CZECHIA',
+  'HU', 'HUNGARY',
+  'RO', 'ROMANIA',
+  'IL', 'ISRAEL',
+  'EE', 'ESTONIA',
+  'LV', 'LATVIA',
+  'LT', 'LITHUANIA',
+]);
+
 // ── Name-based large-enterprise keyword filter ────────────────────────────────
 // Catches big companies that slip through without a known domain or employee count
 const BLOCKED_NAME_PATTERNS = [
@@ -158,6 +191,15 @@ async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
       if (BLOCKED_DOMAINS.has(company.domain)) {
         logger.debug({ domain: company.domain }, '[discovery.worker] Blocked enterprise domain — skipping');
         continue;
+      }
+
+      // Skip companies explicitly HQ'd outside target markets
+      if (company.hqCountry) {
+        const countryKey = company.hqCountry.trim().toUpperCase();
+        if (!ALLOWED_COUNTRIES.has(countryKey)) {
+          logger.debug({ domain: company.domain, hqCountry: company.hqCountry }, '[discovery.worker] Non-target country — skipping');
+          continue;
+        }
       }
 
       // Skip by name pattern (catches large enterprises without a known domain)

@@ -24,7 +24,7 @@ export const normalizer = {
       linkedinUrl: normalizeUrl(raw.linkedinUrl),
       crunchbaseUrl: normalizeUrl(raw.crunchbaseUrl),
       websiteUrl: normalizeUrl(raw.websiteUrl),
-      hqCountry: raw.hqCountry ?? 'US',
+      hqCountry: raw.hqCountry,  // don't default — repository handles insert default
       hqState: raw.hqState?.trim(),
       hqCity: raw.hqCity?.trim(),
       employeeCount: raw.employeeCount ? parseInt(String(raw.employeeCount)) : undefined,
