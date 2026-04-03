@@ -23,7 +23,7 @@ export async function startEnrichmentWorker(): Promise<void> {
   );
   logger.info({ concurrency: initialSettings.workerConcurrencyEnrichment }, '[enrichment.worker] Worker started (agent mode)');
 
-  setInterval(async () => {
+  const settingsInterval = setInterval(async () => {
     try {
       const s = await settingsRepository.get();
       const target = s.workerConcurrencyEnrichment;
@@ -36,6 +36,7 @@ export async function startEnrichmentWorker(): Promise<void> {
 
   process.on('SIGTERM', async () => {
     logger.info('[enrichment.worker] SIGTERM received — draining and shutting down');
+    clearInterval(settingsInterval);
     await worker.close();
     process.exit(0);
   });

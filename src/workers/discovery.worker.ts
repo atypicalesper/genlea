@@ -23,7 +23,7 @@ export async function startDiscoveryWorker(): Promise<void> {
   );
   logger.info({ concurrency: initialSettings.workerConcurrencyDiscovery }, '[discovery.worker] Worker started (agent mode)');
 
-  setInterval(async () => {
+  const settingsInterval = setInterval(async () => {
     try {
       const s = await settingsRepository.get();
       const target = s.workerConcurrencyDiscovery;
@@ -36,6 +36,7 @@ export async function startDiscoveryWorker(): Promise<void> {
 
   process.on('SIGTERM', async () => {
     logger.info('[discovery.worker] SIGTERM received — shutting down');
+    clearInterval(settingsInterval);
     await worker.close();
     process.exit(0);
   });

@@ -146,10 +146,12 @@ export const companyRepository = {
       },
     };
 
-    await col.updateOne({ domain }, update);
+    const updated = await col.findOneAndUpdate(
+      { domain },
+      update,
+      { returnDocument: 'after' },
+    );
     logger.debug({ domain }, '[company.repository] Company upserted');
-
-    const updated = await col.findOne({ domain });
     return toCompany(updated!);
   },
 

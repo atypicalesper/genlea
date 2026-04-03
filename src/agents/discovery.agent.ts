@@ -15,7 +15,6 @@ import { normalizer, normalizeRole } from '../enrichment/normalizer.js';
 import { deduplicateCompanies } from '../enrichment/deduplicator.js';
 import { companyRepository } from '../storage/repositories/company.repository.js';
 import { contactRepository } from '../storage/repositories/contact.repository.js';
-import { jobRepository } from '../storage/repositories/job.repository.js';
 import { scrapeLogRepository } from '../storage/repositories/scrape-log.repository.js';
 import { queueManager } from '../core/queue.manager.js';
 import { normalizeDomain } from '../utils/random.js';
@@ -238,7 +237,7 @@ function makeHandlers(job: DiscoveryJobData): Record<string, ToolHandler> {
             fundingStage:   co.fundingStage as string | undefined,
             techStack:      co.techStack as string[] | undefined,
             hqCountry:      (co.hqCountry as string | undefined) ?? 'US',
-            sources:        [co.source as string ?? job.source],
+            sources:        [co.source ? (co.source as string) : job.source],
             pipelineStatus,
           } as any);
 
@@ -247,24 +246,24 @@ function makeHandlers(job: DiscoveryJobData): Record<string, ToolHandler> {
             if (process.env['HUNTER_API_KEY']) {
               hunterScraper.enrichDomain(domain).then(async result => {
                 if (!result?.contacts?.length) return;
-                for (const c of result.contacts) {
-                  if (!c.fullName || !c.role) continue;
-                  const role = normalizeRole(c.role as string);
-                  if (role === 'Unknown') continue;
-                  await contactRepository.upsert({
-                    companyId:       company._id!,
-                    fullName:        c.fullName,
-                    firstName:       c.firstName,
-                    lastName:        c.lastName,
-                    role,
-                    email:           c.email,
-                    emailConfidence: c.emailConfidence ?? 0,
-                    linkedinUrl:     c.linkedinUrl,
-                    sources:         ['hunter'],
-                    forOriginRatio:  false,
-                  }).catch(() => {});
-                }
-              }).catch(() => {});
+                const valid = result.contacts.filter(c => c.fullName && c.role && normalizeRole(c.role as string) !== 'Unknown');
+                await Promise.allSettled(
+                  valid.map(c =>
+                    contactRepository.upsert({
+                      companyId:       company._id!,
+                      fullName:        c.fullName!,
+                      firstName:       c.firstName,
+                      lastName:        c.lastName,
+                      role:            normalizeRole(c.role as string),
+                      email:           c.email,
+                      emailConfidence: c.emailConfidence ?? 0,
+                      linkedinUrl:     c.linkedinUrl,
+                      sources:         ['hunter'],
+                      forOriginRatio:  false,
+                    }).catch(err => logger.debug({ err, domain }, '[discovery.agent] Hunter pre-pop contact save failed'))
+                  )
+                );
+              }).catch(err => logger.debug({ err, domain }, '[discovery.agent] Hunter pre-pop failed'));
             }
 
             await queueManager.addEnrichmentJob({

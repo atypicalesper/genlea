@@ -105,7 +105,7 @@ export async function startScoringWorker(): Promise<void> {
   );
   logger.info({ concurrency: initialSettings.workerConcurrencyScoring }, '[scoring.worker] Worker started');
 
-  setInterval(async () => {
+  const settingsInterval = setInterval(async () => {
     try {
       const s = await settingsRepository.get();
       const target = s.workerConcurrencyScoring;
@@ -118,6 +118,7 @@ export async function startScoringWorker(): Promise<void> {
 
   process.on('SIGTERM', async () => {
     logger.info('[scoring.worker] SIGTERM received — shutting down');
+    clearInterval(settingsInterval);
     await worker.close();
     process.exit(0);
   });

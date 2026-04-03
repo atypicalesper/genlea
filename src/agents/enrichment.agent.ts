@@ -314,23 +314,25 @@ function makeHandlers(job: EnrichmentJobData): Record<string, ToolHandler> {
 
       let contactsSaved = 0;
       if (result.contacts?.length) {
-        for (const c of result.contacts) {
-          if (!c.fullName || !c.role || c.role === 'Unknown') continue;
-          await contactRepository.upsert({
-            companyId,
-            fullName:        c.fullName,
-            firstName:       c.firstName,
-            lastName:        c.lastName,
-            role:            c.role,
-            email:           c.email,
-            emailConfidence: c.emailConfidence ?? 0,
-            phone:           c.phone,
-            linkedinUrl:     c.linkedinUrl,
-            sources:         ['explorium'],
-            forOriginRatio:  false,
-          }).catch(() => {});
-          contactsSaved++;
-        }
+        const validContacts = result.contacts.filter(c => c.fullName && c.role && c.role !== 'Unknown');
+        await Promise.allSettled(
+          validContacts.map(c =>
+            contactRepository.upsert({
+              companyId,
+              fullName:        c.fullName!,
+              firstName:       c.firstName,
+              lastName:        c.lastName,
+              role:            c.role!,
+              email:           c.email,
+              emailConfidence: c.emailConfidence ?? 0,
+              phone:           c.phone,
+              linkedinUrl:     c.linkedinUrl,
+              sources:         ['explorium'],
+              forOriginRatio:  false,
+            }).catch(err => logger.debug({ err, domain }, '[enrichment.agent] Explorium contact save failed'))
+          )
+        );
+        contactsSaved = validContacts.length;
       }
 
       return {
@@ -419,13 +421,15 @@ function makeHandlers(job: EnrichmentJobData): Record<string, ToolHandler> {
       const deduped = deduplicateContacts(raw);
       let saved = 0;
 
-      for (const c of deduped) {
-        if (!c.role || c.role === 'Unknown') continue; // skip unknown roles
-        await contactRepository.upsert({
-          ...c, companyId, fullName: c.fullName ?? '', role: c.role,
-        }).catch(() => {});
-        saved++;
-      }
+      const validDeduped = deduped.filter(c => c.role && c.role !== 'Unknown');
+      await Promise.allSettled(
+        validDeduped.map(c =>
+          contactRepository.upsert({
+            ...c, companyId, fullName: c.fullName ?? '', role: c.role!,
+          }).catch(err => logger.debug({ err, domain }, '[enrichment.agent] Hunter contact save failed'))
+        )
+      );
+      saved = validDeduped.length;
 
       return { found: true, contactsFound: result.contacts.length, savedDecisionMakers: saved };
     },
@@ -586,29 +590,31 @@ function makeHandlers(job: EnrichmentJobData): Record<string, ToolHandler> {
 
     save_contacts: async ({ companyId: cid, contacts }) => {
       const list = contacts as Array<Record<string, unknown>>;
-      let saved = 0;
+      const targetId = cid as string ?? companyId;
 
-      for (const c of list) {
-        if (!c.fullName || !c.role) continue;
-        const role = normalizeRole(String(c.role)) as ContactRole;
-        if (role === 'Unknown') continue; // enforce — no unknown roles in contacts
+      const valid = list
+        .filter(c => c.fullName && c.role)
+        .map(c => ({ c, role: normalizeRole(String(c.role)) as ContactRole }))
+        .filter(({ role }) => role !== 'Unknown');
 
-        await contactRepository.upsert({
-          companyId: cid as string ?? companyId,
-          fullName:    String(c.fullName),
-          firstName:   String(c.fullName).split(' ')[0],
-          lastName:    String(c.fullName).split(' ').at(-1),
-          role,
-          email:       c.email as string | undefined,
-          linkedinUrl: c.linkedinUrl as string | undefined,
-          phone:       c.phone as string | undefined,
-          sources:     ['agent'],
-          forOriginRatio: false,
-        }).catch(() => {});
-        saved++;
-      }
+      await Promise.allSettled(
+        valid.map(({ c, role }) =>
+          contactRepository.upsert({
+            companyId:   targetId,
+            fullName:    String(c.fullName),
+            firstName:   String(c.fullName).split(' ')[0],
+            lastName:    String(c.fullName).split(' ').at(-1),
+            role,
+            email:       c.email as string | undefined,
+            linkedinUrl: c.linkedinUrl as string | undefined,
+            phone:       c.phone as string | undefined,
+            sources:     ['agent'],
+            forOriginRatio: false,
+          }).catch(err => logger.debug({ err, domain }, '[enrichment.agent] save_contacts upsert failed'))
+        )
+      );
 
-      return { saved, total: list.length };
+      return { saved: valid.length, total: list.length };
     },
 
     compute_origin_ratio: async () => {
