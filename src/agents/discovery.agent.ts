@@ -24,6 +24,7 @@ import { logger } from '../utils/logger.js';
 import {
   linkedInScraper, apolloScraper, crunchbaseScraper, wellfoundScraper,
   indeedScraper, glassdoorScraper, surelyRemoteScraper, exploriumScraper,
+  zoomInfoScraper,
 } from '../scrapers/discovery/index.js';
 import type { DiscoveryJobData, Scraper } from '../types/index.js';
 
@@ -59,6 +60,7 @@ const SCRAPERS: Record<string, Scraper> = {
   apollo:       apolloScraper,
   glassdoor:    glassdoorScraper,
   surelyremote: surelyRemoteScraper,
+  zoominfo:     zoomInfoScraper,
 };
 
 const SYSTEM_PROMPT = `You are a B2B lead generation discovery agent for a software agency that sells offshore Indian developer talent to US/UK/CA/AU/EU tech companies.
@@ -72,7 +74,7 @@ Target profile:
 - Verticals (include variety): SaaS, AI/ML, Fintech, HealthTech, DevTools, B2B Software, EdTech, LegalTech, PropTech, InsurTech, Cybersecurity, MarTech, HRTech, CleanTech, LogisticsTech, E-commerce Tech, Data & Analytics, API Platforms, CRMTech, AgriTech
 - Funding: pre-seed to Series C (not bootstrapped micro-businesses or Series D+ mega-rounds)
 
-Available sources: explorium, wellfound, linkedin, indeed, crunchbase, apollo, glassdoor, surelyremote
+Available sources: explorium, wellfound, linkedin, indeed, crunchbase, apollo, glassdoor, surelyremote, zoominfo
 
 Hiring status — set hiringInStack per company:
 - Job board sources (wellfound, linkedin, indeed, glassdoor, surelyremote): companies returned ARE actively hiring → hiringInStack: true
@@ -82,7 +84,7 @@ Hiring status — set hiringInStack per company:
 Decision rules:
 1. Always start with the source specified in the task. If it returns < 5 results, automatically try 2–3 other sources with the same or adapted keywords.
 2. If a source returns an error or is unavailable, skip it and try the next best source.
-3. Good fallback order: explorium → wellfound → linkedin → indeed → glassdoor → crunchbase → apollo → surelyremote
+3. Good fallback order: explorium → wellfound → linkedin → indeed → glassdoor → crunchbase → apollo → zoominfo → surelyremote
 4. explorium uses API-based company search — very reliable, no browser needed. Prefer it when available.
 5. Adapt keywords when expanding — e.g. if "startup backend engineer" returns little, try "growth stage tech company software engineer" or "series b saas engineer".
 6. Stop when you have ≥ 15 valid companies OR have tried all available sources.

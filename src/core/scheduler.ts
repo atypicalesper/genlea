@@ -57,6 +57,20 @@ const SEED_QUERIES: Array<{
   { source: 'surelyremote', keywords: 'startup AI engineer generative llm',          techStack: ['python', 'generative-ai', 'ai'] },
   { source: 'surelyremote', keywords: 'startup fullstack react typescript',          techStack: ['react', 'typescript', 'fullstack'] },
   { source: 'surelyremote', keywords: 'saas startup backend typescript nestjs',      techStack: ['nodejs', 'nestjs', 'typescript'] },
+
+  // ── Crunchbase — database source (hiringInStack: false → watchlist) ─────
+  { source: 'crunchbase', keywords: 'seed stage saas startup software US',          techStack: ['nodejs', 'python'] },
+  { source: 'crunchbase', keywords: 'series a ai ml startup US',                    techStack: ['python', 'generative-ai', 'ai'] },
+  { source: 'crunchbase', keywords: 'series b fintech devtools startup US',         techStack: ['nodejs', 'typescript', 'golang'] },
+
+  // ── Apollo — database source (hiringInStack: false → watchlist) ──────────
+  { source: 'apollo', keywords: 'saas startup nodejs typescript engineer US',       techStack: ['nodejs', 'typescript'] },
+  { source: 'apollo', keywords: 'ai ml startup python engineer US',                 techStack: ['python', 'generative-ai'] },
+  { source: 'apollo', keywords: 'fintech startup fullstack engineer US',            techStack: ['react', 'nodejs'] },
+
+  // ── ZoomInfo — database source (hiringInStack: false → watchlist) ────────
+  { source: 'zoominfo', keywords: 'tech startup software engineer US seed series a', techStack: ['nodejs', 'python', 'react'] },
+  { source: 'zoominfo', keywords: 'saas startup backend engineer US',               techStack: ['nodejs', 'typescript'] },
 ];
 
 // ── Configurable thresholds ────────────────────────────────────────────────────
