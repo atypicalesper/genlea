@@ -137,6 +137,91 @@ The scheduler also auto-seeds every 2 hours.
 
 ---
 
+## How it works — full pipeline walkthrough
+
+### 1. Scheduler triggers discovery
+
+`src/core/scheduler.ts` runs a cron job every 2 hours (configurable). On each tick it calls `enqueueSeedRound()`, which pushes ~22 BullMQ jobs into the `genlea-discovery` queue — one per `(source, keyword)` pair. You can also trigger this manually via `npm run seed` or `POST /api/seed`.
+
+### 2. Discovery worker + LangGraph agent
+
+`src/workers/discovery.worker.ts` pulls each job from the queue and calls `runDiscoveryAgent(job)`.
+
+The discovery agent is a **LangGraph `createReactAgent` loop** backed by your configured LLM (Ollama `qwen3.5` by default). It has three tools:
+
+- `check_source_availability` — checks if the requested scraper has credentials
+- `scrape_source` — runs the actual scraper (Playwright stealth browser or API call). Normalises and deduplicates results before returning them to the model.
+- `save_companies` — called by the model when it has enough results. Upserts companies into MongoDB and enqueues each one for enrichment.
+
+The agent autonomously decides: which sources to try, when to switch sources if results are thin, and when to stop. If a source is unavailable it moves to the next without breaking.
+
+**Filter pass** (inside `scrape_source`): blocklisted enterprise domains (Google, Amazon, etc.) and companies with >1000 employees are stripped before the model ever sees them.
+
+**Hunter pre-population** (fire-and-forget): if `HUNTER_API_KEY` is set, the save handler asynchronously pre-fetches contact emails for every discovered company before enrichment even starts.
+
+### 3. Enrichment worker + LangGraph agent
+
+`src/workers/enrichment.worker.ts` picks each enrichment job. Before running the agent it checks:
+- company still exists in MongoDB
+- employee count ≤ 1000 (auto-disqualify if not)
+- 7-day cooldown not active (unless `force: true`)
+
+Then `runEnrichmentAgent(job)` runs a second LangGraph agent with 12 tools:
+
+| Tool | What it does |
+|---|---|
+| `get_company_state` | Reads current DB state — tells the agent what's already filled |
+| `enrich_explorium` | API call: company metadata + verified contacts in one shot |
+| `enrich_github` | Finds GitHub org, extracts tech stack from repos, gets contributor names for ratio |
+| `enrich_clearbit` | Company metadata (employee count, funding, HQ) |
+| `scrape_website_team` | Scrapes `/team`, `/about`, `/people` pages via Playwright |
+| `playwright_scrape_url` | General-purpose stealth browser — fallback for any URL. Extracts people via JSON-LD, LinkedIn anchors, and email regexes |
+| `enrich_hunter` | Email discovery via Hunter.io API |
+| `verify_contacts` | SMTP-verifies existing emails, fills gaps using email patterns |
+| `save_contacts` | Persists decision-maker contacts (CEO, CTO, HR, etc.) to MongoDB |
+| `compute_origin_ratio` | Classifies collected names as Indian-origin via Groq/Ollama, computes ratio |
+| `save_company_data` | Merges partial company data into MongoDB |
+| `disqualify_company` | Marks defunct / too-large / wrong-country companies as disqualified |
+| `queue_for_scoring` | Writes `lastEnrichedAt`, sets `pipelineStatus: enriched`, enqueues scoring |
+
+The agent reads the system prompt and the current company state, then autonomously decides the order of tool calls. If Explorium is unavailable, it falls back to Clearbit + GitHub + Playwright. If no emails are found via API, it scrapes `/team` and `/contact` pages directly.
+
+### 4. Scoring worker
+
+`src/workers/scoring.worker.ts` runs the deterministic rule engine:
+
+| Signal | Max pts | How |
+|---|---|---|
+| `originRatioScore` | 30 | Linearly scaled from `originRatioThreshold` → 1.0. Unknown ratio → 10 (neutral) |
+| `jobFreshnessScore` | 20 | Active jobs posted in the last 14 days score full; decays to 0 past 90 days |
+| `techStackScore` | 20 | Tags matched against `TARGET_TECH_STACK` env var |
+| `contactScore` | 15 | Points for CEO/CTO/HR email presence + email verification |
+| `companyFitScore` | 15 | Employee count 30–200 ideal; funding stage Seed–Series B ideal |
+
+Total → status:
+
+```
+≥ 80  →  hot_verified
+≥ 55  →  hot
+≥ 38  →  warm
+≥ 20  →  cold
+< 20  →  disqualified
+```
+
+The `manuallyReviewed` flag prevents the scorer from overwriting statuses set by a human via the UI.
+
+### 5. Alert on failure
+
+Any unhandled exception in a discovery or enrichment agent calls `alertAgentFailure()` before re-throwing. If `SMTP_HOST` and `ALERT_EMAIL_TO` are set in `.env`, a structured email is sent with the agent name, company domain, run ID, error message, and stack trace. Otherwise the failure is logged at `warn` level and the BullMQ retry policy handles re-queuing (3 attempts, exponential backoff starting at 5s).
+
+### 6. API + frontend
+
+The Fastify API (`src/api/server.ts`) on port `4001` exposes REST endpoints for all data and queue operations. The React frontend (`../genlea-frontend`) proxies `/api`, `/health`, and `/queues` to `localhost:4001` via Vite during development.
+
+The Bull Board queue monitor is embedded at `/queues` — it shows live job counts, failure reasons, and lets you retry failed jobs without writing code.
+
+---
+
 ## Dashboards
 
 | URL | What |
