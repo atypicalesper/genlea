@@ -54,8 +54,8 @@ export async function leadsRoutes(app: FastifyInstance) {
       filter['techStack'] = { $in: tags };
     }
     if (search) {
-      // Escape regex special chars to prevent ReDoS
-      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const trimmed = search.slice(0, 100);
+      const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter['$or'] = [
         { name:   { $regex: escaped, $options: 'i' } },
         { domain: { $regex: escaped, $options: 'i' } },
