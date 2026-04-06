@@ -38,7 +38,7 @@ async function bootstrap() {
   });
   bullBoardAdapter.setBasePath('/queues');
   await server.register(bullBoardAdapter.registerPlugin(), { basePath: '/queues', prefix: '/queues' });
-  logger.info('[api] Bull Board: http://localhost:4000/queues');
+  logger.info(`[api] Bull Board: http://localhost:${parseInt(process.env['API_PORT'] ?? '4001')}/queues`);
 
   // Health check
   server.get('/health', async () => ({
