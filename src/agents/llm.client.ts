@@ -120,7 +120,8 @@ async function ollamaChat(
     model,
     messages: ollamaMessages,
     stream: false,
-    options: { temperature: 0.2, num_predict: 800 },
+    temperature: 0.2,
+    max_tokens: 800,
   };
 
   if (tools.length) {
