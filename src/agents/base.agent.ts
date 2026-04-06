@@ -1,156 +1,83 @@
 /**
- * Base agentic loop.
+ * LangGraph agentic loop.
  *
- * Runs a tool-use loop until:
- *   - The LLM stops calling tools (end_turn)
- *   - A tool calls `signal_done`
- *   - MAX_ITERATIONS is reached (safety guard)
+ * Wraps `createReactAgent` — tool-calling loop that runs until the model
+ * produces a final response with no tool calls, or `maxIterations` is hit.
+ *
+ * Single responsibility: orchestrate the agent loop and surface results.
+ * All tool definitions and handlers live in the concrete agent files.
  */
 
-import { llmChat, toolResult, LLMMessage, ToolDef, ToolCall } from './llm.client.js';
-export type { ToolDef, ToolCall } from './llm.client.js';
-import { logger } from '../utils/logger.js';
+import { createReactAgent }            from '@langchain/langgraph/prebuilt';
+import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
+import type { StructuredToolInterface } from '@langchain/core/tools';
+import { buildLlm }                    from './llm.client.js';
+import { logger }                      from '../utils/logger.js';
 
-export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
-
-export interface AgentConfig {
-  name: string;
-  systemPrompt: string;
-  tools: ToolDef[];
-  handlers: Record<string, ToolHandler>;
+export interface AgentRunOptions {
+  name:          string;
+  systemPrompt:  string;
+  tools:         StructuredToolInterface[];
+  userMessage:   string;
   maxIterations?: number;
 }
 
 export interface AgentResult {
-  iterations: number;
+  /** Final text response from the model (after all tool calls). */
   finalMessage: string;
-  toolCallLog: Array<{ tool: string; args: Record<string, unknown>; result: unknown }>;
+  /** Number of LLM → tool-call iterations completed. */
+  iterations:   number;
+  /**
+   * Last result for each tool that was called, keyed by tool name.
+   * Multiple calls to the same tool keep only the last result.
+   */
+  toolResults: Map<string, unknown>;
 }
 
-const DONE_TOOL = 'signal_done';
+export async function runAgent({
+  name,
+  systemPrompt,
+  tools,
+  userMessage,
+  maxIterations = 15,
+}: AgentRunOptions): Promise<AgentResult> {
+  const llm = await buildLlm();
 
-const DONE_TOOL_DEF: ToolDef = {
-  name: DONE_TOOL,
-  description: 'Signal that you have finished your task. Call this when all work is complete.',
-  parameters: {
-    type: 'object',
-    properties: {
-      summary: { type: 'string', description: 'Brief summary of what was accomplished' },
-    },
-    required: ['summary'],
-  },
-};
+  const agent = createReactAgent({
+    llm,
+    tools,
+    stateModifier: systemPrompt,
+  });
 
-const TOOL_RESULT_MAX_CHARS = 600;
+  logger.info({ agent: name, tools: tools.map(t => t.name) }, '[agent] Starting');
 
-/**
- * Slim down a tool result before appending to message history.
- * The LLM already reasoned over the full result — subsequent iterations
- * only need a short summary to maintain context, not the full payload.
- */
-function truncateToolResult(result: unknown, toolName: string): unknown {
-  const json = typeof result === 'string' ? result : JSON.stringify(result);
-  if (json.length <= TOOL_RESULT_MAX_CHARS) return result;
+  const result = await agent.invoke(
+    { messages: [new HumanMessage(userMessage)] },
+    // Each full iteration = 1 agent node + 1 tools node = 2 graph steps.
+    // Add headroom for the final LLM response (no tool call).
+    { recursionLimit: maxIterations * 2 + 4 },
+  );
 
-  // For scrape_source: keep counts + first 3 company names only
-  if (toolName === 'scrape_source' && typeof result === 'object' && result !== null) {
-    const r = result as Record<string, unknown>;
-    const companies = (r['companies'] as unknown[]) ?? [];
-    return {
-      source:         r['source'],
-      rawCount:       r['rawCount'],
-      filteredCount:  r['filteredCount'],
-      companies:      companies.slice(0, 3).map((c: any) => ({ name: c.name, domain: c.domain })),
-      truncated:      `${companies.length} companies total — first 3 shown`,
-    };
-  }
-
-  // Generic fallback: truncate JSON string
-  return { _truncated: json.slice(0, TOOL_RESULT_MAX_CHARS) + `… [${json.length} chars total]` };
-}
-
-export async function runAgent(
-  config: AgentConfig,
-  userMessage: string,
-): Promise<AgentResult> {
-  const maxIter = config.maxIterations ?? 15;
-  const allTools = [...config.tools, DONE_TOOL_DEF];
-
-  const messages: LLMMessage[] = [
-    { role: 'system',  content: config.systemPrompt },
-    { role: 'user',    content: userMessage },
-  ];
-
-  const toolCallLog: AgentResult['toolCallLog'] = [];
+  // Extract tool results and count meaningful iterations from message history.
+  const toolResults = new Map<string, unknown>();
   let iterations = 0;
-  let finalMessage = '';
 
-  logger.info({ agent: config.name, userMessage: userMessage.slice(0, 120) }, '[agent] Starting');
-
-  while (iterations < maxIter) {
-    iterations++;
-
-    const response = await llmChat(messages, allTools);
-    finalMessage = response.content;
-
-    logger.debug(
-      { agent: config.name, iter: iterations, stopReason: response.stopReason, toolCalls: response.toolCalls.map(t => t.name) },
-      '[agent] LLM response'
-    );
-
-    // Append assistant turn to history
-    messages.push({
-      role: 'assistant',
-      content: response.content,
-      tool_calls: response.toolCalls.length
-        ? response.toolCalls.map(tc => ({
-            id: tc.id,
-            type: 'function' as const,
-            function: { name: tc.name, arguments: JSON.stringify(tc.args) },
-          }))
-        : undefined,
-    });
-
-    if (response.stopReason === 'end_turn' || response.toolCalls.length === 0) {
-      logger.info({ agent: config.name, iterations }, '[agent] Done — end_turn');
-      break;
+  for (const msg of result.messages as (AIMessage | ToolMessage)[]) {
+    if (msg instanceof AIMessage && msg.tool_calls && msg.tool_calls.length > 0) {
+      iterations++;
     }
-
-    // Execute each tool call
-    for (const call of response.toolCalls) {
-      if (call.name === DONE_TOOL) {
-        finalMessage = String((call.args as { summary?: string }).summary ?? 'Done');
-        logger.info({ agent: config.name, iterations, summary: finalMessage }, '[agent] signal_done');
-        return { iterations, finalMessage, toolCallLog };
+    if (msg instanceof ToolMessage && msg.name) {
+      try {
+        toolResults.set(msg.name, JSON.parse(msg.content as string));
+      } catch {
+        toolResults.set(msg.name, msg.content);
       }
-
-      const handler = config.handlers[call.name];
-      let result: unknown;
-
-      if (!handler) {
-        result = { error: `Unknown tool: ${call.name}` };
-        logger.warn({ agent: config.name, tool: call.name }, '[agent] Unknown tool called');
-      } else {
-        try {
-          result = await handler(call.args);
-          logger.debug({ agent: config.name, tool: call.name }, '[agent] Tool executed');
-        } catch (err) {
-          result = { error: err instanceof Error ? err.message : String(err) };
-          logger.warn({ agent: config.name, tool: call.name, err }, '[agent] Tool error');
-        }
-      }
-
-      toolCallLog.push({ tool: call.name, args: call.args, result });
-      // Truncate large tool results in message history — LLM already reasoned over
-      // the full result; keeping a slim summary prevents history bloat across iterations.
-      const resultForHistory = truncateToolResult(result, call.name);
-      messages.push(toolResult(call.id, call.name, resultForHistory));
     }
   }
 
-  if (iterations >= maxIter) {
-    logger.warn({ agent: config.name, iterations }, '[agent] Max iterations reached');
-  }
+  const lastAI = [...result.messages].reverse().find(m => m instanceof AIMessage);
+  const finalMessage = typeof lastAI?.content === 'string' ? lastAI.content : '';
 
-  return { iterations, finalMessage, toolCallLog };
+  logger.info({ agent: name, iterations }, '[agent] Complete');
+  return { finalMessage, iterations, toolResults };
 }

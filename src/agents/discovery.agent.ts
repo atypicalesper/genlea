@@ -1,25 +1,29 @@
 /**
  * Discovery Agent
  *
- * Given a search query, the agent decides:
+ * Given a search query, the agent autonomously decides:
  *   - Which sources to try (and in what order)
  *   - Whether to expand to more sources if results are thin
  *   - How to handle failures (retry different source, adjust keywords)
  *   - When enough companies have been found
  *
- * Workers call runDiscoveryAgent() instead of hardcoded scraper logic.
+ * Workers call runDiscoveryAgent() — no manual intervention needed.
  */
 
-import { runAgent, AgentConfig, ToolDef, ToolHandler } from './base.agent.js';
+import { z }                from 'zod';
+import { tool }             from '@langchain/core/tools';
+import type { StructuredToolInterface } from '@langchain/core/tools';
+import { runAgent }              from './base.agent.js';
+import { alertAgentFailure }     from '../utils/alert.js';
 import { normalizer, normalizeRole } from '../enrichment/normalizer.js';
-import { deduplicateCompanies } from '../enrichment/deduplicator.js';
-import { companyRepository } from '../storage/repositories/company.repository.js';
-import { contactRepository } from '../storage/repositories/contact.repository.js';
-import { scrapeLogRepository } from '../storage/repositories/scrape-log.repository.js';
-import { queueManager } from '../core/queue.manager.js';
-import { normalizeDomain } from '../utils/random.js';
-import { hunterScraper } from '../scrapers/enrichment/index.js';
-import { logger } from '../utils/logger.js';
+import { deduplicateCompanies }      from '../enrichment/deduplicator.js';
+import { companyRepository }         from '../storage/repositories/company.repository.js';
+import { contactRepository }         from '../storage/repositories/contact.repository.js';
+import { scrapeLogRepository }       from '../storage/repositories/scrape-log.repository.js';
+import { queueManager }              from '../core/queue.manager.js';
+import { normalizeDomain }           from '../utils/random.js';
+import { hunterScraper }             from '../scrapers/enrichment/index.js';
+import { logger }                    from '../utils/logger.js';
 import {
   linkedInScraper, apolloScraper, crunchbaseScraper, wellfoundScraper,
   indeedScraper, glassdoorScraper, surelyRemoteScraper, exploriumScraper,
@@ -27,7 +31,8 @@ import {
 } from '../scrapers/discovery/index.js';
 import type { DiscoveryJobData, Scraper } from '../types/index.js';
 
-// ── Blocklists (shared with discovery worker) ─────────────────────────────────
+// ── Blocklists ────────────────────────────────────────────────────────────────
+
 const BLOCKED_DOMAINS = new Set([
   'google.com','amazon.com','microsoft.com','apple.com','meta.com','facebook.com',
   'netflix.com','salesforce.com','oracle.com','ibm.com','sap.com','adobe.com',
@@ -62,6 +67,10 @@ const SCRAPERS: Record<string, Scraper> = {
   zoominfo:     zoomInfoScraper,
 };
 
+const SOURCE_LIST = Object.keys(SCRAPERS).join(', ');
+
+// ── System prompt ─────────────────────────────────────────────────────────────
+
 const SYSTEM_PROMPT = `You are a B2B lead generation discovery agent for a software agency that sells offshore Indian developer talent to US/UK/CA/AU/EU tech companies.
 
 Your goal: find tech companies with 10–200 employees that are actively hiring software engineers. These are pre-qualified leads because they are in a growth phase and have engineering demand.
@@ -73,7 +82,7 @@ Target profile:
 - Verticals (include variety): SaaS, AI/ML, Fintech, HealthTech, DevTools, B2B Software, EdTech, LegalTech, PropTech, InsurTech, Cybersecurity, MarTech, HRTech, CleanTech, LogisticsTech, E-commerce Tech, Data & Analytics, API Platforms, CRMTech, AgriTech
 - Funding: pre-seed to Series C (not bootstrapped micro-businesses or Series D+ mega-rounds)
 
-Available sources: explorium, wellfound, linkedin, indeed, crunchbase, apollo, glassdoor, surelyremote, zoominfo
+Available sources: ${SOURCE_LIST}
 
 Hiring status — set hiringInStack per company:
 - Job board sources (wellfound, linkedin, indeed, glassdoor, surelyremote): companies returned ARE actively hiring → hiringInStack: true
@@ -91,198 +100,172 @@ Decision rules:
 8. A 5–7 year old company with strong engineering hiring is a better lead than a 1-year-old startup with zero team.
 9. Save ALL valid companies — even if not currently hiring in the target stack. These go on a watchlist and will be refreshed automatically.
 
-After collecting results, call save_companies with all discovered companies (set hiringInStack accurately per company) and signal_done.`;
+After collecting results, call save_companies with all discovered companies (set hiringInStack accurately per company).`;
 
-// ── Tool definitions ──────────────────────────────────────────────────────────
+// ── Tool factory ──────────────────────────────────────────────────────────────
+// Combines tool schema (Zod) + handler in one place — no separate makeHandlers map.
 
-const TOOLS: ToolDef[] = [
-  {
-    name: 'check_source_availability',
-    description: 'Check if a scraper source has valid credentials and is available to use.',
-    parameters: {
-      type: 'object',
-      properties: {
-        source: { type: 'string', enum: Object.keys(SCRAPERS) },
+function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
+  return [
+    // ── check_source_availability ─────────────────────────────────────────────
+    tool(
+      async ({ source }) => {
+        const scraper = SCRAPERS[source];
+        if (!scraper) return JSON.stringify({ available: false, reason: 'Unknown source' });
+        const available = await scraper.isAvailable();
+        return JSON.stringify({ available, source });
       },
-      required: ['source'],
-    },
-  },
-  {
-    name: 'scrape_source',
-    description: 'Scrape a source for companies matching the query. Returns companies found.',
-    parameters: {
-      type: 'object',
-      properties: {
-        source:   { type: 'string', enum: Object.keys(SCRAPERS) },
-        keywords: { type: 'string', description: 'Search keywords' },
-        location: { type: 'string', default: 'United States' },
-        limit:    { type: 'number', default: 25, description: 'Max results to fetch' },
+      {
+        name:        'check_source_availability',
+        description: 'Check if a scraper source has valid credentials and is available to use.',
+        schema: z.object({
+          source: z.string().describe(`Source to check. Options: ${SOURCE_LIST}`),
+        }),
       },
-      required: ['source', 'keywords'],
-    },
-  },
-  {
-    name: 'save_companies',
-    description: 'Save all valid discovered companies to the database. Companies actively hiring in the target stack are queued for enrichment; others go on a watchlist for later refresh. Call once when done collecting.',
-    parameters: {
-      type: 'object',
-      properties: {
-        companies: {
-          type: 'array',
-          description: 'Array of company objects to save',
-          items: {
-            type: 'object',
-            properties: {
-              name:           { type: 'string' },
-              domain:         { type: 'string' },
-              linkedinUrl:    { type: 'string' },
-              employeeCount:  { type: 'number' },
-              fundingStage:   { type: 'string' },
-              techStack:      { type: 'array', items: { type: 'string' } },
-              hqCountry:      { type: 'string' },
-              source:         { type: 'string' },
-              hiringInStack:  { type: 'boolean', description: 'True if company is confirmed to be actively hiring in the target tech stack. False if unknown (database source) or not hiring.' },
-            },
-            required: ['name', 'domain'],
-          },
-        },
-      },
-      required: ['companies'],
-    },
-  },
-];
+    ),
 
-// ── Tool handlers ─────────────────────────────────────────────────────────────
+    // ── scrape_source ─────────────────────────────────────────────────────────
+    tool(
+      async ({ source, keywords, location = 'United States', limit = 25 }) => {
+        const scraper = SCRAPERS[source];
+        if (!scraper) return JSON.stringify({ error: `Unknown source: ${source}`, companies: [] });
 
-function makeHandlers(job: DiscoveryJobData): Record<string, ToolHandler> {
-  return {
-    check_source_availability: async ({ source }) => {
-      const scraper = SCRAPERS[source as string];
-      if (!scraper) return { available: false, reason: 'Unknown source' };
-      const available = await scraper.isAvailable();
-      return { available, source };
-    },
-
-    scrape_source: async ({ source, keywords, location = 'United States', limit = 25 }) => {
-      const scraper = SCRAPERS[source as string];
-      if (!scraper) return { error: `Unknown source: ${source}`, companies: [] };
-
-      const available = await scraper.isAvailable();
-      if (!available) return { error: `${source} is unavailable — missing credentials`, companies: [] };
-
-      try {
-        const rawResults = await scraper.scrape({
-          keywords: keywords as string,
-          location: location as string,
-          limit: Number(limit),
-        });
-
-        const { companies } = normalizer.processResults(rawResults);
-        const deduped = deduplicateCompanies(companies);
-
-        // Apply filters — keep loose: enrich phase handles disqualification
-        // Don't filter by missing tech stack — enrichment will fill it in
-        const filtered = deduped.filter(c => {
-          if (!c.domain || !c.name) return false;
-          if (BLOCKED_DOMAINS.has(c.domain)) return false;
-          if (c.name && BLOCKED_NAME_PATTERNS.some(re => re.test(c.name!))) return false;
-          if (c.employeeCount && c.employeeCount > 1000) return false;
-          return true;
-        });
-
-        logger.info({ source, raw: rawResults.length, filtered: filtered.length }, '[discovery.agent] Scraped');
-        // Return slim objects — LLM only needs name/domain/employees/stack to reason.
-        // Full data (linkedinUrl, hqCountry etc.) is passed through save_companies.
-        return {
-          source,
-          rawCount:      rawResults.length,
-          filteredCount: filtered.length,
-          companies: filtered.map(c => ({
-            name:          c.name,
-            domain:        c.domain,
-            employeeCount: c.employeeCount,
-            fundingStage:  c.fundingStage,
-            techStack:     (c.techStack ?? []).slice(0, 4), // cap tags sent to LLM
-            source,
-          })),
-        };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn({ source, err }, '[discovery.agent] Scrape failed');
-        return { error: msg, companies: [] };
-      }
-    },
-
-    save_companies: async ({ companies }) => {
-      const list = companies as Array<Record<string, unknown>>;
-      let saved = 0;
-      let watchlisted = 0;
-      let skipped = 0;
-
-      for (const co of list) {
-        const domain = normalizeDomain(String(co.domain ?? ''));
-        if (!domain || !co.name) { skipped++; continue; }
-
-        // hiringInStack: true  → discovered + enqueue for enrichment
-        // hiringInStack: false → watchlist (no enrichment until refreshed)
-        const hiringInStack = co.hiringInStack !== false; // default true if omitted
-        const pipelineStatus = hiringInStack ? 'discovered' : 'watchlist';
+        if (!(await scraper.isAvailable())) {
+          return JSON.stringify({ error: `${source} is unavailable — missing credentials`, companies: [] });
+        }
 
         try {
-          const company = await companyRepository.upsert({
-            name:           String(co.name),
-            domain,
-            linkedinUrl:    co.linkedinUrl as string | undefined,
-            employeeCount:  co.employeeCount as number | undefined,
-            fundingStage:   co.fundingStage as string | undefined,
-            techStack:      co.techStack as string[] | undefined,
-            hqCountry:      (co.hqCountry as string | undefined) ?? 'US',
-            sources:        [co.source ? (co.source as string) : job.source],
-            pipelineStatus,
-          } as any);
+          const rawResults = await scraper.scrape({ keywords, location, limit });
+          const { companies } = normalizer.processResults(rawResults);
+          const deduped = deduplicateCompanies(companies);
 
-          if (hiringInStack) {
-            // Fire-and-forget Hunter contact pre-population
-            if (process.env['HUNTER_API_KEY']) {
-              hunterScraper.enrichDomain(domain).then(async result => {
-                if (!result?.contacts?.length) return;
-                const valid = result.contacts.filter(c => c.fullName && c.role && normalizeRole(c.role as string) !== 'Unknown');
-                await Promise.allSettled(
-                  valid.map(c =>
-                    contactRepository.upsert({
-                      companyId:       company._id!,
-                      fullName:        c.fullName!,
-                      firstName:       c.firstName,
-                      lastName:        c.lastName,
-                      role:            normalizeRole(c.role as string),
-                      email:           c.email,
-                      emailConfidence: c.emailConfidence ?? 0,
-                      linkedinUrl:     c.linkedinUrl,
-                      sources:         ['hunter'],
-                      forOriginRatio:  false,
-                    }).catch(err => logger.debug({ err, domain }, '[discovery.agent] Hunter pre-pop contact save failed'))
-                  )
-                );
-              }).catch(err => logger.debug({ err, domain }, '[discovery.agent] Hunter pre-pop failed'));
+          const filtered = deduped.filter(c => {
+            if (!c.domain || !c.name) return false;
+            if (BLOCKED_DOMAINS.has(c.domain)) return false;
+            if (c.name && BLOCKED_NAME_PATTERNS.some(re => re.test(c.name!))) return false;
+            if (c.employeeCount && c.employeeCount > 1000) return false;
+            return true;
+          });
+
+          logger.info({ source, raw: rawResults.length, filtered: filtered.length }, '[discovery.agent] Scraped');
+
+          return JSON.stringify({
+            source,
+            rawCount:      rawResults.length,
+            filteredCount: filtered.length,
+            // Slim payload — LLM only needs identity + basic signals to reason.
+            companies: filtered.map(c => ({
+              name:          c.name,
+              domain:        c.domain,
+              employeeCount: c.employeeCount,
+              fundingStage:  c.fundingStage,
+              techStack:     (c.techStack ?? []).slice(0, 4),
+              source,
+            })),
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.warn({ source, err }, '[discovery.agent] Scrape failed');
+          return JSON.stringify({ error: msg, companies: [] });
+        }
+      },
+      {
+        name:        'scrape_source',
+        description: 'Scrape a source for companies matching the query. Returns companies found.',
+        schema: z.object({
+          source:   z.string().describe(`Source to scrape. Options: ${SOURCE_LIST}`),
+          keywords: z.string().describe('Search keywords'),
+          location: z.string().default('United States'),
+          limit:    z.number().int().min(1).max(100).default(25).describe('Max results to fetch'),
+        }),
+      },
+    ),
+
+    // ── save_companies ────────────────────────────────────────────────────────
+    tool(
+      async ({ companies }) => {
+        let saved = 0, watchlisted = 0, skipped = 0;
+
+        for (const co of companies) {
+          const domain = normalizeDomain(co.domain ?? '');
+          if (!domain || !co.name) { skipped++; continue; }
+
+          const hiringInStack   = co.hiringInStack !== false;
+          const pipelineStatus  = hiringInStack ? 'discovered' : 'watchlist';
+
+          try {
+            const company = await companyRepository.upsert({
+              name:          co.name,
+              domain,
+              linkedinUrl:   co.linkedinUrl,
+              employeeCount: co.employeeCount,
+              fundingStage:  co.fundingStage,
+              techStack:     co.techStack,
+              hqCountry:     co.hqCountry ?? 'US',
+              sources:       [co.source ?? job.source],
+              pipelineStatus,
+            } as any);
+
+            if (hiringInStack) {
+              // Fire-and-forget Hunter contact pre-population
+              if (process.env['HUNTER_API_KEY']) {
+                hunterScraper.enrichDomain(domain).then(async result => {
+                  if (!result?.contacts?.length) return;
+                  const valid = result.contacts.filter(c => c.fullName && c.role && normalizeRole(c.role as string) !== 'Unknown');
+                  await Promise.allSettled(
+                    valid.map(c =>
+                      contactRepository.upsert({
+                        companyId:       company._id!,
+                        fullName:        c.fullName!,
+                        firstName:       c.firstName,
+                        lastName:        c.lastName,
+                        role:            normalizeRole(c.role as string),
+                        email:           c.email,
+                        emailConfidence: c.emailConfidence ?? 0,
+                        linkedinUrl:     c.linkedinUrl,
+                        sources:         ['hunter'],
+                        forOriginRatio:  false,
+                      }).catch(err => logger.debug({ err, domain }, '[discovery.agent] Hunter pre-pop failed'))
+                    )
+                  );
+                }).catch(err => logger.debug({ err, domain }, '[discovery.agent] Hunter pre-pop error'));
+              }
+
+              await queueManager.addEnrichmentJob({
+                runId:     job.runId,
+                companyId: company._id!,
+                domain:    company.domain,
+                sources:   ['github', 'hunter', 'clearbit'],
+              });
+              saved++;
+            } else {
+              watchlisted++;
             }
+          } catch { skipped++; }
+        }
 
-            await queueManager.addEnrichmentJob({
-              runId:     job.runId,
-              companyId: company._id!,
-              domain:    company.domain,
-              sources:   ['github', 'hunter', 'clearbit'],
-            });
-            saved++;
-          } else {
-            watchlisted++;
-          }
-        } catch { skipped++; }
-      }
-
-      logger.info({ saved, watchlisted, skipped }, '[discovery.agent] Companies saved');
-      return { saved, watchlisted, skipped, total: list.length };
-    },
-  };
+        logger.info({ saved, watchlisted, skipped }, '[discovery.agent] Companies saved');
+        return JSON.stringify({ saved, watchlisted, skipped, total: companies.length });
+      },
+      {
+        name:        'save_companies',
+        description: 'Save all valid discovered companies to the database. Companies actively hiring in the target stack are queued for enrichment; others go on a watchlist for later refresh. Call once when done collecting.',
+        schema: z.object({
+          companies: z.array(z.object({
+            name:          z.string(),
+            domain:        z.string(),
+            linkedinUrl:   z.string().optional(),
+            employeeCount: z.number().optional(),
+            fundingStage:  z.string().optional(),
+            techStack:     z.array(z.string()).optional(),
+            hqCountry:     z.string().optional(),
+            source:        z.string().optional(),
+            hiringInStack: z.boolean().optional().describe('True if company is confirmed to be actively hiring in the target tech stack'),
+          })).describe('Array of company objects to save'),
+        }),
+      },
+    ),
+  ];
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────
@@ -298,14 +281,6 @@ export async function runDiscoveryAgent(job: DiscoveryJobData): Promise<void> {
 
   const startedAt = Date.now();
 
-  const config: AgentConfig = {
-    name: `discovery:${source}:${runId.slice(0, 8)}`,
-    systemPrompt: SYSTEM_PROMPT,
-    tools: TOOLS,
-    handlers: makeHandlers(job),
-    maxIterations: 12,
-  };
-
   const userMessage = `
 Find tech companies for B2B lead generation.
 
@@ -315,23 +290,30 @@ Location: ${query.location ?? 'United States'}
 Target limit: ${query.limit ?? 25} companies
 
 Start with ${source}. If you get fewer than 5 results or it fails, expand to other sources using similar keywords.
-Prefer companies in: SaaS, AI/ML, BioTech,  Fintech, HealthTech, DevTools.
+Prefer companies in: SaaS, AI/ML, BioTech, Fintech, HealthTech, DevTools.
 Target size: 10–200 employees. Age: founded 2018–present (up to ~7 years old). Funding: pre-seed to Series C.
 A company founded 5–6 years ago that's actively hiring engineers is a perfect lead — do not skip it just because it's not "early stage".
 `.trim();
 
   try {
-    const result = await runAgent(config, userMessage);
-    const saveCall = result.toolCallLog.find(t => t.tool === 'save_companies');
-    const saved    = (saveCall?.result as any)?.saved ?? 0;
+    const result = await runAgent({
+      name:          `discovery:${source}:${runId.slice(0, 8)}`,
+      systemPrompt:  SYSTEM_PROMPT,
+      tools:         makeTools(job),
+      userMessage,
+      maxIterations: 12,
+    });
+
+    const saveResult = result.toolResults.get('save_companies') as { saved?: number } | undefined;
+    const saved = saveResult?.saved ?? 0;
 
     await scrapeLogRepository.complete(logId, {
       status: 'success',
       companiesFound: saved,
-      contactsFound: 0,
-      jobsFound: 0,
-      errors: [],
-      durationMs: Date.now() - startedAt,
+      contactsFound:  0,
+      jobsFound:      0,
+      errors:         [],
+      durationMs:     Date.now() - startedAt,
     });
 
     logger.info({ runId, source, saved, iterations: result.iterations }, '[discovery.agent] Complete');
@@ -342,6 +324,7 @@ A company founded 5–6 years ago that's actively hiring engineers is a perfect 
       errors: [msg], durationMs: Date.now() - startedAt,
     }).catch(() => {});
     logger.error({ err, runId, source }, '[discovery.agent] Failed');
+    await alertAgentFailure({ agent: `discovery:${source}`, runId, error: err });
     throw err;
   }
 }
