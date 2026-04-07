@@ -438,9 +438,15 @@ function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
             excerpt:      text.slice(0, 600),
           });
         } catch (err) {
-          const code = (err as NodeJS.ErrnoException).code ?? '';
-          if (['ENOTFOUND', 'ECONNREFUSED'].includes(code)) return JSON.stringify({ defunct: true, reason: 'Domain unreachable' });
-          return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+          const code  = (err as NodeJS.ErrnoException).code ?? '';
+          const msg   = err instanceof Error ? err.message : String(err);
+          const cause = (err as any)?.cause ? String((err as any).cause) : undefined;
+          if (['ENOTFOUND', 'ECONNREFUSED'].includes(code)) {
+            logger.warn({ url, domain, code }, '[enrichment.agent] playwright_scrape_url — domain unreachable');
+            return JSON.stringify({ defunct: true, reason: `Domain unreachable (${code})` });
+          }
+          logger.warn({ url, domain, error: msg, cause, code }, '[enrichment.agent] playwright_scrape_url failed');
+          return JSON.stringify({ error: msg, cause, code });
         } finally {
           if (context) await context.close().catch(() => {});
         }

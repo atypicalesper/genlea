@@ -160,15 +160,38 @@ export function createWorker<T>(
   });
 
   worker.on('completed', job => {
-    logger.info({ jobId: job.id, queue: queueName }, 'Job completed');
+    logger.info({ jobId: job.id, queue: queueName, name: job.name }, '[worker] Job completed');
   });
 
   worker.on('failed', (job, err) => {
-    logger.error({ jobId: job?.id, queue: queueName, err }, 'Job failed');
+    const errMsg   = err instanceof Error ? err.message : String(err);
+    const errCause = (err as any)?.cause ? String((err as any).cause) : undefined;
+    const errCode  = (err as any)?.code;
+    logger.error(
+      {
+        jobId:   job?.id,
+        jobName: job?.name,
+        queue:   queueName,
+        attempt: job?.attemptsMade,
+        data:    job?.data,          // domain / source / companyId for context
+        error:   errMsg,
+        cause:   errCause,
+        code:    errCode,
+        stack:   err instanceof Error ? err.stack : undefined,
+      },
+      '[worker] Job failed',
+    );
   });
 
   worker.on('stalled', jobId => {
-    logger.warn({ jobId, queue: queueName }, 'Job stalled');
+    logger.warn({ jobId, queue: queueName }, '[worker] Job stalled — will be retried');
+  });
+
+  worker.on('error', err => {
+    logger.error(
+      { queue: queueName, error: err.message, stack: err.stack },
+      '[worker] Worker-level error (Redis/connection issue)',
+    );
   });
 
   return worker;

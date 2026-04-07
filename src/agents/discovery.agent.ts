@@ -164,9 +164,14 @@ function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
             })),
           });
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.warn({ source, err }, '[discovery.agent] Scrape failed');
-          return JSON.stringify({ error: msg, companies: [] });
+          const msg   = err instanceof Error ? err.message : String(err);
+          const cause = (err as any)?.cause ? String((err as any).cause) : undefined;
+          const code  = (err as any)?.code;
+          logger.warn(
+            { source, keywords, error: msg, cause, code, stack: err instanceof Error ? err.stack : undefined },
+            '[discovery.agent] Scrape failed',
+          );
+          return JSON.stringify({ error: msg, cause, code, companies: [] });
         }
       },
       {

@@ -23,15 +23,9 @@ export interface AgentRunOptions {
 }
 
 export interface AgentResult {
-  /** Final text response from the model (after all tool calls). */
   finalMessage: string;
-  /** Number of LLM → tool-call iterations completed. */
   iterations:   number;
-  /**
-   * Last result for each tool that was called, keyed by tool name.
-   * Multiple calls to the same tool keep only the last result.
-   */
-  toolResults: Map<string, unknown>;
+  toolResults:  Map<string, unknown>;
 }
 
 export async function runAgent({
@@ -43,36 +37,80 @@ export async function runAgent({
 }: AgentRunOptions): Promise<AgentResult> {
   const llm = await buildLlm();
 
-  const agent = createReactAgent({
-    llm,
-    tools,
-    stateModifier: systemPrompt,
-  });
+  const agent = createReactAgent({ llm, tools, stateModifier: systemPrompt });
 
   logger.info({ agent: name, tools: tools.map(t => t.name) }, '[agent] Starting');
 
-  const result = await agent.invoke(
-    { messages: [new HumanMessage(userMessage)] },
-    // Each full iteration = 1 agent node + 1 tools node = 2 graph steps.
-    // Add headroom for the final LLM response (no tool call).
-    { recursionLimit: maxIterations * 2 + 4 },
-  );
+  let result: Awaited<ReturnType<typeof agent.invoke>>;
+  try {
+    result = await agent.invoke(
+      { messages: [new HumanMessage(userMessage)] },
+      { recursionLimit: maxIterations * 2 + 4 },
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const cause = (err as any)?.cause;
+    logger.error(
+      { agent: name, error: msg, cause: cause ? String(cause) : undefined, stack: err instanceof Error ? err.stack : undefined },
+      '[agent] LLM/graph invocation failed',
+    );
+    throw err;
+  }
 
-  // Extract tool results and count meaningful iterations from message history.
   const toolResults = new Map<string, unknown>();
   let iterations = 0;
 
   for (const msg of result.messages as (AIMessage | ToolMessage)[]) {
     if (msg instanceof AIMessage && msg.tool_calls && msg.tool_calls.length > 0) {
       iterations++;
-    }
-    if (msg instanceof ToolMessage && msg.name) {
-      try {
-        toolResults.set(msg.name, JSON.parse(msg.content as string));
-      } catch {
-        toolResults.set(msg.name, msg.content);
+
+      // Log every tool call the model decided to make
+      for (const call of msg.tool_calls) {
+        logger.debug(
+          { agent: name, iter: iterations, tool: call.name, args: call.args },
+          '[agent] Tool call',
+        );
       }
     }
+
+    if (msg instanceof ToolMessage && msg.name) {
+      let parsed: unknown = msg.content;
+      try { parsed = JSON.parse(msg.content as string); } catch { /* leave as string */ }
+
+      toolResults.set(msg.name, parsed);
+
+      // Detect error payloads returned by tool handlers and log them at warn level
+      // so they are visible in the log stream even when the LLM handles them gracefully.
+      if (
+        parsed && typeof parsed === 'object' &&
+        ('error' in parsed || 'available' in (parsed as any))
+      ) {
+        const p = parsed as Record<string, unknown>;
+        if (p['error']) {
+          logger.warn(
+            { agent: name, tool: msg.name, error: p['error'] },
+            '[agent] Tool returned error',
+          );
+        } else if (p['available'] === false) {
+          logger.info(
+            { agent: name, tool: msg.name, reason: p['reason'] },
+            '[agent] Tool unavailable — skipping',
+          );
+        }
+      } else {
+        logger.debug(
+          { agent: name, tool: msg.name, resultPreview: JSON.stringify(parsed).slice(0, 120) },
+          '[agent] Tool result',
+        );
+      }
+    }
+  }
+
+  if (iterations >= maxIterations) {
+    logger.warn(
+      { agent: name, iterations, maxIterations },
+      '[agent] Hit max iterations — agent may not have completed all tasks',
+    );
   }
 
   const lastAI = [...result.messages].reverse().find(m => m instanceof AIMessage);
