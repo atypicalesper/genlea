@@ -7,11 +7,40 @@
 ## What it does
 
 1. **Discovers** companies via Wellfound, LinkedIn, Indeed, Crunchbase, Apollo, Glassdoor, ZoomInfo, SurelyRemote, Explorium
-2. **Enriches** each company — tech stack, employee count, funding stage, decision-maker contacts — using a LangGraph agent backed by your local LLM (Ollama `qwen3.5` by default)
+2. **Enriches** each company — tech stack, employee count, funding stage, decision-maker contacts — using an LLM agent backed by Ollama / Groq / Anthropic
 3. **Analyses** employee names to estimate the Indian-origin developer ratio
 4. **Scores** each lead 0–100 across 5 signals: origin ratio, job freshness, tech stack match, contact completeness, company fit
-5. **Alerts** via email when an agent fails and needs human review
-6. **Exports** hot leads as CSV or via REST API
+5. **Exports** hot leads as CSV or via REST API
+
+---
+
+## Architecture
+
+GenLea is a **microservices monorepo** (npm workspaces). Four independent services communicate only through BullMQ queues on Redis and a shared MongoDB instance.
+
+```
+packages/
+  shared/             — @genlea/shared: types, repositories, queue, browser pool, utilities
+
+services/
+  svc-discovery/      — cron scheduler + discovery worker + 11 scrapers + LLM agent
+  svc-enrichment/     — enrichment worker + 5 scrapers + origin ratio analysis + LLM agent
+  svc-scoring/        — scoring worker (rule engine, no Playwright)
+  svc-api/            — Fastify REST API + Bull Board dashboard
+```
+
+**Pipeline:**
+```
+svc-discovery (cron every 2h)
+  → genlea-discovery queue → svc-discovery worker
+      └─ LLM agent: scrape → normalise → dedup → save → enqueue enrichment
+
+  → genlea-enrichment queue → svc-enrichment worker
+      └─ LLM agent: GitHub / Explorium / Clearbit / Hunter / Playwright → origin ratio → enqueue scoring
+
+  → genlea-scoring queue → svc-scoring worker
+      └─ rule engine (0–100) → status: hot_verified / hot / warm / cold / disqualified
+```
 
 ---
 
@@ -21,204 +50,140 @@
 |---|---|
 | Node.js 20+ | Runtime |
 | Docker + Docker Compose | MongoDB + Redis |
-| [Ollama](https://ollama.com) + `qwen3.5` | Local LLM powering the agents |
-| (Optional) Groq or Anthropic API key | Cloud LLM alternative to Ollama |
+| [Ollama](https://ollama.com) + `qwen3.5` | Local LLM for agents (free, runs offline) |
+| Groq API key | Cloud LLM alternative — free tier at console.groq.com |
+| (Optional) Anthropic API key | Cloud LLM alternative |
 | (Optional) LinkedIn account | LinkedIn scraping — session stored in `sessions/` |
 | (Optional) Residential proxy | Prevents IP bans on LinkedIn / ZoomInfo |
 
 ---
 
-## Setup
+## Quick start
 
-### 1. Install dependencies
+### Option A — Local dev (recommended)
+
+Runs infra in Docker, services directly on your machine. Fastest for development.
+
+**Step 1: Start MongoDB + Redis**
 
 ```bash
-npm install
+cd /path/to/genlea
+docker-compose up -d mongo redis
 ```
 
-### 2. Configure environment
+**Step 2: Configure environment**
 
 ```bash
 cp .env.example .env
 ```
 
-Minimum required fields to get started:
+Open `.env` and set at minimum:
 
 ```env
-MONGO_URI=mongodb://localhost:27017
+MONGO_URI=mongodb://localhost:27017/genlea
 REDIS_URL=redis://localhost:6379
 
 # LLM — pick one:
-AGENT_LLM_PROVIDER=ollama        # default — uses your local qwen3.5
-AGENT_LLM_MODEL=qwen3.5
+AGENT_LLM_PROVIDER=groq        # easiest — free tier at console.groq.com
+GROQ_API_KEY=gsk_...
 
-# OR Groq (free at console.groq.com):
-# AGENT_LLM_PROVIDER=groq
-# GROQ_API_KEY=gsk_...
+# OR local Ollama (no API key needed):
+# AGENT_LLM_PROVIDER=ollama
+# AGENT_LLM_MODEL=qwen3.5
 
 # OR Anthropic:
 # AGENT_LLM_PROVIDER=anthropic
 # ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Optional but strongly recommended:
+Strongly recommended:
 
 ```env
 EXPLORIUM_API_KEY=...     # Best discovery source — company DB + verified contacts
 HUNTER_API_KEY=...        # Email discovery (25 free/month)
-GITHUB_TOKEN=...          # Tech stack extraction (5000 req/hr vs 60 without token)
+GITHUB_TOKEN=...          # Tech stack extraction (5000 req/hr vs 60 without)
 ```
 
-Agent failure email alerts (leave empty to log-only):
-
-```env
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=you@gmail.com
-SMTP_PASS=your-app-password
-ALERT_EMAIL_TO=you@gmail.com
-```
-
-### 3. Start infrastructure
+**Step 3: Install dependencies**
 
 ```bash
-docker-compose up -d
+npm install
 ```
 
-This starts:
-- **MongoDB** on port `27017`
-- **Redis** on port `6379`
-- **Mongo Express** on port `8081` (optional UI — login: `admin` / `genlea_dev`)
+This installs all workspace packages and symlinks `@genlea/shared` into every service's `node_modules`.
 
-### 4. Pull the local LLM
-
-```bash
-ollama pull qwen3.5
-```
-
-### 5. Initialise the database (run once)
+**Step 4: Initialise the database (run once)**
 
 ```bash
 npm run db:init
 ```
 
----
-
-## Running
-
-You need three things running simultaneously:
+**Step 5 (Ollama only): Pull and serve the model**
 
 ```bash
-# Terminal 1 — Ollama (local LLM server)
-ollama serve
-
-# Terminal 2 — GenLea backend (workers + API)
-npm run dev
-
-# Terminal 3 — React frontend (optional dashboard)
-cd ../genlea-frontend
-npm install
-npm run dev
+brew install ollama      # one-time
+ollama pull qwen3.5      # one-time
+ollama serve             # keep running in background
 ```
 
-> `npm run dev` starts both the BullMQ workers and the Fastify API server concurrently.
+Skip this step if using Groq or Anthropic.
 
-### Seed the pipeline
+**Step 6: Start the services**
 
-Once everything is running, trigger the first discovery round:
+Open four terminal tabs:
 
 ```bash
-npm run seed          # 1 round (~22 discovery jobs)
-npm run seed:10       # 10 rounds (~220 jobs)
-npm run seed:100      # 100 rounds (~2200 jobs) — full bulk run
+# Tab 1 — API + dashboard
+npm run dev -w services/svc-api
+
+# Tab 2 — discovery worker + cron scheduler
+npm run dev -w services/svc-discovery
+
+# Tab 3 — enrichment worker
+npm run dev -w services/svc-enrichment
+
+# Tab 4 — scoring worker
+npm run dev -w services/svc-scoring
 ```
 
-The scheduler also auto-seeds every 2 hours.
+Each service reads `.env` from the repo root. They share MongoDB and Redis but run as independent processes.
 
----
+**Dashboards:**
 
-## How it works — full pipeline walkthrough
-
-### 1. Scheduler triggers discovery
-
-`src/core/scheduler.ts` runs a cron job every 2 hours (configurable). On each tick it calls `enqueueSeedRound()`, which pushes ~22 BullMQ jobs into the `genlea-discovery` queue — one per `(source, keyword)` pair. You can also trigger this manually via `npm run seed` or `POST /api/seed`.
-
-### 2. Discovery worker + LangGraph agent
-
-`src/workers/discovery.worker.ts` pulls each job from the queue and calls `runDiscoveryAgent(job)`.
-
-The discovery agent is a **LangGraph `createReactAgent` loop** backed by your configured LLM (Ollama `qwen3.5` by default). It has three tools:
-
-- `check_source_availability` — checks if the requested scraper has credentials
-- `scrape_source` — runs the actual scraper (Playwright stealth browser or API call). Normalises and deduplicates results before returning them to the model.
-- `save_companies` — called by the model when it has enough results. Upserts companies into MongoDB and enqueues each one for enrichment.
-
-The agent autonomously decides: which sources to try, when to switch sources if results are thin, and when to stop. If a source is unavailable it moves to the next without breaking.
-
-**Filter pass** (inside `scrape_source`): blocklisted enterprise domains (Google, Amazon, etc.) and companies with >1000 employees are stripped before the model ever sees them.
-
-**Hunter pre-population** (fire-and-forget): if `HUNTER_API_KEY` is set, the save handler asynchronously pre-fetches contact emails for every discovered company before enrichment even starts.
-
-### 3. Enrichment worker + LangGraph agent
-
-`src/workers/enrichment.worker.ts` picks each enrichment job. Before running the agent it checks:
-- company still exists in MongoDB
-- employee count ≤ 1000 (auto-disqualify if not)
-- 7-day cooldown not active (unless `force: true`)
-
-Then `runEnrichmentAgent(job)` runs a second LangGraph agent with 12 tools:
-
-| Tool | What it does |
+| URL | What |
 |---|---|
-| `get_company_state` | Reads current DB state — tells the agent what's already filled |
-| `enrich_explorium` | API call: company metadata + verified contacts in one shot |
-| `enrich_github` | Finds GitHub org, extracts tech stack from repos, gets contributor names for ratio |
-| `enrich_clearbit` | Company metadata (employee count, funding, HQ) |
-| `scrape_website_team` | Scrapes `/team`, `/about`, `/people` pages via Playwright |
-| `playwright_scrape_url` | General-purpose stealth browser — fallback for any URL. Extracts people via JSON-LD, LinkedIn anchors, and email regexes |
-| `enrich_hunter` | Email discovery via Hunter.io API |
-| `verify_contacts` | SMTP-verifies existing emails, fills gaps using email patterns |
-| `save_contacts` | Persists decision-maker contacts (CEO, CTO, HR, etc.) to MongoDB |
-| `compute_origin_ratio` | Classifies collected names as Indian-origin via Groq/Ollama, computes ratio |
-| `save_company_data` | Merges partial company data into MongoDB |
-| `disqualify_company` | Marks defunct / too-large / wrong-country companies as disqualified |
-| `queue_for_scoring` | Writes `lastEnrichedAt`, sets `pipelineStatus: enriched`, enqueues scoring |
+| `http://localhost:4000/dashboard` | Lead pipeline, queue controls, system warnings |
+| `http://localhost:4000/queues` | Bull Board — live queue depths + retry |
+| `http://localhost:8081` | Mongo Express — raw DB browser (admin / genlea_dev) |
 
-The agent reads the system prompt and the current company state, then autonomously decides the order of tool calls. If Explorium is unavailable, it falls back to Clearbit + GitHub + Playwright. If no emails are found via API, it scrapes `/team` and `/contact` pages directly.
+---
 
-### 4. Scoring worker
+### Option B — Full Docker
 
-`src/workers/scoring.worker.ts` runs the deterministic rule engine:
+Builds and runs everything as containers. Closest to production.
 
-| Signal | Max pts | How |
-|---|---|---|
-| `originRatioScore` | 30 | Linearly scaled from `originRatioThreshold` → 1.0. Unknown ratio → 10 (neutral) |
-| `jobFreshnessScore` | 20 | Active jobs posted in the last 14 days score full; decays to 0 past 90 days |
-| `techStackScore` | 20 | Tags matched against `TARGET_TECH_STACK` env var |
-| `contactScore` | 15 | Points for CEO/CTO/HR email presence + email verification |
-| `companyFitScore` | 15 | Employee count 30–200 ideal; funding stage Seed–Series B ideal |
-
-Total → status:
-
-```
-≥ 80  →  hot_verified
-≥ 55  →  hot
-≥ 38  →  warm
-≥ 20  →  cold
-< 20  →  disqualified
+```bash
+cp .env.example .env   # fill in values
+docker-compose up --build
 ```
 
-The `manuallyReviewed` flag prevents the scorer from overwriting statuses set by a human via the UI.
+Starts all six containers: mongo, redis, mongo-express, svc-api, svc-discovery, svc-enrichment, svc-scoring.
 
-### 5. Alert on failure
+Note: when running in Docker, `MONGO_URI` and `REDIS_URL` are automatically overridden to use Docker network hostnames — you don't need to change them in `.env` for this mode.
 
-Any unhandled exception in a discovery or enrichment agent calls `alertAgentFailure()` before re-throwing. If `SMTP_HOST` and `ALERT_EMAIL_TO` are set in `.env`, a structured email is sent with the agent name, company domain, run ID, error message, and stack trace. Otherwise the failure is logged at `warn` level and the BullMQ retry policy handles re-queuing (3 attempts, exponential backoff starting at 5s).
+---
 
-### 6. API + frontend
+## Seed the pipeline
 
-The Fastify API (`src/api/server.ts`) on port `4001` exposes REST endpoints for all data and queue operations. The React frontend (`../genlea-frontend`) proxies `/api`, `/health`, and `/queues` to `localhost:4001` via Vite during development.
+Once running, trigger the first discovery round:
 
-The Bull Board queue monitor is embedded at `/queues` — it shows live job counts, failure reasons, and lets you retry failed jobs without writing code.
+```bash
+npm run seed          # 1 round (~48 discovery jobs)
+npm run seed:10       # 10 rounds
+npm run seed:100      # 100 rounds — full bulk run
+```
+
+The scheduler in `svc-discovery` also auto-seeds every 2 hours.
 
 ---
 
@@ -226,28 +191,30 @@ The Bull Board queue monitor is embedded at `/queues` — it shows live job coun
 
 | URL | What |
 |---|---|
-| `http://localhost:5173` | React frontend — leads table, control panel, analytics, logs |
-| `http://localhost:4001/dashboard` | Inline HTML dashboard (no frontend needed) |
-| `http://localhost:4001/queues` | Bull Board — live queue depths, retry controls |
-| `http://localhost:8081` | Mongo Express — raw MongoDB browser |
+| `http://localhost:4000/dashboard` | Inline HTML dashboard — leads, pipeline status, queue controls |
+| `http://localhost:4000/queues` | Bull Board — live queue depths, retry controls |
+| `http://localhost:8081` | Mongo Express — raw MongoDB browser (login: `admin` / `genlea_dev`) |
 
 ---
 
 ## CLI commands
 
-### Servers
+### Dev
 
 | Command | What |
 |---|---|
-| `npm run dev` | Workers + API server + scheduler — **normal daily driver** |
-| `npm run api` | API server only (no workers) |
-| `npm run workers` | Workers only (no API server) |
+| `npm run dev` | Workers + API (monolith mode) |
+| `npm run dev -w services/svc-api` | API service only |
+| `npm run dev -w services/svc-discovery` | Discovery service only |
+| `npm run dev -w services/svc-enrichment` | Enrichment service only |
+| `npm run dev -w services/svc-scoring` | Scoring service only |
+| `npm run build:services` | Type-check all 4 services |
 
 ### Scraping
 
 | Command | What |
 |---|---|
-| `npm run seed` | Push 1 discovery round (~22 jobs) |
+| `npm run seed` | Push 1 discovery round |
 | `npm run seed:10` | Push 10 rounds |
 | `npm run seed:50` | Push 50 rounds |
 | `npm run seed:100` | Push 100 rounds |
@@ -257,106 +224,157 @@ The Bull Board queue monitor is embedded at `/queues` — it shows live job coun
 
 | Command | What |
 |---|---|
-| `npm run stats` | Print summary: total / hot_verified / hot / warm / cold counts |
+| `npm run stats` | Print lead count by status |
 | `npm run export` | Export hot leads (≥65) to `exports/leads-export.csv` |
-| `npm run rescore-all` | Re-score all companies (useful after changing thresholds) |
+| `npm run rescore-all` | Re-score all companies (use after changing thresholds) |
 | `npm run verify-emails` | SMTP-verify up to 500 unverified contact emails |
 
-### Dev
+### Maintenance
 
 | Command | What |
 |---|---|
-| `npm run build` | TypeScript type-check |
-| `npm run lint` | ESLint |
+| `npm run build:services` | `tsc --noEmit` across all 4 services |
+| `npm run lint` | ESLint (monolith `src/`) |
 | `npm run test` | Vitest |
-| `npm run db:init` | Create MongoDB indexes (run once after first setup) |
+| `npm run db:init` | Create MongoDB indexes (run once) |
 
 ---
 
 ## REST API
 
-The API runs on port `4001`.
+API runs on port `4000`.
 
 ```
-GET  /api/leads                            Paginated lead list
-GET  /api/leads?status=hot&minScore=75     Filter by status + score
-GET  /api/leads?techStack=nodejs           Filter by tech stack
-GET  /api/stats                            Summary counts
-GET  /api/companies/:id                    Full company detail + contacts + jobs
-GET  /api/companies/domain/:domain         Look up by domain
-PATCH /api/companies/:id/status            Override lead status manually
-POST  /api/companies/:id/enrich            Re-queue enrichment
-POST  /api/companies/:id/score             Re-queue scoring
-GET  /api/contacts/for-companies?ids=...   Batch contact fetch
-GET  /api/export/csv                       Download CSV (hot leads)
-GET  /api/export/csv?status=warm           Download warm leads
-POST /api/seed                             Trigger discovery round
-POST /api/scrape                           Trigger single scrape job
-GET  /api/jobs/status                      Queue counts (all 3 queues)
-GET  /api/jobs/active                      Currently processing jobs
-GET  /api/jobs/cron                        Cron schedule info
-POST /api/jobs/rescore-all                 Queue scoring for every company
-POST /api/jobs/retry/:queue                Retry all failed jobs in a queue
-DELETE /api/jobs/clear/:queue              Drain a queue
-GET  /api/jobs/logs                        Recent scrape logs
-GET  /api/jobs/stats                       Scrape success/fail counts
-GET  /api/settings                         Pipeline settings
-PATCH /api/settings                        Update pipeline settings
-GET  /health                               Health check
+GET    /api/leads                        Paginated lead list
+GET    /api/leads?status=hot&minScore=75 Filter by status + score
+GET    /api/stats                        Summary counts
+GET    /api/companies/:id                Full company + contacts + jobs
+GET    /api/companies/domain/:domain     Look up by domain
+PATCH  /api/companies/:id/status         Override lead status manually
+POST   /api/companies/:id/enrich         Re-queue enrichment
+POST   /api/companies/:id/score          Re-queue scoring
+GET    /api/export/csv                   Download CSV (hot leads)
+GET    /api/export/csv?status=warm       Download warm leads
+POST   /api/seed                         Trigger a discovery round
+POST   /api/scrape                       Trigger a single scrape job
+GET    /api/jobs/status                  Queue depths (all 3 queues)
+GET    /api/jobs/active                  Currently processing jobs
+GET    /api/jobs/cron                    Cron schedule info
+POST   /api/jobs/rescore-all             Queue scoring for every company
+POST   /api/jobs/retry/:queue            Retry all failed jobs in a queue
+DELETE /api/jobs/clear/:queue            Drain a queue
+GET    /api/jobs/logs                    Recent scrape logs
+GET    /api/jobs/stats                   Scrape success/fail counts
+GET    /api/settings                     Pipeline settings
+PATCH  /api/settings                     Update pipeline settings
+POST   /admin/reset-db                   Wipe all collections + drain queues
+GET    /health                           Health check
+GET    /health/queues                    Queue stats health check
 ```
 
 ---
 
-## Architecture
+## Deployment
 
-```
-Scheduler (cron every 2h)
-  └─ discovery queue
-       └─ discovery.worker
-            └─ LangGraph agent (qwen3.5 / Groq / Anthropic)
-                 ├─ check_source_availability
-                 ├─ scrape_source  → Wellfound / LinkedIn / Indeed / Apollo / ...
-                 └─ save_companies → upsert DB + enqueue enrichment
+### Docker Compose (single server)
 
-  └─ enrichment queue
-       └─ enrichment.worker
-            └─ LangGraph agent
-                 ├─ get_company_state
-                 ├─ enrich_explorium / enrich_github / enrich_clearbit
-                 ├─ scrape_website_team
-                 ├─ playwright_scrape_url  (stealth Playwright fallback)
-                 ├─ enrich_hunter / verify_contacts
-                 ├─ compute_origin_ratio
-                 ├─ save_contacts / save_company_data
-                 ├─ disqualify_company
-                 └─ queue_for_scoring
+The standard deployment path. All services are defined in `docker-compose.yml`.
 
-  └─ scoring queue
-       └─ scoring.worker
-            └─ 5-signal rule engine (0–100)
-                 ├─ originRatioScore    (0–30)
-                 ├─ jobFreshnessScore   (0–20)
-                 ├─ techStackScore      (0–20)
-                 ├─ contactScore        (0–15)
-                 └─ companyFitScore     (0–15)
-                      └─ → MongoDB: status (hot_verified / hot / warm / cold / disqualified)
+```bash
+# Build and start everything
+docker-compose up -d --build
+
+# View logs for a specific service
+docker-compose logs -f svc-discovery
+docker-compose logs -f svc-enrichment
+docker-compose logs -f svc-api
+
+# Restart a single service after a code change
+docker-compose up -d --build svc-enrichment
+
+# Stop everything
+docker-compose down
 ```
 
-Storage: MongoDB (companies, contacts, jobs, scrape_logs). Queue: BullMQ on Redis.
+Each service container:
+- Reads `.env` from the repo root via `env_file: .env`
+- Has `MONGO_URI` and `REDIS_URL` overridden to use Docker network hostnames (`mongo`, `redis`)
+- Restarts automatically on crash (`restart: unless-stopped`)
+
+### Environment variables in production
+
+Set all secrets as environment variables on the host (or in a secrets manager). The `env_file: .env` directive in `docker-compose.yml` reads from a `.env` file next to `docker-compose.yml`. On a server:
+
+```bash
+# On the server, create .env with production values
+nano /opt/genlea/.env
+# Then:
+docker-compose --env-file /opt/genlea/.env up -d
+```
+
+### Scaling individual services
+
+Discovery and enrichment are the bottlenecks — they run Playwright and call external APIs. To scale them horizontally, run multiple replicas. Since all state is in MongoDB and Redis (not in-process), replicas are stateless:
+
+```bash
+docker-compose up -d --scale svc-discovery=2 --scale svc-enrichment=3
+```
+
+Concurrency within each replica is controlled via settings:
+
+```bash
+curl -X PATCH http://localhost:4000/api/settings \
+  -H 'Content-Type: application/json' \
+  -d '{"workerConcurrencyDiscovery": 3, "workerConcurrencyEnrichment": 2}'
+```
+
+Workers poll these settings every 10 seconds and adjust without restart.
+
+---
+
+## Maintenance
+
+### Adding a new scraper
+
+1. Create `services/svc-discovery/src/scrapers/mysource.scraper.ts` implementing the `Scraper` interface from `@genlea/shared`
+2. Export it from `services/svc-discovery/src/scrapers/index.ts`
+3. Add it to `SCRAPERS` in `services/svc-discovery/src/discovery/blocklists.ts`
+4. Add availability check in `packages/shared/src/scheduler.ts` → `getAvailableSources()`
+5. Add seed queries for it in `packages/shared/src/scheduler.ts` → `SEED_QUERIES`
+
+No other files need changing — the agent discovers available scrapers at runtime.
+
+### Adding a new enrichment source
+
+Same pattern but in `services/svc-enrichment/src/scrapers/`. Add a tool for it in `services/svc-enrichment/src/agents/enrichment-tools.ts` and reference it in the agent's system prompt.
+
+### Modifying shared utilities
+
+Edit files under `packages/shared/src/`. All services pick up the change immediately on next start (or live via `tsx watch` in dev). No publish step needed.
+
+### Changing scoring weights
+
+Edit `services/svc-scoring/src/scoring/rules.ts`. Dynamic thresholds (hot/warm/cold cutoffs) are stored in MongoDB settings and adjustable live via `PATCH /api/settings` — no restart needed.
+
+### Database indexes
+
+If you add new query patterns to a repository, add the corresponding index in `scripts/db-init.ts` and re-run:
+
+```bash
+npm run db:init
+```
 
 ---
 
 ## LLM / Agent configuration
 
-Agents use [LangGraph](https://langchain-ai.github.io/langgraphjs/) `createReactAgent` and are provider-agnostic:
+| Provider | Env var | Default model |
+|---|---|---|
+| `ollama` (default) | `OLLAMA_BASE_URL` | `qwen3.5` |
+| `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-haiku-4-5-20251001` |
 
-| Provider | Env var | Default model | Notes |
-|---|---|---|---|
-| `ollama` (default) | `OLLAMA_BASE_URL` | `qwen3.5` | Free, local, no API key |
-| `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Free tier at console.groq.com |
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-haiku-4-5-20251001` | Paid |
-
-Override model: `AGENT_LLM_MODEL=qwen3:32b`
+Override the model: `AGENT_LLM_MODEL=qwen3:32b`
 
 ---
 
@@ -364,13 +382,13 @@ Override model: `AGENT_LLM_MODEL=qwen3:32b`
 
 | Score | Status | Action |
 |---|---|---|
-| 80–100 | 🔥 `hot_verified` | Immediate outreach |
-| 55–79 | 🔥 `hot` | Personalised outreach |
-| 38–54 | 🌡️ `warm` | Nurture sequence |
-| 20–37 | ❄️ `cold` | Low priority |
-| < 20 | ✗ `disqualified` | Skip |
+| 80–100 | `hot_verified` | Immediate outreach |
+| 55–79 | `hot` | Personalised outreach |
+| 38–54 | `warm` | Nurture sequence |
+| 20–37 | `cold` | Low priority |
+| < 20 | `disqualified` | Skip |
 
-Thresholds are adjustable live via `PATCH /api/settings` or the frontend control panel.
+Thresholds are adjustable live via `PATCH /api/settings`.
 
 ---
 
@@ -378,19 +396,20 @@ Thresholds are adjustable live via `PATCH /api/settings` or the frontend control
 
 | Source | Purpose | Requires |
 |---|---|---|
-| Explorium | Company DB + verified contacts (best single source) | `EXPLORIUM_API_KEY` |
+| Explorium | Company DB + verified contacts | `EXPLORIUM_API_KEY` |
 | Wellfound | YC + seed startups + open roles | Nothing |
 | Indeed | Job listings + companies | Nothing |
-| LinkedIn | Companies + employees + jobs | Account (`LI_USERNAME` + `LI_PASSWORD`) |
+| LinkedIn | Companies + employees + jobs | Account (`LI_USERNAME`) |
 | Apollo | B2B contacts + company data | Nothing (free web tier) |
 | Crunchbase | Funding + founders | Nothing (free web tier) |
 | Glassdoor | Job listings | Nothing |
 | SurelyRemote | Remote-first companies | Nothing |
 | ZoomInfo | Direct phones | Account |
+| Clay | Company + contacts | `CLAY_API_KEY` |
 | Hunter.io | Email discovery | `HUNTER_API_KEY` (25/mo free) |
-| GitHub | Tech stack via repos + contributor names | `GITHUB_TOKEN` (optional, increases rate limit) |
+| GitHub | Tech stack + contributor names | `GITHUB_TOKEN` (optional) |
 | Clearbit | Company metadata | `CLEARBIT_API_KEY` |
-| Playwright | Stealth scrape fallback for any URL | Nothing |
+| Playwright | Stealth scrape fallback | Nothing |
 
 ---
 
@@ -398,42 +417,40 @@ Thresholds are adjustable live via `PATCH /api/settings` or the frontend control
 
 ```
 genlea/
-├── src/
-│   ├── agents/           # LangGraph agents (discovery, enrichment) + LLM factory
-│   ├── scrapers/
-│   │   ├── discovery/    # One module per source (wellfound, linkedin, apollo, ...)
-│   │   └── enrichment/   # github, hunter, clearbit, explorium
-│   ├── core/             # BullMQ queue manager, Playwright browser pool, proxy/session managers, scheduler
-│   ├── enrichment/       # Normalizer, deduplicator, website scraper, origin analyzer, contact resolver
-│   ├── scoring/          # 5-signal rule engine
-│   ├── workers/          # discovery.worker, enrichment.worker, scoring.worker
-│   ├── storage/
-│   │   ├── mongo.client.ts
-│   │   └── repositories/ # company, contact, job, scrape-log, settings
-│   ├── api/
-│   │   ├── server.ts     # Fastify app bootstrap
-│   │   ├── dashboard.ts  # Inline HTML dashboard
-│   │   └── routes/       # leads, companies, jobs, scrape, export, settings
-│   ├── types/            # Shared TypeScript types
-│   └── utils/            # logger, alert (email), helpers
-├── scripts/              # db-init, seed-queries, rescore-all, verify-emails
-├── sessions/             # LinkedIn session cookies (gitignored)
-├── proxies/              # Proxy lists (gitignored)
-├── exports/              # CSV output (gitignored)
-├── logs/                 # genlea.log (gitignored)
+├── packages/
+│   └── shared/               — @genlea/shared (types, repos, queue, browser, utils)
+│       └── src/
+│           ├── types/
+│           ├── utils/
+│           ├── storage/repositories/
+│           ├── queue/
+│           ├── core/          — browser/proxy/session managers
+│           ├── enrichment/    — normalizer, deduplicator, email verifier
+│           └── scheduler.ts   — seed queries + enqueueSeedRound
+│
+├── services/
+│   ├── svc-api/               — Fastify API, Bull Board, dashboard
+│   ├── svc-discovery/         — cron + discovery worker + 11 scrapers + LLM agent
+│   ├── svc-enrichment/        — enrichment worker + 5 scrapers + origin analysis + LLM agent
+│   └── svc-scoring/           — scoring worker (rule engine)
+│
+├── src/                       — original monolith (kept for reference / scripts)
+├── scripts/                   — db-init, seed-queries, rescore-all, verify-emails
+├── sessions/                  — LinkedIn session cookies (gitignored)
+├── proxies/                   — proxy lists (gitignored)
+├── exports/                   — CSV output (gitignored)
 ├── docker-compose.yml
-├── .env.example
-├── ARCHITECTURE.md
-├── LEAD_SCORING.md
-└── SCRAPING_NOTES.md
+├── tsconfig.base.json         — base TS config extended by all services
+└── .env.example
 ```
 
 ---
 
 ## Notes
 
-- **LinkedIn anti-scraping**: max 80 profiles/session/day, 8h cooldown. Sessions rotate automatically.
-- **Proxy**: residential proxies recommended for LinkedIn and ZoomInfo. Datacenter IPs get blocked.
-- **Free to run**: Wellfound, Indeed, Apollo web, Crunchbase web, GitHub (no token), Hunter SMTP fallback, Playwright — all work with zero API keys. Only Explorium, Hunter API, Clearbit, and ZoomInfo require credentials.
-- **manuallyReviewed flag**: if you override a company's status via the UI or API, the scoring engine will never overwrite it.
-- **Cooldown**: enrichment skips companies re-processed within 7 days unless `force: true` is passed.
+- **LinkedIn anti-scraping**: max 80 profiles/session/day, 8h cooldown, sessions rotate automatically
+- **Proxy**: residential proxies strongly recommended for LinkedIn and ZoomInfo
+- **Free to run**: Wellfound, Indeed, Apollo, Crunchbase, GitHub (no token), Playwright — zero API keys needed for a basic run
+- **manuallyReviewed flag**: UI/API status overrides are never overwritten by the scoring engine
+- **Enrichment cooldown**: companies re-processed within 7 days are skipped unless `force: true`
+- **Backlog guard**: if the discovery queue exceeds 200 waiting jobs, the scheduler skips that cron tick to prevent runaway growth (configurable via `DISCOVERY_BACKLOG_THRESHOLD`)
