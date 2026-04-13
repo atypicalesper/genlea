@@ -199,6 +199,12 @@ export interface Job {
   isActive: boolean;
 }
 
+export interface AgentStep {
+  tool:    string;
+  summary: string;
+  ts:      string;  // ISO timestamp
+}
+
 export interface ScrapeLog {
   _id?: string;
   runId: string;
@@ -211,6 +217,7 @@ export interface ScrapeLog {
   durationMs: number;
   startedAt: Date;
   completedAt?: Date;
+  agentSteps?: AgentStep[];
 }
 
 // ── Scoring ───────────────────────────────────────────────────────────────────

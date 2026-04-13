@@ -1,7 +1,7 @@
 import { createAgent }                          from 'langchain';
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
 import { buildLlm, alertAgentFailure, scrapeLogRepository, logger } from '@genlea/shared';
-import type { DiscoveryJobData }                from '@genlea/shared';
+import type { DiscoveryJobData, AgentStep }     from '@genlea/shared';
 import { makeTools, buildSystemPrompt }         from './discovery-tools.js';
 
 export async function runDiscoveryAgent(job: DiscoveryJobData): Promise<void> {
@@ -43,16 +43,23 @@ Prefer: SaaS, AI/ML, Fintech, HealthTech, DevTools. Size 10–200, founded 2018+
 
     let iterations  = 0;
     let totalSaved  = 0;
-    const errors: string[] = [];
+    const errors: string[]     = [];
+    const agentSteps: AgentStep[] = [];
+
+    // Build a tool→callTime map so each ToolMessage can be timestamped
+    const toolCallTimes = new Map<string, string>();
 
     for (const msg of agentResult.messages as (AIMessage | ToolMessage)[]) {
       if (msg instanceof AIMessage && msg.tool_calls?.length) {
         iterations++;
+        const ts = new Date().toISOString();
         for (const call of msg.tool_calls) {
+          if (call.id) toolCallTimes.set(call.id, ts);
           logger.debug({ agent: agentName, iter: iterations, tool: call.name, args: call.args }, '[agent] Tool call');
         }
       }
       if (msg instanceof ToolMessage && msg.name) {
+        const ts = (msg.tool_call_id && toolCallTimes.get(msg.tool_call_id)) ?? new Date().toISOString();
         let parsed: unknown = msg.content;
         try { parsed = JSON.parse(msg.content as string); } catch { /* leave as string */ }
         const p = parsed as Record<string, unknown>;
@@ -61,6 +68,10 @@ Prefer: SaaS, AI/ML, Fintech, HealthTech, DevTools. Size 10–200, founded 2018+
         if (msg.name === 'save_companies' && typeof p?.['runningTotal'] === 'number') {
           totalSaved = p['runningTotal'] as number;
         }
+
+        // Build human-readable summary for this step
+        const summary = buildStepSummary(msg.name, p);
+        agentSteps.push({ tool: msg.name, summary, ts });
 
         if (p?.['error'] && !p?.['alreadyTried']) {
           errors.push(String(p['error']));
@@ -77,17 +88,31 @@ Prefer: SaaS, AI/ML, Fintech, HealthTech, DevTools. Size 10–200, founded 2018+
       logger.warn({ agent: agentName, iterations, maxIterations }, '[agent] Hit max iterations');
     }
 
+    // Correct status: success only when ≥1 company saved and no errors
+    let status: import('@genlea/shared').ScrapeJobStatus;
+    if (totalSaved > 0 && errors.length === 0) {
+      status = 'success';
+    } else if (totalSaved > 0) {
+      status = 'partial';  // saved some but hit errors too
+    } else if (errors.length > 0) {
+      status = 'failed';   // errors and nothing saved
+    } else {
+      status = 'partial';  // ran clean but all results filtered — not a hard failure
+    }
+
     await scrapeLogRepository.complete(logId, {
-      status:         errors.length > 0 && totalSaved === 0 ? 'failed' : 'success',
+      status,
       companiesFound: totalSaved,
       contactsFound:  0,
       jobsFound:      0,
       errors,
       durationMs:     Date.now() - startedAt,
+      agentSteps,
     });
 
     logger.info({ runId, source, saved: totalSaved, iterations, durationMs: Date.now() - startedAt }, '[discovery.agent] Complete');
   } catch (err) {
+
     const msg = err instanceof Error ? err.message : String(err);
     await scrapeLogRepository.complete(logId, {
       status: 'failed', companiesFound: 0, contactsFound: 0, jobsFound: 0,
@@ -96,5 +121,29 @@ Prefer: SaaS, AI/ML, Fintech, HealthTech, DevTools. Size 10–200, founded 2018+
     logger.error({ err, runId, source }, '[discovery.agent] Failed');
     await alertAgentFailure({ agent: `discovery:${source}`, runId, error: err });
     throw err;
+  }
+}
+
+function buildStepSummary(tool: string, p: Record<string, unknown>): string {
+  if (p?.['error'])         return `error: ${String(p['error']).slice(0, 120)}`;
+  if (p?.['available'] === false) return `unavailable: ${String(p['reason'] ?? 'no credential')}`;
+  if (p?.['alreadyTried'])  return 'skipped — already tried this run';
+
+  switch (tool) {
+    case 'get_discovery_state':
+      return `state: ${p['companiesFound'] ?? 0}/${p['goalTarget'] ?? 15} companies — goalMet: ${p['goalMet'] ?? false}`;
+    case 'check_source_availability':
+      return `${p['source']}: ${p['available'] ? 'available' : 'unavailable'}`;
+    case 'scrape_source':
+      return `scraped ${p['source'] ?? '?'}: ${p['rawCount'] ?? 0} raw → ${p['filteredCount'] ?? 0} after filter`;
+    case 'save_companies': {
+      const saved  = p['saved']  ?? 0;
+      const skip   = p['skipped'] ?? 0;
+      const watch  = p['watchlisted'] ?? 0;
+      const total  = p['runningTotal'] ?? 0;
+      return `saved ${saved}, watchlisted ${watch}, skipped ${skip} — running total: ${total}`;
+    }
+    default:
+      return JSON.stringify(p).slice(0, 100);
   }
 }

@@ -684,13 +684,12 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
             <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Status</th>
             <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Companies</th>
             <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Contacts</th>
-            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Jobs</th>
             <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Duration</th>
-            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Errors</th>
+            <th class="text-left px-4 py-2.5 text-gray-500 uppercase tracking-wide">Details</th>
           </tr>
         </thead>
         <tbody id="logs-tbody">
-          <tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">Loading logs…</td></tr>
+          <tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Loading logs…</td></tr>
         </tbody>
       </table>
     </div>
@@ -1649,57 +1648,99 @@ async function loadLogs() {
     _logsCache = logs;
     const tbody = document.getElementById('logs-tbody');
     if (!logs.length) {
-      tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No scrape logs yet</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No scrape logs yet</td></tr>';
       return;
     }
     tbody.innerHTML = logs.map(function(l, i) {
-      const errCount = (l.errors || []).length;
+      const errCount   = (l.errors || []).length;
+      const stepCount  = (l.agentSteps || []).length;
+      const hasDetails = errCount > 0 || stepCount > 0;
+
+      let detailBtn = '<span class="text-gray-300">—</span>';
+      if (errCount > 0 && stepCount > 0) {
+        detailBtn = '<button onclick="showLogTrace(event,' + i + ')" class="text-red-500 text-[10px] hover:underline font-medium">'
+          + errCount + ' error' + (errCount>1?'s':'') + ' · ' + stepCount + ' steps</button>';
+      } else if (errCount > 0) {
+        detailBtn = '<button onclick="showLogTrace(event,' + i + ')" class="text-red-500 text-[10px] hover:underline font-medium">'
+          + errCount + ' error' + (errCount>1?'s':'') + '</button>';
+      } else if (stepCount > 0) {
+        detailBtn = '<button onclick="showLogTrace(event,' + i + ')" class="text-blue-500 text-[10px] hover:underline">'
+          + stepCount + ' steps</button>';
+      }
+
       return '<tr class="border-b border-gray-100 hover:bg-gray-50">' +
         '<td class="px-4 py-2 text-gray-400 whitespace-nowrap">' + fmtTime(l.startedAt) + '</td>' +
         '<td class="px-4 py-2"><span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px] font-medium">' + esc(l.scraper||'—') + '</span></td>' +
         '<td class="px-4 py-2"><span class="badge badge-' + esc(l.status||'processing') + '">' + esc(l.status||'—') + '</span></td>' +
         '<td class="px-4 py-2 font-medium ' + (l.companiesFound > 0 ? 'text-green-600' : 'text-gray-400') + '">' + (l.companiesFound || 0) + '</td>' +
         '<td class="px-4 py-2 text-gray-500">' + (l.contactsFound || 0) + '</td>' +
-        '<td class="px-4 py-2 text-gray-500">' + (l.jobsFound || 0) + '</td>' +
         '<td class="px-4 py-2 text-gray-400 whitespace-nowrap">' + fmtDuration(l.durationMs) + '</td>' +
-        '<td class="px-4 py-2">' + (errCount > 0
-          ? '<button onclick="showLogErrors(event,' + i + ')" class="text-red-500 text-[10px] hover:underline font-medium">' + errCount + ' error' + (errCount>1?'s':'') + '</button>'
-          : '<span class="text-gray-300">—</span>') + '</td>' +
+        '<td class="px-4 py-2">' + detailBtn + '</td>' +
       '</tr>';
     }).join('');
   } catch(e) { /* silent */ }
 }
 
-function showLogErrors(event, idx) {
+function showLogTrace(event, idx) {
   event.stopPropagation();
   const log = _logsCache[idx];
   if (!log) return;
-  const errors = log.errors || [];
-  // Remove any existing error popover
-  document.getElementById('log-error-popover')?.remove();
+  document.getElementById('log-trace-popover')?.remove();
 
-  const btn = event.currentTarget;
+  const btn  = event.currentTarget;
   const rect = btn.getBoundingClientRect();
+  const errors = log.errors || [];
+  const steps  = log.agentSteps || [];
 
   const pop = document.createElement('div');
-  pop.id = 'log-error-popover';
-  pop.style.cssText = 'position:fixed;z-index:9999;background:#1e293b;color:#f8fafc;border-radius:8px;padding:12px 14px;font-size:11px;font-family:ui-monospace,monospace;max-width:520px;min-width:260px;box-shadow:0 8px 32px rgba(0,0,0,.35);line-height:1.5;';
-  pop.style.top  = (rect.bottom + 6) + 'px';
-  pop.style.left = Math.min(rect.left, window.innerWidth - 540) + 'px';
+  pop.id = 'log-trace-popover';
+  pop.style.cssText = 'position:fixed;z-index:9999;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px 16px;font-size:11px;font-family:ui-monospace,monospace;max-width:580px;min-width:300px;max-height:420px;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,.45);line-height:1.6;';
+  pop.style.top  = Math.min(rect.bottom + 6, window.innerHeight - 440) + 'px';
+  pop.style.left = Math.min(rect.left, window.innerWidth - 600) + 'px';
 
-  const header = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
-    '<span style="font-weight:700;color:#f87171;">' + errors.length + ' error' + (errors.length > 1 ? 's' : '') + ' — ' + esc(log.scraper || '?') + '</span>' +
-    '<button onclick="document.getElementById(\'log-error-popover\').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">✕</button>' +
-  '</div>';
+  const scraper  = esc(log.scraper || '?');
+  const duration = fmtDuration(log.durationMs);
+  const saved    = log.companiesFound || 0;
 
-  const items = errors.map(function(e) {
-    return '<div style="border-top:1px solid #334155;padding:6px 0;word-break:break-all;color:#fca5a5;">' + esc(String(e)) + '</div>';
-  }).join('');
+  let html = '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">' +
+    '<div><span style="font-weight:700;color:#93c5fd;">' + scraper + '</span>' +
+    '<span style="color:#64748b;margin-left:8px;">' + duration + ' · ' + saved + ' saved</span></div>' +
+    '<button onclick="document.getElementById(\'log-trace-popover\').remove()" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:15px;line-height:1;padding:0 2px;flex-shrink:0;">✕</button>' +
+    '</div>';
 
-  pop.innerHTML = header + items;
+  // Errors section
+  if (errors.length > 0) {
+    html += '<div style="margin-bottom:8px;padding:6px 8px;background:#1e1b22;border-radius:6px;border-left:3px solid #f87171;">' +
+      '<div style="color:#f87171;font-weight:700;margin-bottom:4px;">Errors (' + errors.length + ')</div>' +
+      errors.map(function(e) {
+        return '<div style="color:#fca5a5;word-break:break-all;padding:2px 0;">' + esc(String(e)) + '</div>';
+      }).join('') + '</div>';
+  }
+
+  // Agent steps section
+  if (steps.length > 0) {
+    html += '<div style="color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;">Agent Trace (' + steps.length + ' steps)</div>';
+    html += steps.map(function(s) {
+      const toolColor = s.tool.startsWith('scrape') ? '#fde68a' :
+                        s.tool === 'save_companies'  ? '#86efac' :
+                        s.tool.startsWith('get_') || s.tool.startsWith('check_') ? '#93c5fd' :
+                        '#e2e8f0';
+      const time = s.ts ? new Date(s.ts).toLocaleTimeString() : '';
+      return '<div style="display:flex;gap:6px;align-items:baseline;padding:3px 0;border-top:1px solid #1e293b;">' +
+        '<span style="color:' + toolColor + ';flex-shrink:0;min-width:160px;">' + esc(s.tool) + '</span>' +
+        '<span style="color:#94a3b8;flex:1;word-break:break-all;">' + esc(s.summary) + '</span>' +
+        '<span style="color:#475569;flex-shrink:0;font-size:9px;">' + time + '</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  if (errors.length === 0 && steps.length === 0) {
+    html += '<div style="color:#475569;">No details available</div>';
+  }
+
+  pop.innerHTML = html;
   document.body.appendChild(pop);
 
-  // Close on outside click
   function onOutside(ev) {
     if (!pop.contains(ev.target) && ev.target !== btn) {
       pop.remove();

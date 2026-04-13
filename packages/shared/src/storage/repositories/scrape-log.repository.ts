@@ -20,6 +20,7 @@ export const scrapeLogRepository = {
       jobsFound: number;
       errors: string[];
       durationMs: number;
+      agentSteps?: import('../../types/index.js').AgentStep[];
     }
   ): Promise<void> {
     const col = getCollection<ScrapeLogDoc>(COLLECTIONS.SCRAPE_LOGS);

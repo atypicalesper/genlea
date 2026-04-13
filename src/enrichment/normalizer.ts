@@ -141,7 +141,7 @@ function normalizeUrl(url?: string): string | undefined {
 function normalizePhone(phone?: string): string | undefined {
   if (!phone) return undefined;
   const digits = phone.replace(/\D/g, '');
-  if (digits.length < 7) return undefined;
+
   // Already has country code (starts with + in original, or digits are 11+ chars starting with 1)
   if (phone.trim().startsWith('+')) return `+${digits}`;
   // 10-digit US number — prepend country code
