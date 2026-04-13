@@ -39,6 +39,7 @@ export async function buildLlm(): Promise<BaseChatModel> {
     model:       MODEL,
     baseUrl:     process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
     temperature: 0.2,
-    numPredict:  1024,
+    numCtx:      32768,  // qwen3.5 max — Ollama default is only 2048
+    numPredict:  8192,
   }) as unknown as BaseChatModel;
 }
