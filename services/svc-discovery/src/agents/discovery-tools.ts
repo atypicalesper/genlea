@@ -12,7 +12,7 @@ import {
   getAvailableSources,
   logger,
 } from '@genlea/shared';
-import type { DiscoveryJobData } from '@genlea/shared';
+import type { DiscoveryJobData, Company } from '@genlea/shared';
 import { SCRAPERS, BLOCKED_DOMAINS, BLOCKED_NAME_PATTERNS, isJunkDomain } from '../discovery/blocklists.js';
 import { resolvesRealDomain } from '../discovery/domain-validator.js';
 import { hunterScraper } from '../scrapers/index.js';
@@ -33,8 +33,8 @@ GOAL: Find and save ≥15 valid tech companies matching the query. Stop as soon 
 WORKFLOW:
 1. Call get_discovery_state — check if goal is already met before scraping anything.
 2. If not met, call scrape_source for the primary source.
-3. After each scrape, call save_companies with the filtered results.
-4. Call get_discovery_state again — if goalMet: true, stop immediately.
+3. After each scrape_source call, immediately call save_companies with source="<same source name>". Do NOT pass company data — just the source name.
+4. Call get_discovery_state again — if goalMet: true, stop.
 5. If not met and < 5 results were found from primary, try 1–2 fallback sources.
 6. Never try the same source twice (get_discovery_state.sourcesTried shows what's been done).
 
@@ -61,6 +61,9 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
 
   // ── Per-job closure state ────────────────────────────────────────────────────
   const triedSources = new Set<string>();
+  // Stores filtered companies after each scrape_source call.
+  // save_companies reads from here by source — the LLM never echoes company data back.
+  const pendingBySource = new Map<string, Partial<Company & { hiringInStack?: boolean; source?: string }>[]>();
   let totalSaved = 0;
 
   return [
@@ -141,21 +144,19 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
             return true;
           });
 
+          // Store in closure so save_companies can pick them up without re-passing through the LLM
+          pendingBySource.set(source, filtered.map(c => ({ ...c, source })));
+
           logger.info({ source, raw: rawResults.length, filtered: filtered.length }, '[discovery-tools] Scraped');
 
+          // Return only a summary — company data lives in pendingBySource, not in the LLM context.
+          // This prevents the LLM from echoing back thousands of tokens in the save_companies call.
           return JSON.stringify({
             source,
             rawCount:      rawResults.length,
             filteredCount: filtered.length,
-            companies: filtered.map(c => ({
-              name:          c.name,
-              domain:        c.domain,
-              linkedinUrl:   c.linkedinUrl,
-              employeeCount: c.employeeCount,
-              fundingStage:  c.fundingStage,
-              techStack:     (c.techStack ?? []).slice(0, 4),
-              source,
-            })),
+            preview: filtered.slice(0, 3).map(c => ({ name: c.name, domain: c.domain, employees: c.employeeCount })),
+            message: `${filtered.length} companies ready to save. Call save_companies with source="${source}" to persist them.`,
           });
         } catch (err) {
           const msg   = err instanceof Error ? err.message : String(err);
@@ -179,27 +180,36 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
 
     // ── 3. Save companies ─────────────────────────────────────────────────────
     tool(
-      async ({ companies }) => {
+      async ({ source, hiringInStack: defaultHiring = true }) => {
+        const companies = pendingBySource.get(source);
+        if (!companies?.length) {
+          return JSON.stringify({ error: `No pending results for source "${source}". Call scrape_source first.`, saved: 0, runningTotal: totalSaved });
+        }
+        // Consume the pending batch
+        pendingBySource.delete(source);
+
         let saved = 0, watchlisted = 0, skipped = 0;
 
         for (const co of companies) {
-          const domain = normalizeDomain(co.domain ?? '');
-          if (!domain || !co.name) { skipped++; continue; }
+          const domain = normalizeDomain((co as any).domain ?? '');
+          if (!domain || !(co as any).name) { skipped++; continue; }
           if (!(await resolvesRealDomain(domain))) { skipped++; continue; }
 
-          const hiringInStack  = co.hiringInStack !== false;
+          // Job-board sources (wellfound, linkedin, indeed, glassdoor, surelyremote) are always hiring
+          const isJobBoard = ['wellfound', 'linkedin', 'indeed', 'glassdoor', 'surelyremote'].includes(source);
+          const hiringInStack = isJobBoard || defaultHiring;
           const pipelineStatus = hiringInStack ? 'discovered' : 'watchlist';
 
           try {
             const company = await companyRepository.upsert({
-              name:          co.name,
+              name:          (co as any).name,
               domain,
-              linkedinUrl:   co.linkedinUrl,
-              employeeCount: co.employeeCount,
-              fundingStage:  co.fundingStage as any,
-              techStack:     co.techStack,
-              hqCountry:     co.hqCountry ?? 'US',
-              sources:       [co.source ?? job.source] as any,
+              linkedinUrl:   (co as any).linkedinUrl,
+              employeeCount: (co as any).employeeCount,
+              fundingStage:  (co as any).fundingStage as any,
+              techStack:     (co as any).techStack,
+              hqCountry:     (co as any).hqCountry ?? 'US',
+              sources:       [source ?? job.source] as any,
               pipelineStatus,
             } as any);
 
@@ -242,24 +252,15 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
         }
 
         totalSaved += saved;
-        logger.info({ saved, watchlisted, skipped, runningTotal: totalSaved }, '[discovery-tools] Companies saved');
+        logger.info({ source, saved, watchlisted, skipped, runningTotal: totalSaved }, '[discovery-tools] Companies saved');
         return JSON.stringify({ saved, watchlisted, skipped, total: companies.length, runningTotal: totalSaved });
       },
       {
         name:        'save_companies',
-        description: 'Save all valid discovered companies to the database. Actively-hiring companies are queued for enrichment; others go on a watchlist. Returns runningTotal across all save_companies calls this run.',
+        description: 'Persist companies from a completed scrape_source call. Pass the source name — company data is stored internally after scrape_source runs. Actively-hiring companies are queued for enrichment.',
         schema: z.object({
-          companies: z.array(z.object({
-            name:          z.string(),
-            domain:        z.string(),
-            linkedinUrl:   z.string().optional(),
-            employeeCount: z.number().optional(),
-            fundingStage:  z.string().optional(),
-            techStack:     z.array(z.string()).optional(),
-            hqCountry:     z.string().optional(),
-            source:        z.string().optional(),
-            hiringInStack: z.boolean().optional().describe('True if company is confirmed actively hiring in the target tech stack'),
-          })).describe('Array of company objects to save'),
+          source:        z.string().describe('The source name you just scraped (e.g. "wellfound", "indeed")'),
+          hiringInStack: z.boolean().optional().describe('Whether these companies are actively hiring (default: true for job-board sources)'),
         }),
       },
     ),

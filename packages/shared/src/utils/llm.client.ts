@@ -20,7 +20,7 @@ export async function buildLlm(): Promise<BaseChatModel> {
       model:       MODEL,
       apiKey:      process.env['GROQ_API_KEY'],
       temperature: 0.2,
-      maxTokens:   1024,
+      maxTokens:   8192,
     }) as unknown as BaseChatModel;
   }
 
@@ -30,7 +30,7 @@ export async function buildLlm(): Promise<BaseChatModel> {
       model:       MODEL,
       apiKey:      process.env['ANTHROPIC_API_KEY'],
       temperature: 0.2,
-      maxTokens:   1024,
+      maxTokens:   8192,
     }) as unknown as BaseChatModel;
   }
 
