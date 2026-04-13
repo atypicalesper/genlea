@@ -35,11 +35,15 @@ export async function buildLlm(): Promise<BaseChatModel> {
   }
 
   const { ChatOllama } = await import('@langchain/ollama');
+  // numCtx: Ollama default is 2048 — qwen3.5 supports 32768 (fits fine on 18GB M3 Pro).
+  // Override via OLLAMA_NUM_CTX if you need to reduce for a larger model.
+  const numCtx = parseInt(process.env['OLLAMA_NUM_CTX'] ?? '32768', 10);
   return new ChatOllama({
-    model:       MODEL,
-    baseUrl:     process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
+    model:      MODEL,
+    baseUrl:    process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
     temperature: 0.2,
-    numCtx:      32768,  // qwen3.5 max — Ollama default is only 2048
-    numPredict:  8192,
+    numCtx,
+    numPredict: 8192,
+    keepAlive:  '30m',  // keep model loaded between agent runs — avoids ~3s cold-start per job
   }) as unknown as BaseChatModel;
 }
