@@ -242,7 +242,6 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
                 runId:     job.runId,
                 companyId: company._id!,
                 domain:    company.domain,
-                sources:   ['github', 'hunter', 'clearbit'],
               });
               saved++;
             } else {

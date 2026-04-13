@@ -255,7 +255,6 @@ export interface EnrichmentJobData {
   runId: string;
   companyId: string;
   domain: string;
-  sources: ScraperSource[];
   force?: boolean;
 }
 
