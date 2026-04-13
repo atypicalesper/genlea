@@ -5,6 +5,44 @@ import { logger } from '../utils/logger.js';
 import { jobRepository } from '../storage/repositories/job.repository.js';
 import { ScraperSource } from '../types/index.js';
 
+// ── Available sources — derived from env at startup ───────────────────────────
+// Sync checks only (no I/O) — scrapers do their own full check inside isAvailable().
+// This just prevents queueing jobs for sources we know won't work.
+
+export function getAvailableSources(): Set<ScraperSource> {
+  const available = new Set<ScraperSource>();
+
+  // Always available — browser-only, no credentials required
+  available.add('wellfound');
+  available.add('indeed');
+  available.add('glassdoor');
+  available.add('surelyremote');
+
+  // API key required
+  if (process.env['EXPLORIUM_API_KEY'])  available.add('explorium');
+  if (process.env['APOLLO_API_KEY'])     available.add('apollo');
+  if (process.env['CLAY_API_KEY'])       available.add('clay');
+  if (process.env['CRUNCHBASE_API_KEY']) available.add('crunchbase');
+
+  // Full credentials required
+  if (process.env['ZOOMINFO_USERNAME'] && process.env['ZOOMINFO_PASSWORD']) available.add('zoominfo');
+  if (process.env['LI_USERNAME'])        available.add('linkedin');
+
+  return available;
+}
+
+export function logAvailableSources(): void {
+  const available = getAvailableSources();
+  const all: ScraperSource[] = ['explorium', 'wellfound', 'linkedin', 'indeed', 'glassdoor', 'surelyremote', 'crunchbase', 'apollo', 'zoominfo', 'clay'];
+  for (const src of all) {
+    if (available.has(src)) {
+      logger.info(`  ✓  ${src}`);
+    } else {
+      logger.warn(`  ✗  ${src}  — credentials not configured, skipping`);
+    }
+  }
+}
+
 // ── Seed queries ──────────────────────────────────────────────────────────────
 const SEED_QUERIES: Array<{
   source: ScraperSource;
@@ -71,6 +109,11 @@ const SEED_QUERIES: Array<{
   // ── ZoomInfo — database source (hiringInStack: false → watchlist) ────────
   { source: 'zoominfo', keywords: 'tech startup software engineer US seed series a', techStack: ['nodejs', 'python', 'react'] },
   { source: 'zoominfo', keywords: 'saas startup backend engineer US',               techStack: ['nodejs', 'typescript'] },
+
+  // ── Clay — enrichment-grade database source ───────────────────────────────
+  { source: 'clay', keywords: 'saas startup nodejs typescript engineer US',         techStack: ['nodejs', 'typescript'] },
+  { source: 'clay', keywords: 'ai ml startup python generative engineer US',        techStack: ['python', 'generative-ai', 'ai'] },
+  { source: 'clay', keywords: 'fintech startup fullstack react engineer US',        techStack: ['react', 'nodejs', 'fullstack'] },
 ];
 
 // ── Configurable thresholds ────────────────────────────────────────────────────
@@ -95,10 +138,13 @@ export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: st
     }
   }
 
-  const runId = generateRunId();
-  logger.info({ runId, queries: SEED_QUERIES.length, label }, '[scheduler] Enqueueing seed round');
+  const availableSources = getAvailableSources();
+  const activeQueries = SEED_QUERIES.filter(q => availableSources.has(q.source));
 
-  for (const q of SEED_QUERIES) {
+  const runId = generateRunId();
+  logger.info({ runId, total: SEED_QUERIES.length, active: activeQueries.length, label }, '[scheduler] Enqueueing seed round');
+
+  for (const q of activeQueries) {
     await discoveryQueue.add(
       `${label}:${q.source}:${runId}`,
       {
@@ -121,8 +167,8 @@ export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: st
   }
 
   _lastSeedAt = new Date();
-  logger.info({ runId, label }, '[scheduler] ✅ Seed round enqueued');
-  return { runId, queries: SEED_QUERIES.length };
+  logger.info({ runId, label, queued: activeQueries.length }, '[scheduler] ✅ Seed round enqueued');
+  return { runId, queries: activeQueries.length };
 }
 
 // ── Start scheduler (cron every 2 hours + immediate run on startup) ───────────

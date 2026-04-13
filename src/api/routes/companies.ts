@@ -4,8 +4,22 @@ import { contactRepository } from '../../storage/repositories/contact.repository
 import { jobRepository } from '../../storage/repositories/job.repository.js';
 import { queueManager } from '../../core/queue.manager.js';
 import { generateRunId } from '../../utils/random.js';
-import { LeadStatus } from '../../types/index.js';
+import type { Contact, LeadStatus } from '../../types/index.js';
 import { logger } from '../../utils/logger.js';
+
+const CONTACT_ROLE_ORDER: Record<string, number> = {
+  'CEO': 0, 'Founder': 1, 'Co-Founder': 2, 'CTO': 3,
+  'VP of Engineering': 4, 'VP Engineering': 4, 'Head of Engineering': 5,
+  'Director of Engineering': 6, 'Engineering Manager': 7, 'CPO': 8, 'COO': 9, 'CFO': 10,
+  'Head of HR': 11, 'VP of HR': 11, 'HR': 12, 'Recruiter': 13,
+  'Head of Talent': 14, 'Talent Acquisition': 15, 'Unknown': 99,
+};
+
+function sortContactsByRole(contacts: Contact[]): Contact[] {
+  return [...contacts].sort((a, b) =>
+    (CONTACT_ROLE_ORDER[a.role] ?? 50) - (CONTACT_ROLE_ORDER[b.role] ?? 50)
+  );
+}
 
 export async function companiesRoutes(app: FastifyInstance) {
 
@@ -27,18 +41,7 @@ export async function companiesRoutes(app: FastifyInstance) {
 
     const activeJobs   = jobs.filter(j => j.isActive);
     const inactiveJobs = jobs.filter(j => !j.isActive);
-
-    // Sort: CEO/Founder first, then CTO, then engineering/HR, then others
-    const roleOrder: Record<string, number> = {
-      'CEO': 0, 'Founder': 1, 'Co-Founder': 2, 'CTO': 3,
-      'VP of Engineering': 4, 'VP Engineering': 4, 'Head of Engineering': 5,
-      'Director of Engineering': 6, 'Engineering Manager': 7, 'CPO': 8, 'COO': 9, 'CFO': 10,
-      'Head of HR': 11, 'VP of HR': 11, 'HR': 12, 'Recruiter': 13,
-      'Head of Talent': 14, 'Talent Acquisition': 15, 'Unknown': 99,
-    };
-    const sortedContacts = [...contacts].sort((a, b) =>
-      (roleOrder[a.role] ?? 50) - (roleOrder[b.role] ?? 50)
-    );
+    const sortedContacts = sortContactsByRole(contacts);
 
     logger.info(
       { id, domain: company.domain, contacts: contacts.length, jobs: jobs.length },

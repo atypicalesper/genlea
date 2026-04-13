@@ -9,64 +9,62 @@ const VALID_SORT_FIELDS: Record<string, string> = {
   name: 'name', fundingStage: 'fundingStage', createdAt: 'createdAt',
 };
 
+type LeadQuery = LeadFilter & {
+  search?: string;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
+  qualified?: string;
+  maxScore?: string;
+};
+
+function buildLeadsFilter(q: LeadQuery): Record<string, unknown> {
+  const filter: Record<string, unknown> = {};
+
+  if (q.qualified === 'true') {
+    filter['status'] = { $in: ['hot_verified', 'hot', 'warm'] };
+  } else if (q.qualified === 'false') {
+    filter['status'] = { $in: ['cold', 'disqualified'] };
+  } else if (q.status) {
+    filter['status'] = q.status;
+  }
+
+  if (q.minScore || q.maxScore) {
+    const scoreFilter: Record<string, number> = {};
+    if (q.minScore) scoreFilter['$gte'] = Number(q.minScore);
+    if (q.maxScore) scoreFilter['$lte'] = Number(q.maxScore);
+    filter['score'] = scoreFilter;
+  }
+  if (q.fundingStage) filter['fundingStage'] = q.fundingStage;
+  if (q.hqState)      filter['hqState'] = q.hqState;
+  if (q.source)       filter['sources'] = { $in: [q.source] };
+  if (q.techStack) {
+    const tags = Array.isArray(q.techStack) ? q.techStack : [q.techStack];
+    filter['techStack'] = { $in: tags };
+  }
+  if (q.search) {
+    const escaped = q.search.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    filter['$or'] = [
+      { name:   { $regex: escaped, $options: 'i' } },
+      { domain: { $regex: escaped, $options: 'i' } },
+    ];
+  }
+
+  return filter;
+}
+
 export async function leadsRoutes(app: FastifyInstance) {
 
   // GET /api/leads — paginated, filterable, sortable list
-  app.get<{
-    Querystring: LeadFilter & {
-      search?: string;
-      sortBy?: string;
-      sortDir?: 'asc' | 'desc';
-      qualified?: string;
-      maxScore?: string;
-    }
-  }>('/leads', async (req, reply) => {
-    const {
-      status, minScore, maxScore, techStack, fundingStage,
-      hqState, source, page = 1, limit = 50,
-      search, sortBy = 'score', sortDir = 'desc', qualified,
-    } = req.query;
-
+  app.get<{ Querystring: LeadQuery }>('/leads', async (req, reply) => {
+    const { page = 1, limit = 50, sortBy = 'score', sortDir = 'desc' } = req.query;
     logger.info({ filters: req.query }, '[api:leads] GET /leads request');
 
-    const filter: Record<string, unknown> = {};
-
-    // Qualified/disqualified segments
-    if (qualified === 'true') {
-      filter['status'] = { $in: ['hot_verified', 'hot', 'warm'] };
-    } else if (qualified === 'false') {
-      filter['status'] = { $in: ['cold', 'disqualified'] };
-    } else if (status) {
-      filter['status'] = status;
-    }
-
-    if (minScore || maxScore) {
-      const scoreFilter: Record<string, number> = {};
-      if (minScore) scoreFilter['$gte'] = Number(minScore);
-      if (maxScore) scoreFilter['$lte'] = Number(maxScore);
-      filter['score'] = scoreFilter;
-    }
-    if (fundingStage) filter['fundingStage'] = fundingStage;
-    if (hqState)      filter['hqState'] = hqState;
-    if (source)       filter['sources'] = { $in: [source] };
-    if (techStack) {
-      const tags = Array.isArray(techStack) ? techStack : [techStack];
-      filter['techStack'] = { $in: tags };
-    }
-    if (search) {
-      const trimmed = search.slice(0, 100);
-      const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      filter['$or'] = [
-        { name:   { $regex: escaped, $options: 'i' } },
-        { domain: { $regex: escaped, $options: 'i' } },
-      ];
-    }
-
+    const filter    = buildLeadsFilter(req.query);
     const sortField = VALID_SORT_FIELDS[sortBy] ?? 'score';
     const sortOrder = sortDir === 'asc' ? 1 : -1;
-
     const safeLimit = Math.min(Number(limit), 500);
-    const skip = (Number(page) - 1) * safeLimit;
+    const skip      = (Number(page) - 1) * safeLimit;
+
     const [companies, total] = await Promise.all([
       companyRepository.findMany(filter, { sort: { [sortField]: sortOrder }, limit: safeLimit, skip }),
       companyRepository.count(filter),

@@ -46,6 +46,72 @@ services:
     networks:
       - genlea-net
 
+  svc-api:
+    build:
+      context: .
+      dockerfile: services/svc-api/Dockerfile
+    container_name: genlea-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-4000}:4000"
+    env_file: .env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/genlea
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - genlea-net
+
+  svc-discovery:
+    build:
+      context: .
+      dockerfile: services/svc-discovery/Dockerfile
+    container_name: genlea-discovery
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/genlea
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - genlea-net
+
+  svc-enrichment:
+    build:
+      context: .
+      dockerfile: services/svc-enrichment/Dockerfile
+    container_name: genlea-enrichment
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/genlea
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - genlea-net
+
+  svc-scoring:
+    build:
+      context: .
+      dockerfile: services/svc-scoring/Dockerfile
+    container_name: genlea-scoring
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/genlea
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - genlea-net
+
 
 volumes:
   mongo_data:

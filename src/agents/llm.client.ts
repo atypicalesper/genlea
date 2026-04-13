@@ -16,7 +16,7 @@ const PROVIDER = (process.env['AGENT_LLM_PROVIDER'] ?? 'ollama').toLowerCase();
 const DEFAULT_MODELS: Record<string, string> = {
   ollama:    'qwen3.5',
   groq:      'llama-3.3-70b-versatile',
-  anthropic: 'claude-haiku-4-5-20251001',
+  anthropic: 'claude-3-5-haiku-20241022',
 };
 
 export const MODEL = process.env['AGENT_LLM_MODEL'] ?? DEFAULT_MODELS[PROVIDER] ?? 'qwen3.5';

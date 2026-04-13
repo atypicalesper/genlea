@@ -12,8 +12,45 @@ import { scrapeRoutes } from './routes/scrape.js';
 import { jobsRoutes } from './routes/jobs.js';
 import { companiesRoutes } from './routes/companies.js';
 import { settingsRoutes } from './routes/settings.js';
+import { adminRoutes } from './routes/admin.js';
 import { dashboardRoutes } from './dashboard.js';
 import { logger } from '../utils/logger.js';
+
+const REQUIRED_ENV: Record<string, string> = {
+  MONGO_URI:  'MongoDB connection string (mongodb:// or mongodb+srv://)',
+};
+
+const OPTIONAL_ENV: Record<string, string> = {
+  REDIS_URL:      'Redis connection URL — defaults to redis://localhost:6379',
+  REDIS_PASSWORD: 'Redis auth password — optional',
+  MONGO_DB_NAME:  'MongoDB database name — defaults to "genlea"',
+  API_PORT:       'HTTP port — defaults to 4000',
+  API_HOST:       'Bind address — defaults to 0.0.0.0',
+};
+
+function checkEnv(): boolean {
+  const missing = Object.entries(REQUIRED_ENV).filter(([key]) => !process.env[key]);
+
+  if (missing.length === 0) return true;
+
+  logger.error('[api] Server cannot start — required environment variables are missing:');
+  for (const [key, description] of missing) {
+    logger.error(`  ✗  ${key}  —  ${description}`);
+  }
+
+  const presentOptional = Object.keys(OPTIONAL_ENV).filter(k => process.env[k]);
+  const absentOptional  = Object.keys(OPTIONAL_ENV).filter(k => !process.env[k]);
+
+  if (presentOptional.length) {
+    logger.info('[api] Optional env vars present: ' + presentOptional.join(', '));
+  }
+  if (absentOptional.length) {
+    logger.info('[api] Optional env vars not set (defaults apply): ' + absentOptional.join(', '));
+  }
+
+  logger.info('[api] Copy .env.example → .env and fill in the missing values');
+  return false;
+}
 
 const server = Fastify({
   logger: false, // use our Pino instance instead
@@ -21,6 +58,7 @@ const server = Fastify({
 });
 
 async function bootstrap() {
+  if (!checkEnv()) process.exit(1);
   await connectMongo();
 
   await server.register(cors, { origin: '*' });
@@ -66,6 +104,11 @@ async function bootstrap() {
   await server.register(scrapeRoutes,    { prefix: '/api' });
   await server.register(jobsRoutes,      { prefix: '/api' });
   await server.register(settingsRoutes,  { prefix: '/api' });
+  await server.register(adminRoutes,     { prefix: '/api' });
+
+  const { logAvailableSources } = await import('../core/scheduler.js');
+  logger.info('[api] Active discovery sources:');
+  logAvailableSources();
 
   const port = parseInt(process.env['API_PORT'] ?? '4000');
   const host = process.env['API_HOST'] ?? '0.0.0.0';

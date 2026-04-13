@@ -1,7 +1,9 @@
 import { Company, Contact, Job, ScoreBreakdown, FundingStage } from '../types/index.js';
 
-const TARGET_TAGS = (process.env['TARGET_TECH_STACK'] ?? 'nodejs,typescript,python,react,nextjs,nestjs,frontend,backend,fullstack,ai,ml,generative-ai,fastapi')
+const ENV_TARGET_TAGS = (process.env['TARGET_TECH_STACK'] ?? 'nodejs,typescript,python,react,nextjs,nestjs,frontend,backend,fullstack,ai,ml,generative-ai,fastapi')
   .split(',').map(t => t.trim());
+
+const ENV_HIGH_VALUE_INDUSTRIES = ['ai', 'saas', 'fintech', 'healthtech', 'edtech'];
 
 // ── 1. Dev Origin Concentration (0–30) ───────────────────────────────────────
 export function originRatioScore(company: Company): number {
@@ -35,7 +37,7 @@ export function jobFreshnessScore(jobs: Job[]): number {
 }
 
 // ── 3. Tech Stack Alignment (0–20) ───────────────────────────────────────────
-export function techStackScore(company: Company, jobs: Job[]): number {
+export function techStackScore(company: Company, jobs: Job[], targetTags: string[] = ENV_TARGET_TAGS): number {
   const allTags = new Set([
     ...(company.techStack ?? []),
     ...jobs.flatMap(j => j.techTags ?? []),
@@ -43,7 +45,7 @@ export function techStackScore(company: Company, jobs: Job[]): number {
 
   let score = 0;
   for (const tag of allTags) {
-    if (TARGET_TAGS.includes(tag)) {
+    if (targetTags.includes(tag)) {
       // AI/ML/Gen-AI roles are highest value clients
       if (['ai', 'ml', 'generative-ai'].includes(tag)) score += 5;
       else score += 3;
@@ -70,7 +72,7 @@ export function contactScore(contacts: Contact[]): number {
 }
 
 // ── 5. Company Profile Fit (0–15) ─────────────────────────────────────────────
-export function companyFitScore(company: Company): number {
+export function companyFitScore(company: Company, highValueIndustries: string[] = ENV_HIGH_VALUE_INDUSTRIES): number {
   let score = 0;
 
   // Size — undefined means unknown (not 0 employees), give neutral credit
@@ -86,10 +88,12 @@ export function companyFitScore(company: Company): number {
   };
   score += stageScores[company.fundingStage ?? 'Unknown'] ?? 0;
 
-  // Industry bonus
-  const highValueIndustries = ['ai', 'saas', 'fintech', 'healthtech', 'edtech'];
+  // Industry bonus — unknown industry (no data fetched yet) → grant bonus as failsafe
   const companyIndustries = (company.industry ?? []).map(i => i.toLowerCase());
-  if (highValueIndustries.some(i => companyIndustries.some(ci => ci.includes(i)))) {
+  if (
+    companyIndustries.length === 0 ||
+    highValueIndustries.some(i => companyIndustries.some(ci => ci.includes(i)))
+  ) {
     score += 3;
   }
 

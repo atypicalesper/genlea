@@ -1,0 +1,31 @@
+{
+  "name": "@genlea/svc-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development tsx watch src/server.ts",
+    "start": "NODE_ENV=production tsx src/server.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@genlea/shared": "*",
+    "@bull-board/api": "^5.23.0",
+    "@bull-board/fastify": "^5.23.0",
+    "@fastify/cors": "^9.0.1",
+    "bullmq": "^5.7.0",
+    "csv-stringify": "^6.5.0",
+    "dotenv-flow": "^4.1.0",
+    "fastify": "^4.26.2",
+    "ioredis": "^5.3.2",
+    "mongodb": "^6.7.0",
+    "pino": "^9.2.0",
+    "pino-pretty": "^11.2.1",
+    "pino-roll": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.2",
+    "tsx": "^4.15.6",
+    "typescript": "^5.5.2"
+  }
+}

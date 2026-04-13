@@ -1,6 +1,7 @@
 import { Company, Contact, Job } from '../types/index.js';
 import { normalizeDomain } from '../utils/random.js';
 import { logger } from '../utils/logger.js';
+import { uniqueArray, newerDate } from '../utils/array-utils.js';
 
 // ── Company Deduplication ──────────────────────────────────────────────────────
 
@@ -178,14 +179,3 @@ export function deduplicateJobs(jobs: Partial<Job>[]): Partial<Job>[] {
   return deduplicated;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function uniqueArray<T>(arr: T[]): T[] {
-  return [...new Set(arr)];
-}
-
-function newerDate(a?: Date, b?: Date): Date | undefined {
-  if (!a) return b;
-  if (!b) return a;
-  return a > b ? a : b;
-}

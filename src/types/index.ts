@@ -20,6 +20,7 @@ export type ScraperSource =
   | 'indeed'
   | 'surelyremote'
   | 'website'
+  | 'clay'
   | 'agent';
 
 export type ContactRole =

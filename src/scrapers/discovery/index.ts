@@ -7,3 +7,4 @@ export { zoomInfoScraper } from './zoominfo.scraper.js';
 export { glassdoorScraper } from './glassdoor.scraper.js';
 export { surelyRemoteScraper } from './surelyremote.scraper.js';
 export { exploriumScraper } from '../enrichment/explorium.scraper.js';
+export { clayScraper } from '../enrichment/clay.scraper.js';

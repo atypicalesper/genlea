@@ -39,10 +39,12 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     const { score, status, breakdown } = scoreCompany(
       { company, contacts, jobs },
       {
-        hotVerified: settings.leadScoreHotVerifiedThreshold,
-        hot:         settings.leadScoreHotThreshold,
-        warm:        settings.leadScoreWarmThreshold,
-        cold:        settings.leadScoreColdThreshold,
+        hotVerified:         settings.leadScoreHotVerifiedThreshold,
+        hot:                 settings.leadScoreHotThreshold,
+        warm:                settings.leadScoreWarmThreshold,
+        cold:                settings.leadScoreColdThreshold,
+        targetTechTags:      settings.targetTechTags,
+        highValueIndustries: settings.highValueIndustries,
       }
     );
 

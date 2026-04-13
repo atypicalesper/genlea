@@ -15,6 +15,9 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     *{box-sizing:border-box;}
+    .info-btn{width:15px;height:15px;border-radius:50%;background:#e5e7eb;color:#6b7280;font-size:9px;font-weight:700;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1;transition:background .15s,color .15s;}
+    .info-btn:hover{background:#dbeafe;color:#1d4ed8;}
+    .tip-box{background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:8px 10px;font-size:11px;color:#0369a1;margin-bottom:6px;line-height:1.5;}
     .badge{display:inline-block;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600;}
     .badge-hot_verified{background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;}
     .badge-hot{background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;}
@@ -190,6 +193,7 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
         <option>apollo</option><option>indeed</option><option>glassdoor</option>
         <option>surelyremote</option><option>github</option><option>zoominfo</option>
         <option>website</option><option>hunter</option><option>clearbit</option>
+        <option>clay</option>
       </select>
     </div>
     <div class="flex flex-col gap-0.5">
@@ -368,38 +372,85 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
           <h2 class="font-semibold text-gray-900">Worker Concurrency</h2>
           <p class="text-xs text-gray-400 mt-0.5">Live — applied within 10 seconds, no restart needed</p>
         </div>
-        <button onclick="saveSettings()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition">
+        <button onclick="saveConcurrency()" id="save-concurrency-btn"
+          class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition">
           Save
         </button>
       </div>
       <div class="grid grid-cols-3 gap-6">
         <div>
-          <div class="flex justify-between items-baseline mb-1">
-            <label class="text-xs font-medium text-gray-600">Discovery</label>
-            <span class="text-xs font-bold text-blue-600" id="concurrency-discovery-display">10</span>
+          <div class="flex items-center gap-1.5 mb-2">
+            <label class="text-xs font-medium text-gray-600">Discovery workers</label>
+            <button class="info-btn" onclick="toggleTip('tip-conc-discovery')">?</button>
           </div>
-          <input type="range" id="s-concurrency-discovery" min="1" max="20" step="1" value="10"
-            oninput="document.getElementById('concurrency-discovery-display').textContent=this.value" class="w-full"/>
-          <div class="flex justify-between text-[10px] text-gray-400 mt-0.5"><span>1</span><span>10</span><span>20</span></div>
+          <div id="tip-conc-discovery" class="tip-box hidden">
+            Parallel discovery jobs — each job scrapes one source (Wellfound, Indeed, LinkedIn, etc.) for company listings.<br/><br/>
+            <strong>Higher:</strong> Faster discovery, more companies found per hour — but more browser instances and memory.<br/>
+            <strong>Lower:</strong> Slower but lighter on resources. Recommended: 3–8 unless on a beefy server.
+          </div>
+          <div class="flex items-center gap-3">
+            <input type="range" id="s-concurrency-discovery" min="1" max="20" step="1" value="10"
+              oninput="syncConcurrency('discovery',this.value)" class="flex-1"/>
+            <input type="number" id="n-concurrency-discovery" min="1" max="20" value="10"
+              oninput="syncConcurrency('discovery',this.value,true)"
+              class="w-14 text-center font-bold text-blue-600 text-sm"/>
+          </div>
+          <div class="flex justify-between text-[10px] text-gray-400 mt-0.5"><span>1</span><span>20</span></div>
         </div>
         <div>
-          <div class="flex justify-between items-baseline mb-1">
-            <label class="text-xs font-medium text-gray-600">Enrichment</label>
-            <span class="text-xs font-bold text-indigo-600" id="concurrency-enrichment-display">15</span>
+          <div class="flex items-center gap-1.5 mb-2">
+            <label class="text-xs font-medium text-gray-600">Enrichment workers</label>
+            <button class="info-btn" onclick="toggleTip('tip-conc-enrichment')">?</button>
           </div>
-          <input type="range" id="s-concurrency-enrichment" min="1" max="30" step="1" value="15"
-            oninput="document.getElementById('concurrency-enrichment-display').textContent=this.value" class="w-full"/>
-          <div class="flex justify-between text-[10px] text-gray-400 mt-0.5"><span>1</span><span>15</span><span>30</span></div>
+          <div id="tip-conc-enrichment" class="tip-box hidden">
+            Parallel enrichment jobs — each job enriches one company via GitHub, Hunter, Clearbit, website scraping, and name origin analysis.<br/><br/>
+            <strong>Higher:</strong> Faster enrichment pipeline — companies reach scoring sooner. Watch your API rate limits (Hunter, Clearbit, Explorium all have quotas).<br/>
+            <strong>Lower:</strong> Safer for API budgets. Recommended: 5–10 unless you have high API limits.
+          </div>
+          <div class="flex items-center gap-3">
+            <input type="range" id="s-concurrency-enrichment" min="1" max="30" step="1" value="15"
+              oninput="syncConcurrency('enrichment',this.value)" class="flex-1"/>
+            <input type="number" id="n-concurrency-enrichment" min="1" max="30" value="15"
+              oninput="syncConcurrency('enrichment',this.value,true)"
+              class="w-14 text-center font-bold text-indigo-600 text-sm"/>
+          </div>
+          <div class="flex justify-between text-[10px] text-gray-400 mt-0.5"><span>1</span><span>30</span></div>
         </div>
         <div>
-          <div class="flex justify-between items-baseline mb-1">
-            <label class="text-xs font-medium text-gray-600">Scoring</label>
-            <span class="text-xs font-bold text-emerald-600" id="concurrency-scoring-display">30</span>
+          <div class="flex items-center gap-1.5 mb-2">
+            <label class="text-xs font-medium text-gray-600">Scoring workers</label>
+            <button class="info-btn" onclick="toggleTip('tip-conc-scoring')">?</button>
           </div>
-          <input type="range" id="s-concurrency-scoring" min="1" max="50" step="1" value="30"
-            oninput="document.getElementById('concurrency-scoring-display').textContent=this.value" class="w-full"/>
-          <div class="flex justify-between text-[10px] text-gray-400 mt-0.5"><span>1</span><span>25</span><span>50</span></div>
+          <div id="tip-conc-scoring" class="tip-box hidden">
+            Parallel scoring jobs — each job computes the 0–100 lead score for one company using the 5-signal rule engine (origin ratio, job freshness, tech stack, contacts, company fit).<br/><br/>
+            Scoring is <strong>CPU-only</strong> (no network calls, no API usage) so this can safely be high. Recommended: 10–30.
+          </div>
+          <div class="flex items-center gap-3">
+            <input type="range" id="s-concurrency-scoring" min="1" max="50" step="1" value="30"
+              oninput="syncConcurrency('scoring',this.value)" class="flex-1"/>
+            <input type="number" id="n-concurrency-scoring" min="1" max="50" value="30"
+              oninput="syncConcurrency('scoring',this.value,true)"
+              class="w-14 text-center font-bold text-emerald-600 text-sm"/>
+          </div>
+          <div class="flex justify-between text-[10px] text-gray-400 mt-0.5"><span>1</span><span>50</span></div>
         </div>
+      </div>
+      <div id="concurrency-saved" class="hidden mt-3 bg-emerald-50 border border-emerald-200 rounded-lg p-2.5 text-xs text-emerald-700">
+        ✓ Concurrency updated — workers will pick it up within 10 seconds
+      </div>
+    </div>
+
+    <!-- Danger Zone -->
+    <div class="bg-white border border-red-200 rounded-xl p-5 md:col-span-2">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="font-semibold text-red-700">Danger Zone</h2>
+          <p class="text-xs text-gray-400 mt-0.5">Irreversible — clears all companies, contacts, jobs, logs and drains all queues</p>
+        </div>
+        <button onclick="resetDatabase()"
+          class="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition">
+          ✕ Reset Database
+        </button>
       </div>
     </div>
 
@@ -433,8 +484,17 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
         <div class="space-y-4">
           <div>
             <div class="flex justify-between items-baseline mb-1">
-              <label class="text-xs font-medium text-gray-600">Indian Origin Ratio Threshold</label>
+              <div class="flex items-center gap-1.5">
+                <label class="text-xs font-medium text-gray-600">Indian Origin Ratio Threshold</label>
+                <button class="info-btn" onclick="toggleTip('tip-origin-ratio')">?</button>
+              </div>
               <span class="text-xs font-bold text-blue-600" id="ratio-display">60%</span>
+            </div>
+            <div id="tip-origin-ratio" class="tip-box hidden">
+              The minimum fraction of engineers at a company that must appear to be of Indian origin for the lead to score highly. The engine classifies developer names collected from GitHub, LinkedIn, and team pages.<br/><br/>
+              <strong>Higher:</strong> Fewer leads, stronger signal — the ones that pass are very warm.<br/>
+              <strong>Lower:</strong> Wider net — more companies qualify but average conversion drops.<br/>
+              Contributes up to <strong>30 of 100</strong> points in the score.
             </div>
             <input type="range" id="s-origin-ratio" min="10" max="90" step="5" value="60"
               oninput="updateRatioDisplay()" class="w-full"/>
@@ -447,8 +507,16 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
           </div>
           <div>
             <div class="flex justify-between items-baseline mb-1">
-              <label class="text-xs font-medium text-gray-600">Min Name Sample for Ratio</label>
+              <div class="flex items-center gap-1.5">
+                <label class="text-xs font-medium text-gray-600">Min Name Sample for Ratio</label>
+                <button class="info-btn" onclick="toggleTip('tip-min-sample')">?</button>
+              </div>
               <span class="text-xs font-bold text-gray-600" id="sample-display">10</span>
+            </div>
+            <div id="tip-min-sample" class="tip-box hidden">
+              How many developer names must be collected before the origin ratio is trusted. If fewer names are available, the ratio score defaults to a neutral <strong>10/30</strong> instead of 0 — preventing small samples from unfairly disqualifying good leads.<br/><br/>
+              <strong>Higher:</strong> More accurate ratios, but more companies get the neutral 10/30 fallback.<br/>
+              <strong>Lower:</strong> Ratio kicks in sooner but may be based on too few names to be reliable.
             </div>
             <input type="range" id="s-min-sample" min="3" max="50" step="1" value="10"
               oninput="document.getElementById('sample-display').textContent=this.value" class="w-full"/>
@@ -460,8 +528,16 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
         <div class="space-y-4">
           <div>
             <div class="flex justify-between items-baseline mb-1">
-              <label class="text-xs font-medium text-gray-600">Hot Verified Threshold (score ≥)</label>
+              <div class="flex items-center gap-1.5">
+                <label class="text-xs font-medium text-gray-600">Hot Verified Threshold (score ≥)</label>
+                <button class="info-btn" onclick="toggleTip('tip-hotv')">?</button>
+              </div>
               <span class="text-xs font-bold text-orange-700" id="hotv-display">80</span>
+            </div>
+            <div id="tip-hotv" class="tip-box hidden">
+              Companies scoring at or above this are classified as <strong>Hot Verified</strong> — top priority leads. They have confirmed contacts with verified emails, strong Indian-origin ratios, and active engineering hiring.<br/><br/>
+              <strong>Raise:</strong> Tightens the top tier — more companies fall to Hot instead.<br/>
+              <strong>Lower:</strong> Expands Hot Verified but risks including less-qualified leads at the top of your outreach queue.
             </div>
             <input type="range" id="s-hotv-threshold" min="60" max="100" step="5" value="80"
               oninput="document.getElementById('hotv-display').textContent=this.value" class="w-full"/>
@@ -469,8 +545,16 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
           </div>
           <div>
             <div class="flex justify-between items-baseline mb-1">
-              <label class="text-xs font-medium text-gray-600">Hot Lead Threshold (score ≥)</label>
+              <div class="flex items-center gap-1.5">
+                <label class="text-xs font-medium text-gray-600">Hot Lead Threshold (score ≥)</label>
+                <button class="info-btn" onclick="toggleTip('tip-hot')">?</button>
+              </div>
               <span class="text-xs font-bold text-orange-600" id="hot-display">55</span>
+            </div>
+            <div id="tip-hot" class="tip-box hidden">
+              Companies scoring at or above this (but below Hot Verified) are classified as <strong>Hot</strong>. They match most criteria — hiring in target stack, team composition looks right — but may lack a verified email or have a smaller name sample.<br/><br/>
+              <strong>Raise:</strong> Shrinks the Hot pool, pushes borderline companies to Warm.<br/>
+              <strong>Lower:</strong> Grows Hot, potentially diluting the signal for your outreach team.
             </div>
             <input type="range" id="s-hot-threshold" min="40" max="90" step="5" value="55"
               oninput="document.getElementById('hot-display').textContent=this.value" class="w-full"/>
@@ -478,8 +562,16 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
           </div>
           <div>
             <div class="flex justify-between items-baseline mb-1">
-              <label class="text-xs font-medium text-gray-600">Warm Lead Threshold (score ≥)</label>
+              <div class="flex items-center gap-1.5">
+                <label class="text-xs font-medium text-gray-600">Warm Lead Threshold (score ≥)</label>
+                <button class="info-btn" onclick="toggleTip('tip-warm')">?</button>
+              </div>
               <span class="text-xs font-bold text-yellow-600" id="warm-display">50</span>
+            </div>
+            <div id="tip-warm" class="tip-box hidden">
+              Companies scoring at or above this (but below Hot) are classified as <strong>Warm</strong>. They show some signal but may be missing contacts, have low origin ratios, or be in a less-targeted tech stack. Good for follow-up after the Hot pool is worked.<br/><br/>
+              <strong>Raise:</strong> More companies fall to Cold — stricter Warm qualification.<br/>
+              <strong>Lower:</strong> Larger Warm pool, useful if you want to cast a wider net.
             </div>
             <input type="range" id="s-warm-threshold" min="20" max="70" step="5" value="50"
               oninput="document.getElementById('warm-display').textContent=this.value" class="w-full"/>
@@ -488,6 +580,41 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
           <div id="settings-saved" class="hidden bg-emerald-50 border border-emerald-200 rounded-lg p-2.5 text-xs text-emerald-700">
             ✓ Settings saved — applies to new enrichment/scoring jobs
           </div>
+        </div>
+
+      </div>
+
+      <!-- Tag editors — full width -->
+      <div class="grid grid-cols-2 gap-6 mt-4 pt-4 border-t border-gray-100">
+
+        <!-- Tech Stack Tags -->
+        <div>
+          <div class="flex items-center gap-1.5 mb-1">
+            <label class="text-xs font-medium text-gray-600">Target Tech Stack Tags</label>
+            <button class="info-btn" onclick="toggleTip(\'tip-tech-tags\')">?</button>
+          </div>
+          <div id="tip-tech-tags" class="tip-box hidden mb-2">
+            Comma-separated list of tech tags that score positively (up to <strong>20 pts</strong>). Tags matching <strong>ai, ml, generative-ai</strong> score 5 pts each; all others score 3 pts each.
+          </div>
+          <textarea id="s-tech-tags" rows="3"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
+            placeholder="nodejs, typescript, python, react, ai, ml"></textarea>
+          <div class="text-[10px] text-gray-400 mt-0.5">Comma-separated — changes apply to next scoring run</div>
+        </div>
+
+        <!-- High-Value Industries -->
+        <div>
+          <div class="flex items-center gap-1.5 mb-1">
+            <label class="text-xs font-medium text-gray-600">High-Value Industries</label>
+            <button class="info-btn" onclick="toggleTip(\'tip-industries\')">?</button>
+          </div>
+          <div id="tip-industries" class="tip-box hidden mb-2">
+            Comma-separated industry keywords (matched as substrings, case-insensitive). Companies whose industry contains any of these receive a <strong>+3 pt bonus</strong> in the Company Fit score. Companies with no industry data also receive the bonus (failsafe).
+          </div>
+          <textarea id="s-industries" rows="3"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
+            placeholder="ai, saas, fintech, healthtech, edtech"></textarea>
+          <div class="text-[10px] text-gray-400 mt-0.5">Comma-separated — changes apply to next scoring run</div>
         </div>
 
       </div>
@@ -514,6 +641,7 @@ const DASHBOARD_HTML = /* html */`<!DOCTYPE html>
           <option>apollo</option><option>indeed</option><option>glassdoor</option>
           <option>surelyremote</option><option>github</option><option>zoominfo</option>
           <option>hunter</option><option>clearbit</option><option>website</option>
+          <option>clay</option>
         </select>
         <select id="log-filter-limit" onchange="loadLogs()" class="text-xs">
           <option value="50">Last 50</option>
@@ -939,8 +1067,11 @@ async function loadCompanies() {
         '<td class="px-4 py-2.5"><div class="flex flex-wrap gap-1">' + (sources || '<span class="text-gray-300">—</span>') + '</div></td>' +
         '<td class="px-4 py-2.5">' + contactsCell + '</td>' +
         '<td class="px-4 py-2.5">' +
-          '<div class="flex gap-1" onclick="event.stopPropagation()">' +
-            '<button onclick="quickStatus(\\''+c._id+'\\',\\''+status+'\\')" class="action-btn" title="Change status">✎</button>' +
+          '<div class="flex gap-1 flex-wrap" onclick="event.stopPropagation()">' +
+            (status === 'disqualified'
+              ? '<button onclick="restoreLead(\\''+c._id+'\\')" class="action-btn text-green-600" style="border-color:#bbf7d0;background:#f0fdf4" title="Restore lead">↩ Restore</button>'
+              : '<button onclick="disqualifyLead(\\''+c._id+'\\',\\''+esc(c.name||c.domain)+'\\')" class="action-btn danger" title="Disqualify lead">✗ Disq.</button>'
+            ) +
             '<button onclick="openCompany(\\''+c._id+'\\',true)" class="action-btn" title="View detail">→</button>' +
           '</div>' +
         '</td>' +
@@ -964,13 +1095,26 @@ async function loadCompanies() {
   }
 }
 
-async function quickStatus(id, currentStatus) {
-  const statuses = ['hot_verified','hot','warm','cold','disqualified','pending'];
-  const next = prompt('Set status for company:\\n\\nValid values: ' + statuses.join(', ') + '\\n\\nCurrent: ' + currentStatus);
-  if (!next || !statuses.includes(next.trim())) return;
+async function disqualifyLead(id, name) {
+  if (!confirm('Disqualify "' + name + '"?\\n\\nThis marks it as manually reviewed and removes it from the active pipeline.')) return;
+  try {
+    await apiPatch('/api/companies/' + id + '/status', { status: 'disqualified' });
+    toast('Disqualified: ' + name);
+    document.getElementById('modal').classList.add('hidden');
+    loadCompanies();
+    loadStats();
+  } catch(e) {
+    toast('Failed: ' + e.message);
+  }
+}
+
+async function restoreLead(id) {
+  const statuses = ['hot_verified','hot','warm','cold','pending'];
+  const next = prompt('Restore to which status?\\n\\n' + statuses.join(' | ') + '\\n\\n(default: cold)') || 'cold';
+  if (!statuses.includes(next.trim())) { toast('Invalid status: ' + next.trim()); return; }
   try {
     await apiPatch('/api/companies/' + id + '/status', { status: next.trim() });
-    toast('Status updated to ' + next.trim());
+    toast('Restored to ' + next.trim());
     loadCompanies();
     loadStats();
   } catch(e) {
@@ -1111,9 +1255,13 @@ async function openCompany(id) {
         (activeJobs.length ? '<div class="border border-gray-100 rounded-lg px-3 py-1">' + activeJobs.map(jobCard).join('') + '</div>'
           : '<div class="text-gray-300 text-xs py-3 text-center">No open jobs found yet</div>') +
       '</div>' +
-      '<div class="mt-4 pt-3 border-t border-gray-100 flex gap-2">' +
+      '<div class="mt-4 pt-3 border-t border-gray-100 flex gap-2 flex-wrap">' +
+        (c.status === 'disqualified'
+          ? '<button onclick="restoreLead(\\''+id+'\\');closeModal({target:null})" class="action-btn text-xs text-green-600" style="border-color:#bbf7d0;background:#f0fdf4">↩ Restore Lead</button>'
+          : '<button onclick="disqualifyLead(\\''+id+'\\',\\''+esc(c.name||c.domain)+'\\')" class="action-btn danger text-xs">✗ Disqualify</button>'
+        ) +
         '<button onclick="quickStatus(\\''+id+'\\',\\''+esc(c.status||'pending')+'\\')" class="action-btn text-xs">✎ Change Status</button>' +
-        '<button onclick="deleteCompany(\\''+id+'\\')" class="action-btn danger text-xs">✕ Delete</button>' +
+        '<button onclick="deleteCompany(\\''+id+'\\')" class="action-btn danger text-xs" style="margin-left:auto">✕ Delete</button>' +
       '</div>';
 
   } catch(e) {
@@ -1342,11 +1490,57 @@ async function drainQueue(name) {
   } catch(e) { toast('Failed: ' + e.message); }
 }
 
+function toggleTip(id) {
+  document.getElementById(id).classList.toggle('hidden');
+}
+
+function syncConcurrency(worker, val, fromNumber) {
+  const n = Math.max(1, parseInt(val) || 1);
+  document.getElementById('s-concurrency-' + worker).value = n;
+  document.getElementById('n-concurrency-' + worker).value = n;
+}
+
+async function saveConcurrency() {
+  const btn = document.getElementById('save-concurrency-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    await apiPatch('/api/settings', {
+      workerConcurrencyDiscovery:  parseInt(document.getElementById('n-concurrency-discovery').value),
+      workerConcurrencyEnrichment: parseInt(document.getElementById('n-concurrency-enrichment').value),
+      workerConcurrencyScoring:    parseInt(document.getElementById('n-concurrency-scoring').value),
+    });
+    const el = document.getElementById('concurrency-saved');
+    el.classList.remove('hidden');
+    toast('Worker concurrency saved');
+    setTimeout(() => el.classList.add('hidden'), 4000);
+  } catch(e) {
+    toast('Save failed: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+}
+
+async function resetDatabase() {
+  const confirmed = confirm(
+    'This will permanently delete ALL companies, contacts, jobs and logs, and drain all queues.\\n\\nType OK to confirm.'
+  );
+  if (!confirmed) return;
+  try {
+    await apiFetch('/api/admin/reset-db', { method: 'POST' });
+    toast('Database reset — all data cleared');
+    loadStats();
+    loadCompanies();
+    loadQueueStats();
+  } catch(e) {
+    toast('Reset failed: ' + e.message);
+  }
+}
+
 async function loadSettings() {
   try {
     const json = await apiFetch('/api/settings');
     const d = json.data;
-    const orPct = Math.round((d.originRatioThreshold || 0.60) * 100);
+    const orPct = Math.round((d.originRatioThreshold || 0.10) * 100);
     document.getElementById('s-origin-ratio').value    = orPct;
     document.getElementById('s-min-sample').value      = d.originRatioMinSample           || 5;
     document.getElementById('s-hotv-threshold').value  = d.leadScoreHotVerifiedThreshold  || 80;
@@ -1359,12 +1553,13 @@ async function loadSettings() {
     const cd = d.workerConcurrencyDiscovery  || 10;
     const ce = d.workerConcurrencyEnrichment || 15;
     const cs = d.workerConcurrencyScoring    || 30;
-    document.getElementById('s-concurrency-discovery').value  = cd;
-    document.getElementById('s-concurrency-enrichment').value = ce;
-    document.getElementById('s-concurrency-scoring').value    = cs;
-    document.getElementById('concurrency-discovery-display').textContent  = cd;
-    document.getElementById('concurrency-enrichment-display').textContent = ce;
-    document.getElementById('concurrency-scoring-display').textContent    = cs;
+    syncConcurrency('discovery',  cd);
+    syncConcurrency('enrichment', ce);
+    syncConcurrency('scoring',    cs);
+    const defaultTags = 'nodejs, typescript, python, react, nextjs, nestjs, frontend, backend, fullstack, ai, ml, generative-ai, fastapi';
+    const defaultInds = 'ai, saas, fintech, healthtech, edtech';
+    document.getElementById('s-tech-tags').value = (d.targetTechTags ?? []).join(', ') || defaultTags;
+    document.getElementById('s-industries').value = (d.highValueIndustries ?? []).join(', ') || defaultInds;
     updateRatioDisplay();
   } catch(e) { /* silent */ }
 }
@@ -1384,15 +1579,18 @@ async function saveSettings() {
   btn.textContent = 'Saving…';
   try {
     const ratio = parseInt(document.getElementById('s-origin-ratio').value) / 100;
+    const techTags = document.getElementById('s-tech-tags').value
+      .split(',').map(t => t.trim()).filter(Boolean);
+    const industries = document.getElementById('s-industries').value
+      .split(',').map(t => t.trim()).filter(Boolean);
     await apiPatch('/api/settings', {
       originRatioThreshold:          ratio,
       originRatioMinSample:          parseInt(document.getElementById('s-min-sample').value),
       leadScoreHotVerifiedThreshold: parseInt(document.getElementById('s-hotv-threshold').value),
       leadScoreHotThreshold:         parseInt(document.getElementById('s-hot-threshold').value),
       leadScoreWarmThreshold:        parseInt(document.getElementById('s-warm-threshold').value),
-      workerConcurrencyDiscovery:    parseInt(document.getElementById('s-concurrency-discovery').value),
-      workerConcurrencyEnrichment:   parseInt(document.getElementById('s-concurrency-enrichment').value),
-      workerConcurrencyScoring:      parseInt(document.getElementById('s-concurrency-scoring').value),
+      targetTechTags:                techTags,
+      highValueIndustries:           industries,
     });
     const el = document.getElementById('settings-saved');
     el.classList.remove('hidden');

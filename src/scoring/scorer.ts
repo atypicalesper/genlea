@@ -1,4 +1,4 @@
-import { ScoringInput, ScoringResult, LeadStatus, ScoreBreakdown } from '../types/index.js';
+import { ScoringInput, ScoringResult, ScoreBreakdown } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import {
   originRatioScore,
@@ -7,25 +7,23 @@ import {
   contactScore,
   companyFitScore,
 } from './rules.js';
-
-// Env-var defaults — overridden at call time by values from settingsRepository
-const ENV_HOT_VERIFIED_THRESHOLD = parseInt(process.env['LEAD_SCORE_HOT_VERIFIED_THRESHOLD'] ?? '80', 10);
-const ENV_HOT_THRESHOLD          = parseInt(process.env['LEAD_SCORE_HOT_THRESHOLD']           ?? '55', 10);
-const ENV_WARM_THRESHOLD         = parseInt(process.env['LEAD_SCORE_WARM_THRESHOLD']          ?? '38', 10);
-const ENV_COLD_THRESHOLD         = parseInt(process.env['LEAD_SCORE_COLD_THRESHOLD']          ?? '20', 10);
+import { resolveStatus } from './status-resolver.js';
 
 export function scoreCompany(
   input: ScoringInput,
-  thresholds?: { hotVerified?: number; hot: number; warm: number; cold?: number }
+  thresholds?: {
+    hotVerified?: number; hot: number; warm: number; cold?: number;
+    targetTechTags?: string[]; highValueIndustries?: string[];
+  }
 ): ScoringResult {
   const { company, contacts, jobs } = input;
 
   const breakdown: ScoreBreakdown = {
     originRatioScore:  originRatioScore(company),
     jobFreshnessScore: jobFreshnessScore(jobs),
-    techStackScore:    techStackScore(company, jobs),
+    techStackScore:    techStackScore(company, jobs, thresholds?.targetTechTags),
     contactScore:      contactScore(contacts),
-    companyFitScore:   companyFitScore(company),
+    companyFitScore:   companyFitScore(company, thresholds?.highValueIndustries),
     total: 0,
   };
 
@@ -57,14 +55,3 @@ export function scoreCompany(
   return { score: breakdown.total, status, breakdown };
 }
 
-function resolveStatus(score: number, thresholds?: { hotVerified?: number; hot: number; warm: number; cold?: number }): LeadStatus {
-  const hotVerified = thresholds?.hotVerified ?? ENV_HOT_VERIFIED_THRESHOLD;
-  const hot         = thresholds?.hot         ?? ENV_HOT_THRESHOLD;
-  const warm        = thresholds?.warm        ?? ENV_WARM_THRESHOLD;
-  const cold        = thresholds?.cold        ?? ENV_COLD_THRESHOLD;
-  if (score >= hotVerified) return 'hot_verified';
-  if (score >= hot)         return 'hot';
-  if (score >= warm)        return 'warm';
-  if (score >= cold)        return 'cold';
-  return 'disqualified';
-}

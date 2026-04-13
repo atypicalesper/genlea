@@ -1,8 +1,10 @@
 import { getCollection } from '../mongo.client.js';
 
 export interface AppSettings {
-  originRatioThreshold: number;         // min Indian dev ratio to flag — default 0.60
+  originRatioThreshold: number;         // min Indian dev ratio to flag — default 0.10
   originRatioMinSample: number;         // min names needed for reliable ratio — default 5
+  targetTechTags: string[];             // tech tags that score positively — default nodejs,typescript,…
+  highValueIndustries: string[];        // industry keywords that grant bonus points — default ai,saas,…
   leadScoreHotVerifiedThreshold: number; // score to become hot_verified — default 80
   leadScoreHotThreshold: number;        // score to become hot — default 55
   leadScoreWarmThreshold: number;       // score to become warm — default 38
@@ -16,8 +18,10 @@ export interface AppSettings {
 type SettingsDoc = AppSettings & { _id: string };
 
 const DEFAULTS: AppSettings = {
-  originRatioThreshold:         0.60,
+  originRatioThreshold:         0.10,
   originRatioMinSample:         5,
+  targetTechTags:               ['nodejs', 'typescript', 'python', 'react', 'nextjs', 'nestjs', 'frontend', 'backend', 'fullstack', 'ai', 'ml', 'generative-ai', 'fastapi'],
+  highValueIndustries:          ['ai', 'saas', 'fintech', 'healthtech', 'edtech'],
   leadScoreHotVerifiedThreshold: 80,
   leadScoreHotThreshold:        55,
   leadScoreWarmThreshold:       38,
