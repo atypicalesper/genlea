@@ -1,6 +1,6 @@
 # GenLea
 
-> Automated B2B lead generation engine. Discovers US tech companies with high Indian-origin developer ratios that are actively hiring, extracts CEO/CTO/HR contacts, and scores each lead 0–100.
+> Automated B2B lead generation engine. Discovers tech companies globally with high Indian-origin developer ratios that are actively hiring, extracts CEO/CTO/HR contacts, and scores each lead 0–100.
 
 ---
 
@@ -152,7 +152,7 @@ Each service reads `.env` from the repo root. They share MongoDB and Redis but r
 
 | URL | What |
 |---|---|
-| `http://localhost:4000/dashboard` | Lead pipeline, queue controls, system warnings |
+| `genlea-frontend` | Lead pipeline UI — run separately (see `genlea-frontend/`) |
 | `http://localhost:4000/queues` | Bull Board — live queue depths + retry |
 | `http://localhost:8081` | Mongo Express — raw DB browser (admin / genlea_dev) |
 
@@ -191,7 +191,7 @@ The scheduler in `svc-discovery` also auto-seeds every 2 hours.
 
 | URL | What |
 |---|---|
-| `http://localhost:4000/dashboard` | Inline HTML dashboard — leads, pipeline status, queue controls |
+| `genlea-frontend` | Lead pipeline UI — run separately (see `genlea-frontend/`) |
 | `http://localhost:4000/queues` | Bull Board — live queue depths, retry controls |
 | `http://localhost:8081` | Mongo Express — raw MongoDB browser (login: `admin` / `genlea_dev`) |
 
@@ -376,6 +376,15 @@ npm run db:init
 
 Override the model: `AGENT_LLM_MODEL=qwen3:32b`
 
+**Ollama context tuning:**
+
+| Env var | Default | What it controls |
+|---|---|---|
+| `OLLAMA_NUM_CTX` | `32768` | Total context window (input + output combined) |
+| `OLLAMA_NUM_PREDICT` | `8192` | Max output tokens per generation |
+
+Reduce these if running a larger model with less VRAM.
+
 ---
 
 ## Lead scoring
@@ -429,7 +438,7 @@ genlea/
 │           └── scheduler.ts   — seed queries + enqueueSeedRound
 │
 ├── services/
-│   ├── svc-api/               — Fastify API, Bull Board, dashboard
+│   ├── svc-api/               — Fastify API, Bull Board
 │   ├── svc-discovery/         — cron + discovery worker + 11 scrapers + LLM agent
 │   ├── svc-enrichment/        — enrichment worker + 5 scrapers + origin analysis + LLM agent
 │   └── svc-scoring/           — scoring worker (rule engine)
