@@ -7,8 +7,6 @@ Stack: Node.js 20, TypeScript strict, Playwright, BullMQ, MongoDB, Fastify.
 
 ## Architecture
 
-Three-stage BullMQ pipeline:
-
 ```
 Scheduler (cron every 2h)
   → discovery queue    → discovery.worker   → normalize → dedup → filter → upsert → enrichment queue
@@ -16,7 +14,7 @@ Scheduler (cron every 2h)
   → scoring queue      → scoring.worker     → score 0–100 → updateScore
 ```
 
-Workers live in `src/workers/`. Each has a single responsibility — don't merge concerns across workers.
+Workers live in `src/workers/`. Each has a single responsibility.
 
 ---
 
@@ -62,18 +60,92 @@ Thresholds (defaults): hot ≥ 55, warm ≥ 38, minSample = 5.
 - **Size guard** — companies with >1000 employees skip enrichment, auto-disqualify
 - **Tech filter** — skip companies with 0 tech tags from both company + jobs sources
 - **lastScrapedAt** only updates when actually scraping, not on every upsert
+- **New scrapers**: create in `src/scrapers/discovery/` or `enrichment/`, implement `Scraper` interface, add `isAvailable()`, export from barrel — never modify existing scrapers or worker logic
 
 ---
 
-## Scrapers — Adding a New One
+## Key Patterns
 
-1. Create file in `src/scrapers/discovery/` or `src/scrapers/enrichment/`
-2. Implement the scraper interface (check existing scrapers for shape)
-3. Add `isAvailable()` — must return `false` if required API key/credential is missing
-4. Export from `src/scrapers/discovery/index.ts` or enrichment barrel
-5. Do NOT modify existing scrapers or the worker logic
+### Scraper Interface
+```ts
+interface Scraper {
+  name: ScraperSource;
+  scrape(query: ScrapeQuery): Promise<RawResult[]>;
+  isAvailable(): Promise<boolean>;
+}
+```
+Return `RawResult[]` — never write to MongoDB directly from a scraper.
 
-Follows Open/Closed — new scrapers extend the system, existing code untouched.
+### Browser Stealth
+```ts
+const proxy = proxyManager.getProxy();
+const context = await browserManager.createContext(browserId, { proxy, cookiesPath });
+const page = await browserManager.newPage(context);
+await browserManager.humanDelay(2000, 6000);
+await browserManager.humanScroll(page, 5);
+```
+
+### Queue Jobs
+```ts
+await queueManager.addDiscoveryJob({ runId, source, query });
+await queueManager.addEnrichmentJob({ runId, companyId, domain, sources });
+await queueManager.addScoringJob({ runId, companyId });
+```
+
+### Repository Upsert
+```ts
+// domain is normalized before upsert (lowercase, strip www., strip /)
+await companyRepository.upsert(normalizedCompany);
+```
+
+### Logger
+```ts
+logger.info({ scraper: 'linkedin', company: 'acme.com', runId }, 'Scraped company');
+logger.warn({ accountId, reason: 'captcha' }, 'Session paused');
+logger.error({ err, domain }, 'Failed to scrape');
+```
+
+---
+
+## MongoDB Schema
+
+### `companies`
+```ts
+{ name, domain (unique), linkedinUrl, employeeCount, indianDevCount, totalDevCount,
+  indianDevRatio, toleranceIncluded, fundingStage, techStack[], openRoles[], sources[],
+  score (0-100), status ('hot'|'warm'|'cold'|'disqualified'), scoreBreakdown{...},
+  createdAt, updatedAt, lastScrapedAt }
+```
+
+### `contacts`
+```ts
+{ companyId, role ('CEO'|'CTO'|'HR'|'Recruiter'), fullName, email, emailVerified,
+  emailConfidence (0-1), phone, linkedinUrl, isIndianOrigin, sources[], createdAt }
+```
+
+### `jobs`
+```ts
+{ companyId, title, techTags[], source, sourceUrl, postedAt, isActive, scrapedAt }
+```
+
+### `scrape_logs`
+```ts
+{ runId, scraper, status, companiesFound, contactsFound, errors[], durationMs, startedAt }
+```
+
+---
+
+## Anti-Detection Rules
+
+| Rule | Value |
+|---|---|
+| Max profiles/LinkedIn session/day | 80 (`LI_MAX_PROFILES_PER_SESSION`) |
+| Delay between navigations | 2–8s randomized |
+| Max concurrent browsers | 3 (`MAX_CONCURRENT_BROWSERS`) |
+| Session cooldown after limit | 8h (`LI_SESSION_COOLDOWN_HOURS`) |
+| Proxy | Always rotate residential proxies |
+| Resource blocking | Block images, fonts, ads, tracking pixels |
+| Fingerprint | Spoof webdriver, plugins, WebGL, canvas |
 
 ---
 
@@ -85,15 +157,3 @@ Follows Open/Closed — new scrapers extend the system, existing code untouched.
 - CSV export uses a single `$in` batch query — don't revert to parallel queries
 - `disqualify()` is a dedicated method — don't use upsert for disqualification (status gets ignored)
 
----
-
-## Dev Commands
-
-```bash
-npm run dev          # ts-node-dev watch
-npm run build        # tsc
-npm run lint         # eslint
-npm test             # jest
-```
-
-Env: copy `.env.example`, set `MONGO_URI`, `TARGET_TAGS`, optional API keys.

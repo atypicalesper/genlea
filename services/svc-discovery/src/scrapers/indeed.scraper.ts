@@ -135,7 +135,7 @@ export class IndeedScraper implements Scraper {
       await browserManager.humanDelay(2500, 5000);
       await browserManager.humanScroll(page, 3);
     }
-
+    
     return jobGroups;
   }
 }

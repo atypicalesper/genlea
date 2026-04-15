@@ -40,9 +40,8 @@ WORKFLOW:
 
 Target company profile:
 - Size: 10–200 employees
-- Age: founded within the last 7 years (2018–present)
 - Hiring: actively posting software engineering roles
-- Verticals: SaaS, AI/ML, Fintech, HealthTech, DevTools, B2B Software, EdTech, LegalTech, Cybersecurity, MarTech, HRTech, CleanTech, E-commerce Tech, Data & Analytics
+- Verticals: SaaS, AI/ML, Fintech, HealthTech, DevTools, B2B Software, EdTech, LegalTech, Cybersecurity, MarTech, HRTech, CleanTech, E-commerce Tech, Data & Analytics, PropTech, InsurTech, LogisticsTech, SupplyChainTech, AdTech, IoT, AR/VR, GovTech, RetailTech, TravelTech, FoodTech, ConstructionTech, AutoTech, DeepTech, Web3, AgriTech
 - Funding: pre-seed to Series C
 
 Available sources: ${activeList}${skipNote}
@@ -112,7 +111,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
 
     // ── 2. Scrape source ──────────────────────────────────────────────────────
     tool(
-      async ({ source, keywords, location = 'United States', limit = 25 }) => {
+      async ({ source, keywords, location, limit = 25 }) => {
         // Dedup: prevent re-scraping the same source
         if (triedSources.has(source)) {
           return JSON.stringify({
@@ -172,7 +171,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
         schema: z.object({
           source:   z.string().describe(`Source to scrape. Available: ${availableSources}`),
           keywords: z.string().describe('Search keywords'),
-          location: z.string().default('United States'),
+          location: z.string().optional(),
           limit:    z.number().int().min(1).max(100).default(25),
         }),
       },

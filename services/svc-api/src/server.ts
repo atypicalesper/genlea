@@ -21,7 +21,6 @@ import { companiesRoutes } from './routes/companies.js';
 import { settingsRoutes }  from './routes/settings.js';
 import { adminRoutes }     from './routes/admin.js';
 import { healthRoutes }    from './routes/health.js';
-import { dashboardRoutes } from './dashboard.js';
 
 const REQUIRED_ENV: Record<string, string> = {
   MONGO_URI: 'MongoDB connection string (mongodb:// or mongodb+srv://)',
@@ -72,9 +71,6 @@ async function bootstrap() {
     queues: await queueManager.getQueueStats(),
   }));
 
-  server.get('/', async (_req, reply) => reply.redirect('/dashboard'));
-
-  await server.register(dashboardRoutes);
   await server.register(leadsRoutes,     { prefix: '/api' });
   await server.register(companiesRoutes, { prefix: '/api' });
   await server.register(exportRoutes,    { prefix: '/api' });
