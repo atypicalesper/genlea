@@ -5,6 +5,7 @@ import {
   companyRepository, contactRepository, settingsRepository,
   queueManager, browserManager, proxyManager,
   normalizer, normalizeRole, deduplicateContacts,
+  withTiming,
   logger,
 } from '@genlea/shared';
 import type { EnrichmentJobData, ContactRole } from '@genlea/shared';
@@ -41,7 +42,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     // ── 0. Get current state ──────────────────────────────────────────────────
     tool(
-      async () => {
+      withTiming('get_company_state', async () => {
         const company   = await companyRepository.findById(companyId);
         const contacts  = await contactRepository.findByCompanyId(companyId);
         const nameCount = (await contactRepository.findAllNamesForOriginRatio(companyId)).length;
@@ -67,7 +68,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
             names:         nameCount < 5,
           },
         });
-      },
+      }),
       {
         name:        'get_company_state',
         description: 'Get current state of the company from the database. Call this first to understand the starting point.',
@@ -77,7 +78,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     // ── 1. Enrichment progress / goal check ───────────────────────────────────
     tool(
-      async () => {
+      withTiming('check_enrichment_progress', async () => {
         const settings  = await settingsRepository.get();
         const company   = await companyRepository.findById(companyId);
         const contacts  = await contactRepository.findByCompanyId(companyId);
@@ -128,7 +129,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           nextBestAction,
           summary: `Tech:${techFilled ? '✓' : '✗'} | Names:${names.length}/${settings.originRatioMinSample} | DM:${decisionMakers.length} | Email:${hasEmail ? '✓' : '✗'}`,
         });
-      },
+      }),
       {
         name:        'check_enrichment_progress',
         description: 'Check enrichment progress and get the recommended next action. Call this after each enrichment step to decide what to do next. When goalMet: true, call compute_origin_ratio (if not done) then queue_for_scoring.',
@@ -138,7 +139,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     // ── 2. GitHub ─────────────────────────────────────────────────────────────
     tool(
-      async () => {
+      withTiming('enrich_github', async () => {
         const guard = onceGuard('enrich_github');
         if (guard) return guard;
 
@@ -163,7 +164,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
         }
 
         return JSON.stringify({ found: true, githubOrg: result.company.githubOrg, techStack: result.company.techStack ?? [], namesSaved });
-      },
+      }),
       {
         name:        'enrich_github',
         description: 'Find company GitHub org, extract tech stack from repos, collect contributor names for origin ratio. Free, no API key. Always try this first.',
@@ -173,7 +174,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     // ── 3. Explorium ──────────────────────────────────────────────────────────
     tool(
-      async ({ name: companyName }) => {
+      withTiming('enrich_explorium', async ({ name: companyName }) => {
         if (!process.env['EXPLORIUM_API_KEY']) {
           return JSON.stringify({ available: false, reason: 'EXPLORIUM_API_KEY not configured' });
         }
@@ -220,7 +221,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           contactsSaved,
           contacts: result.contacts?.map(c => ({ name: c.fullName, role: c.role, email: c.email, phone: c.phone, linkedin: c.linkedinUrl })),
         });
-      },
+      }),
       {
         name:        'enrich_explorium',
         description: 'Fetch company metadata AND decision-maker contacts from Explorium (requires EXPLORIUM_API_KEY). Best single source — returns verified contacts with email/phone/LinkedIn.',
@@ -232,7 +233,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     // ── 4. Clay ───────────────────────────────────────────────────────────────
     tool(
-      async ({ name: companyName }) => {
+      withTiming('enrich_clay', async ({ name: companyName }) => {
         if (!process.env['CLAY_API_KEY']) {
           return JSON.stringify({ available: false, reason: 'CLAY_API_KEY not configured' });
         }
@@ -278,7 +279,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           contactsSaved,
           contacts: result.contacts?.map(c => ({ name: c.fullName, role: c.role, email: c.email, linkedin: c.linkedinUrl })),
         });
-      },
+      }),
       {
         name:        'enrich_clay',
         description: 'Fetch company metadata and decision-maker contacts from Clay (requires CLAY_API_KEY). Use after Explorium or as standalone.',
@@ -290,7 +291,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     // ── 5. Clearbit ───────────────────────────────────────────────────────────
     tool(
-      async () => {
+      withTiming('enrich_clearbit', async () => {
         if (!process.env['CLEARBIT_API_KEY']) {
           return JSON.stringify({ available: false, reason: 'CLEARBIT_API_KEY not configured — use playwright_scrape_url on the company homepage instead' });
         }
@@ -310,7 +311,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           hqCountry:     result.company.hqCountry,
           industry:      result.company.industry,
         });
-      },
+      }),
       {
         name:        'enrich_clearbit',
         description: 'Fetch company metadata from Clearbit — employee count, funding stage, industry, location. Skip if Explorium or Clay already provided metadata.',
@@ -320,7 +321,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     // ── 6. Website team scraper ───────────────────────────────────────────────
     tool(
-      async ({ websiteUrl }) => {
+      withTiming('scrape_website_team', async ({ websiteUrl }) => {
         const guard = onceGuard('scrape_website_team');
         if (guard) return guard;
 
@@ -350,19 +351,19 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           .map(p => ({ name: p.fullName, role: p.role, email: p.email ?? null, phone: p.phone ?? null, linkedin: p.linkedinUrl ?? null }));
 
         return JSON.stringify({ found: true, count: members.length, names: members.map(m => m.fullName), decisionMakers });
-      },
+      }),
       {
         name:        'scrape_website_team',
         description: 'Scrape company /team /about /people pages for team member names and emails. Free, no API key needed.',
         schema: z.object({
-          websiteUrl: z.string().optional().describe('Full URL e.g. https://acme.com — defaults to company domain'),
+          websiteUrl: z.string().url().max(500).optional().describe('Full URL e.g. https://acme.com — defaults to company domain'),
         }),
       },
     ),
 
     // ── 7. Hunter ─────────────────────────────────────────────────────────────
     tool(
-      async () => {
+      withTiming('enrich_hunter', async () => {
         if (!process.env['HUNTER_API_KEY']) {
           return JSON.stringify({ available: false, reason: 'HUNTER_API_KEY not configured — use playwright_scrape_url on /team or /contact pages instead' });
         }
@@ -385,7 +386,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
         );
 
         return JSON.stringify({ found: true, contactsFound: result.contacts.length, savedDecisionMakers: validDeduped.length });
-      },
+      }),
       {
         name:        'enrich_hunter',
         description: 'Discover emails and contacts for the domain using Hunter.io (requires HUNTER_API_KEY). Use when contacts are missing and Explorium/Clay are unavailable.',
@@ -395,7 +396,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     // ── 8. Verify contacts ────────────────────────────────────────────────────
     tool(
-      async () => {
+      withTiming('verify_contacts', async () => {
         if (!process.env['HUNTER_API_KEY'] && !process.env['SMTP_HOST']) {
           return JSON.stringify({ available: false, reason: 'No HUNTER_API_KEY or SMTP_HOST configured — skipping verification' });
         }
@@ -411,7 +412,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           verifiedEmails: contacts.filter(c => c.emailVerified).length,
           contacts: contacts.map(c => ({ role: c.role, fullName: c.fullName, email: c.email, emailVerified: c.emailVerified, linkedinUrl: c.linkedinUrl })),
         });
-      },
+      }),
       {
         name:        'verify_contacts',
         description: 'SMTP-verify existing contacts and fill missing CEO/HR/CTO emails. Call after contacts have been gathered.',
@@ -421,7 +422,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     // ── 9. Playwright stealth scrape — auto-saves people found ────────────────
     tool(
-      async ({ url, purpose }) => {
+      withTiming('playwright_scrape_url', async ({ url, purpose }) => {
         if (scrapedUrls.has(url)) {
           return JSON.stringify({ error: `Already scraped ${url} — try a different URL`, alreadyScraped: true });
         }
@@ -496,20 +497,23 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
         } finally {
           if (context) await context.close().catch(() => {});
         }
-      },
+      }),
       {
         name:        'playwright_scrape_url',
         description: 'Stealth Playwright browser to scrape any URL. People found are auto-saved to the database. Use for /careers, /team, /about, /jobs, /contact pages. Each URL can only be scraped once.',
         schema: z.object({
-          url:     z.string().describe('Full URL to scrape'),
-          purpose: z.string().describe('What you are looking for: "team_names", "tech_stack", "contact_emails", "company_info"'),
+          url:     z.string().url().max(500).describe('Full URL to scrape — must be a valid https:// URL'),
+          purpose: z.enum(['team_names', 'tech_stack', 'contact_emails', 'company_info'])
+            .describe('What you are looking for'),
         }),
       },
     ),
 
     // ── 10. Save contacts (explicit, for LLM-extracted data) ─────────────────
     tool(
-      async ({ contacts }) => {
+      withTiming('save_contacts', async ({ contacts }: {
+        contacts: Array<{ fullName: string; role: string; email?: string; linkedinUrl?: string; phone?: string }>;
+      }) => {
         const valid = contacts
           .filter(c => c.fullName && c.role)
           .map(c => ({ c, role: normalizeRole(c.role) as ContactRole }))
@@ -533,25 +537,25 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
         );
 
         return JSON.stringify({ saved: valid.length, total: contacts.length });
-      },
+      }),
       {
         name:        'save_contacts',
         description: 'Explicitly save decision-maker contacts you have extracted from page content or other sources. Note: playwright_scrape_url auto-saves people it finds — only use this for additional contacts.',
         schema: z.object({
           contacts: z.array(z.object({
-            fullName:    z.string(),
-            role:        z.string().describe('CEO, CTO, VP of Engineering, Head of Engineering, Director of Engineering, HR, Recruiter, Founder, Co-Founder, COO, CPO, CFO, Head of Talent'),
-            email:       z.string().optional(),
-            linkedinUrl: z.string().optional(),
-            phone:       z.string().optional(),
-          })),
+            fullName:    z.string().min(2).max(120),
+            role:        z.string().max(80).describe('CEO, CTO, VP of Engineering, Head of Engineering, Director of Engineering, HR, Recruiter, Founder, Co-Founder, COO, CPO, CFO, Head of Talent'),
+            email:       z.string().email().optional(),
+            linkedinUrl: z.string().url().optional(),
+            phone:       z.string().max(30).optional(),
+          })).max(50),
         }),
       },
     ),
 
     // ── 11. Compute origin ratio ──────────────────────────────────────────────
     tool(
-      async () => {
+      withTiming('compute_origin_ratio', async () => {
         const guard = onceGuard('compute_origin_ratio');
         if (guard) return guard;
 
@@ -582,7 +586,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           reliable:       result.reliable,
           meetsThreshold: result.ratio >= settings.originRatioThreshold,
         });
-      },
+      }),
       {
         name:        'compute_origin_ratio',
         description: 'Analyse all collected names to estimate the Indian-origin developer fraction. Call after gathering ≥5 names. Only needs to be called once.',
@@ -592,7 +596,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     // ── 12. Save partial company data ─────────────────────────────────────────
     tool(
-      async (data) => {
+      withTiming('save_company_data', async (data) => {
         const company = await companyRepository.findById(companyId);
         await companyRepository.upsert({
           ...data,
@@ -600,45 +604,45 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           name: data.name ?? company?.name ?? '',
         } as any);
         return JSON.stringify({ saved: true });
-      },
+      }),
       {
         name:        'save_company_data',
         description: 'Save/merge partial company data (tech stack, employee count, funding, etc.) to the database. Use to persist data found via playwright or other sources.',
         schema: z.object({
-          name:          z.string().optional(),
-          techStack:     z.array(z.string()).optional(),
-          employeeCount: z.number().optional(),
-          fundingStage:  z.string().optional(),
-          hqCountry:     z.string().optional(),
-          websiteUrl:    z.string().optional(),
-          githubOrg:     z.string().optional(),
+          name:          z.string().max(200).optional(),
+          techStack:     z.array(z.string().max(50)).max(30).optional(),
+          employeeCount: z.number().int().min(1).max(500_000).optional(),
+          fundingStage:  z.string().max(50).optional(),
+          hqCountry:     z.string().max(100).optional(),
+          websiteUrl:    z.string().url().max(500).optional(),
+          githubOrg:     z.string().max(100).optional(),
         }),
       },
     ),
 
     // ── 13. Disqualify ────────────────────────────────────────────────────────
     tool(
-      async ({ reason }) => {
+      withTiming('disqualify_company', async ({ reason }) => {
         await companyRepository.disqualify(companyId);
         logger.info({ domain, reason }, '[enrichment-tools] Disqualified');
         return JSON.stringify({ disqualified: true, reason });
-      },
+      }),
       {
         name:        'disqualify_company',
         description: 'Mark as disqualified and stop. Use for: defunct website, employee count > 1000, Indian HQ, no tech signal after trying all sources.',
         schema: z.object({
-          reason: z.string(),
+          reason: z.string().max(500),
         }),
       },
     ),
 
     // ── 14. Queue for scoring ─────────────────────────────────────────────────
     tool(
-      async () => {
+      withTiming('queue_for_scoring', async () => {
         await companyRepository.setPipelineStatus(companyId, 'scoring', new Date());
         await queueManager.addScoringJob({ runId, companyId });
         return JSON.stringify({ queued: true });
-      },
+      }),
       {
         name:        'queue_for_scoring',
         description: 'Send the company to the scoring queue. Call only when check_enrichment_progress returns goalMet: true (or after best effort when no more sources are available).',

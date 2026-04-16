@@ -134,8 +134,9 @@ export const companyRepository = {
       update,
       { returnDocument: 'after' },
     );
+    if (!updated) throw new Error(`[company.repository] upsert returned null for domain: ${domain}`);
     logger.debug({ domain }, '[company.repository] Company upserted');
-    return toCompany(updated!);
+    return toCompany(updated);
   },
 
   async updateScore(

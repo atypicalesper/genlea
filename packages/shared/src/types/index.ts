@@ -200,9 +200,10 @@ export interface Job {
 }
 
 export interface AgentStep {
-  tool:    string;
-  summary: string;
-  ts:      string;  // ISO timestamp
+  tool:       string;
+  summary:    string;
+  ts:         string;  // ISO timestamp
+  latencyMs?: number;
 }
 
 export interface ScrapeLog {

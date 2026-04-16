@@ -1,6 +1,6 @@
 import { createAgent }                          from 'langchain';
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
-import { buildLlm, alertAgentFailure, scrapeLogRepository, logger } from '@genlea/shared';
+import { buildLlm, alertAgentFailure, scrapeLogRepository, sanitizeAgentInput, resilientAgentInvoke, logger } from '@genlea/shared';
 import type { DiscoveryJobData, AgentStep }     from '@genlea/shared';
 import { makeTools, buildSystemPrompt }         from './discovery-tools.js';
 
@@ -15,12 +15,15 @@ export async function runDiscoveryAgent(job: DiscoveryJobData): Promise<void> {
 
   const startedAt = Date.now();
 
+  const safeKeywords = sanitizeAgentInput(query.keywords ?? '', 300);
+  const safeLocation = query.location ? sanitizeAgentInput(query.location, 100) : undefined;
+
   const userMessage = `
 Find tech companies for B2B lead generation.
 
 Primary source : ${source}
-Keywords       : ${query.keywords}
-Location       : ${query.location ?? 'United States'}
+Keywords       : ${safeKeywords}
+${safeLocation ? `Location       : ${safeLocation}` : ''}
 Target         : ≥15 companies
 
 Start with get_discovery_state to check current progress. If the goal is not met, scrape ${source} first.
@@ -37,10 +40,12 @@ Prefer: SaaS, AI/ML, Fintech, HealthTech, DevTools. Size 10–200, founded 2018+
     const agent = createAgent({ model: llm, tools: agentTools, systemPrompt: buildSystemPrompt() });
     logger.info({ agent: agentName, tools: agentTools.map(t => t.name) }, '[agent] Starting');
 
-    const agentResult = await agent.invoke(
+    const agentResult = await resilientAgentInvoke(
+      agent.invoke.bind(agent),
       { messages: [new HumanMessage(userMessage)] },
       { recursionLimit: maxIterations * 2 + 4 },
-    );
+      { agentName },
+    ) as Awaited<ReturnType<typeof agent.invoke>>;
 
     let iterations  = 0;
     let totalSaved  = 0;
@@ -71,8 +76,9 @@ Prefer: SaaS, AI/ML, Fintech, HealthTech, DevTools. Size 10–200, founded 2018+
         }
 
         // Build human-readable summary for this step
-        const summary = buildStepSummary(msg.name, p);
-        agentSteps.push({ tool: msg.name, summary, ts });
+        const latencyMs = typeof p?.['_latencyMs'] === 'number' ? p['_latencyMs'] as number : undefined;
+        const summary   = buildStepSummary(msg.name, p);
+        agentSteps.push({ tool: msg.name, summary, ts, latencyMs });
 
         if (p?.['error'] && !p?.['alreadyTried']) {
           errors.push(String(p['error']));

@@ -43,7 +43,7 @@ export async function jobsRoutes(app: FastifyInstance) {
     '/jobs/logs',
     async (req, reply) => {
       const { scraper, limit } = req.query;
-      const logs = await scrapeLogRepository.findRecent(scraper as any, parseInt(limit ?? '50'));
+      const logs = await scrapeLogRepository.findRecent(scraper as any, parseInt(limit ?? '50', 10));
       return reply.send({ success: true, data: logs });
     }
   );

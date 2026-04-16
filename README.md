@@ -1,14 +1,14 @@
 # GenLea
 
-> Automated B2B lead generation engine. Discovers tech companies globally with high Indian-origin developer ratios that are actively hiring, extracts CEO/CTO/HR contacts, and scores each lead 0–100.
+> Automated B2B lead generation engine. Discovers US tech companies with high Indian-origin developer ratios that are actively hiring, extracts CEO/CTO/HR contacts, and scores each lead 0–100.
 
 ---
 
 ## What it does
 
-1. **Discovers** companies via Wellfound, LinkedIn, Indeed, Crunchbase, Apollo, Glassdoor, ZoomInfo, SurelyRemote, Explorium
+1. **Discovers** companies via Wellfound, LinkedIn, Indeed, Crunchbase, Apollo, Glassdoor, ZoomInfo, Clay, SurelyRemote, Explorium, Hunter
 2. **Enriches** each company — tech stack, employee count, funding stage, decision-maker contacts — using an LLM agent backed by Ollama / Groq / Anthropic
-3. **Analyses** employee names to estimate the Indian-origin developer ratio
+3. **Analyses** employee names to estimate the Indian-origin developer ratio via a dedicated Python microservice
 4. **Scores** each lead 0–100 across 5 signals: origin ratio, job freshness, tech stack match, contact completeness, company fit
 5. **Exports** hot leads as CSV or via REST API
 
@@ -16,7 +16,7 @@
 
 ## Architecture
 
-GenLea is a **microservices monorepo** (npm workspaces). Four independent services communicate only through BullMQ queues on Redis and a shared MongoDB instance.
+GenLea is a **microservices monorepo** (npm workspaces). Five independent services communicate through BullMQ queues on Redis and a shared MongoDB instance.
 
 ```
 packages/
@@ -27,6 +27,7 @@ services/
   svc-enrichment/     — enrichment worker + 5 scrapers + origin ratio analysis + LLM agent
   svc-scoring/        — scoring worker (rule engine, no Playwright)
   svc-api/            — Fastify REST API + Bull Board dashboard
+  name-origin/        — Python FastAPI microservice: Indian/South-Asian origin classifier
 ```
 
 **Pipeline:**
@@ -36,7 +37,8 @@ svc-discovery (cron every 2h)
       └─ LLM agent: scrape → normalise → dedup → save → enqueue enrichment
 
   → genlea-enrichment queue → svc-enrichment worker
-      └─ LLM agent: GitHub / Explorium / Clearbit / Hunter / Playwright → origin ratio → enqueue scoring
+      └─ LLM agent: GitHub / Explorium / Clearbit / Hunter / Playwright
+         → origin ratio (via name-origin service on :5050) → enqueue scoring
 
   → genlea-scoring queue → svc-scoring worker
       └─ rule engine (0–100) → status: hot_verified / hot / warm / cold / disqualified
@@ -49,6 +51,7 @@ svc-discovery (cron every 2h)
 | Requirement | Why |
 |---|---|
 | Node.js 20+ | Runtime |
+| Python 3.9+ | `services/name-origin` microservice |
 | Docker + Docker Compose | MongoDB + Redis |
 | [Ollama](https://ollama.com) + `qwen3.5` | Local LLM for agents (free, runs offline) |
 | Groq API key | Cloud LLM alternative — free tier at console.groq.com |
@@ -62,7 +65,7 @@ svc-discovery (cron every 2h)
 
 ### Option A — Local dev (recommended)
 
-Runs infra in Docker, services directly on your machine. Fastest for development.
+Runs infra in Docker, services directly on your machine.
 
 **Step 1: Start MongoDB + Redis**
 
@@ -104,7 +107,7 @@ HUNTER_API_KEY=...        # Email discovery (25 free/month)
 GITHUB_TOKEN=...          # Tech stack extraction (5000 req/hr vs 60 without)
 ```
 
-**Step 3: Install dependencies**
+**Step 3: Install Node dependencies**
 
 ```bash
 npm install
@@ -112,13 +115,26 @@ npm install
 
 This installs all workspace packages and symlinks `@genlea/shared` into every service's `node_modules`.
 
-**Step 4: Initialise the database (run once)**
+**Step 4: Start the name-origin microservice**
+
+```bash
+cd services/name-origin
+python -m venv .venv
+source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+pip install -r requirements.txt
+python main.py
+# → running at http://localhost:5050
+```
+
+Leave this running. If `ETHNICOLR_URL` is unset or the service is unreachable, enrichment falls back to rule-based name matching.
+
+**Step 5: Initialise the database (run once)**
 
 ```bash
 npm run db:init
 ```
 
-**Step 5 (Ollama only): Pull and serve the model**
+**Step 6 (Ollama only): Pull and serve the model**
 
 ```bash
 brew install ollama      # one-time
@@ -128,7 +144,7 @@ ollama serve             # keep running in background
 
 Skip this step if using Groq or Anthropic.
 
-**Step 6: Start the services**
+**Step 7: Start the services**
 
 Open four terminal tabs:
 
@@ -169,7 +185,7 @@ docker-compose up --build
 
 Starts all six containers: mongo, redis, mongo-express, svc-api, svc-discovery, svc-enrichment, svc-scoring.
 
-Note: when running in Docker, `MONGO_URI` and `REDIS_URL` are automatically overridden to use Docker network hostnames — you don't need to change them in `.env` for this mode.
+Note: `MONGO_URI` and `REDIS_URL` are automatically overridden to use Docker network hostnames — you don't need to change them in `.env` for this mode.
 
 ---
 
@@ -203,7 +219,6 @@ The scheduler in `svc-discovery` also auto-seeds every 2 hours.
 
 | Command | What |
 |---|---|
-| `npm run dev` | Workers + API (monolith mode) |
 | `npm run dev -w services/svc-api` | API service only |
 | `npm run dev -w services/svc-discovery` | Discovery service only |
 | `npm run dev -w services/svc-enrichment` | Enrichment service only |
@@ -278,8 +293,6 @@ GET    /health/queues                    Queue stats health check
 
 ### Docker Compose (single server)
 
-The standard deployment path. All services are defined in `docker-compose.yml`.
-
 ```bash
 # Build and start everything
 docker-compose up -d --build
@@ -301,20 +314,9 @@ Each service container:
 - Has `MONGO_URI` and `REDIS_URL` overridden to use Docker network hostnames (`mongo`, `redis`)
 - Restarts automatically on crash (`restart: unless-stopped`)
 
-### Environment variables in production
-
-Set all secrets as environment variables on the host (or in a secrets manager). The `env_file: .env` directive in `docker-compose.yml` reads from a `.env` file next to `docker-compose.yml`. On a server:
-
-```bash
-# On the server, create .env with production values
-nano /opt/genlea/.env
-# Then:
-docker-compose --env-file /opt/genlea/.env up -d
-```
-
 ### Scaling individual services
 
-Discovery and enrichment are the bottlenecks — they run Playwright and call external APIs. To scale them horizontally, run multiple replicas. Since all state is in MongoDB and Redis (not in-process), replicas are stateless:
+Discovery and enrichment are the bottlenecks — they run Playwright and call external APIs. Since all state is in MongoDB and Redis, replicas are stateless:
 
 ```bash
 docker-compose up -d --scale svc-discovery=2 --scale svc-enrichment=3
@@ -392,12 +394,12 @@ Reduce these if running a larger model with less VRAM.
 | Score | Status | Action |
 |---|---|---|
 | 80–100 | `hot_verified` | Immediate outreach |
-| 55–79 | `hot` | Personalised outreach |
-| 38–54 | `warm` | Nurture sequence |
-| 20–37 | `cold` | Low priority |
+| 65–79 | `hot` | Personalised outreach |
+| 50–64 | `warm` | Nurture sequence |
+| 20–49 | `cold` | Low priority |
 | < 20 | `disqualified` | Skip |
 
-Thresholds are adjustable live via `PATCH /api/settings`.
+Thresholds (`LEAD_SCORE_HOT_THRESHOLD`, `LEAD_SCORE_WARM_THRESHOLD`) are adjustable live via `PATCH /api/settings`.
 
 ---
 
@@ -409,8 +411,8 @@ Thresholds are adjustable live via `PATCH /api/settings`.
 | Wellfound | YC + seed startups + open roles | Nothing |
 | Indeed | Job listings + companies | Nothing |
 | LinkedIn | Companies + employees + jobs | Account (`LI_USERNAME`) |
-| Apollo | B2B contacts + company data | Nothing (free web tier) |
-| Crunchbase | Funding + founders | Nothing (free web tier) |
+| Apollo | B2B contacts + company data | `APOLLO_API_KEY` |
+| Crunchbase | Funding + founders | `CRUNCHBASE_API_KEY` |
 | Glassdoor | Job listings | Nothing |
 | SurelyRemote | Remote-first companies | Nothing |
 | ZoomInfo | Direct phones | Account |
@@ -441,7 +443,8 @@ genlea/
 │   ├── svc-api/               — Fastify API, Bull Board
 │   ├── svc-discovery/         — cron + discovery worker + 11 scrapers + LLM agent
 │   ├── svc-enrichment/        — enrichment worker + 5 scrapers + origin analysis + LLM agent
-│   └── svc-scoring/           — scoring worker (rule engine)
+│   ├── svc-scoring/           — scoring worker (rule engine)
+│   └── name-origin/           — Python FastAPI origin classifier (port 5050)
 │
 ├── src/                       — original monolith (kept for reference / scripts)
 ├── scripts/                   — db-init, seed-queries, rescore-all, verify-emails
@@ -457,9 +460,11 @@ genlea/
 
 ## Notes
 
-- **LinkedIn anti-scraping**: max 80 profiles/session/day, 8h cooldown, sessions rotate automatically
+- **name-origin service**: runs independently on port 5050. Set `NAME_ORIGIN_PROVIDER=ethnicolr` and `ETHNICOLR_URL=http://localhost:5050` in `.env`. If unreachable, enrichment falls back to rule-based classification.
+- **LinkedIn anti-scraping**: max 80 profiles/session/day (`LI_MAX_PROFILES_PER_SESSION`), 8h cooldown, sessions rotate automatically
 - **Proxy**: residential proxies strongly recommended for LinkedIn and ZoomInfo
-- **Free to run**: Wellfound, Indeed, Apollo, Crunchbase, GitHub (no token), Playwright — zero API keys needed for a basic run
+- **Free to run**: Wellfound, Indeed, Glassdoor, SurelyRemote, GitHub (no token), Playwright — zero API keys needed for a basic run
 - **manuallyReviewed flag**: UI/API status overrides are never overwritten by the scoring engine
 - **Enrichment cooldown**: companies re-processed within 7 days are skipped unless `force: true`
 - **Backlog guard**: if the discovery queue exceeds 200 waiting jobs, the scheduler skips that cron tick to prevent runaway growth (configurable via `DISCOVERY_BACKLOG_THRESHOLD`)
+- **Alert emails**: set `SMTP_*` and `ALERT_EMAIL_TO` to receive notifications when an agent throws an unhandled error

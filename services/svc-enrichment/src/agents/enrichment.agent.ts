@@ -1,7 +1,7 @@
 import { createAgent }                          from 'langchain';
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
 import {
-  buildLlm, alertAgentFailure,
+  buildLlm, alertAgentFailure, resilientAgentInvoke,
   companyRepository, scrapeLogRepository, queueManager, logger,
 } from '@genlea/shared';
 import type { EnrichmentJobData, AgentStep } from '@genlea/shared';
@@ -102,10 +102,12 @@ Disqualify immediately if the domain is defunct or company is too large.
     const agent = createAgent({ model: llm, tools: agentTools, systemPrompt: SYSTEM_PROMPT });
     logger.info({ agent: agentName, tools: agentTools.map(t => t.name) }, '[agent] Starting');
 
-    const agentResult = await agent.invoke(
+    const agentResult = await resilientAgentInvoke(
+      agent.invoke.bind(agent),
       { messages: [new HumanMessage(userMessage)] },
       { recursionLimit: maxIterations * 2 + 4 },
-    );
+      { agentName, timeoutMs: 12 * 60 * 1000 },  // enrichment gets 12 min — more tools, more steps
+    ) as Awaited<ReturnType<typeof agent.invoke>>;
 
     let iterations    = 0;
     let contactsFound = 0;
@@ -134,8 +136,9 @@ Disqualify immediately if the domain is defunct or company is too large.
           if (typeof p?.['nameCount'] === 'number')          namesFound    = p['nameCount'] as number;
         }
 
-        const summary = buildStepSummary(msg.name, p);
-        agentSteps.push({ tool: msg.name, summary, ts });
+        const latencyMs = typeof p?.['_latencyMs'] === 'number' ? p['_latencyMs'] as number : undefined;
+        const summary   = buildStepSummary(msg.name, p);
+        agentSteps.push({ tool: msg.name, summary, ts, latencyMs });
 
         if (p?.['error'] && !p?.['alreadyCalled'] && !p?.['alreadyScraped']) {
           errors.push(String(p['error']));
@@ -150,6 +153,16 @@ Disqualify immediately if the domain is defunct or company is too large.
 
     if (iterations >= maxIterations) {
       logger.warn({ agent: agentName, iterations, maxIterations }, '[agent] Hit max iterations');
+    }
+
+    // Fallback: if the agent finished without calling queue_for_scoring (e.g. hit maxIterations),
+    // the company is stuck at 'enriching'. Queue best-effort scoring so it doesn't stay frozen.
+    // Exclude disqualified companies — the disqualify_company tool sets status but not pipelineStatus.
+    const afterState = await companyRepository.findById(companyId);
+    if (afterState?.pipelineStatus === 'enriching' && afterState?.status !== 'disqualified') {
+      logger.info({ domain }, '[enrichment.agent] Agent ended without scoring — queuing best-effort');
+      await companyRepository.setPipelineStatus(companyId, 'scoring', new Date());
+      await queueManager.addScoringJob({ runId, companyId });
     }
 
     const status = errors.length > 0 ? (contactsFound > 0 ? 'partial' : 'failed') : 'success';
@@ -169,6 +182,9 @@ Disqualify immediately if the domain is defunct or company is too large.
     }, '[enrichment.agent] Complete');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // Reset pipeline status so the company can be re-enriched on the next run
+    // rather than being stuck at 'enriching' forever.
+    await companyRepository.setPipelineStatus(companyId, 'discovered').catch(() => {});
     await scrapeLogRepository.complete(logId, {
       status: 'failed', companiesFound: 0, contactsFound: 0, jobsFound: 0,
       errors: [msg], durationMs: Date.now() - startedAt,

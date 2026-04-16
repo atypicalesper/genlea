@@ -22,9 +22,9 @@ export async function scrapeRoutes(app: FastifyInstance) {
   });
 
   app.post<{
-    Body: { source: ScraperSource; query: ScrapeQuery; limit?: number }
+    Body: { source: ScraperSource; query: ScrapeQuery }
   }>('/scrape', async (req, reply) => {
-    const { source, query, limit } = req.body;
+    const { source, query } = req.body;
 
     if (!ALL_SOURCES.includes(source)) {
       return reply.status(400).send({
@@ -33,11 +33,21 @@ export async function scrapeRoutes(app: FastifyInstance) {
       });
     }
 
+    if (!query?.keywords || typeof query.keywords !== 'string') {
+      return reply.status(400).send({ success: false, error: 'query.keywords is required' });
+    }
+    if (query.keywords.length > 300) {
+      return reply.status(400).send({ success: false, error: 'query.keywords must be ≤300 characters' });
+    }
+    if (query.location && query.location.length > 100) {
+      return reply.status(400).send({ success: false, error: 'query.location must be ≤100 characters' });
+    }
+
     const runId = generateRunId();
     await queueManager.addDiscoveryJob({
       runId,
       source,
-      query: { ...query, limit: limit ?? 25 },
+      query: { ...query, limit: Math.min(Math.max(1, query.limit ?? 25), 250) },
     });
 
     logger.info({ runId, source, keywords: query.keywords }, '[api:scrape] Discovery job queued');

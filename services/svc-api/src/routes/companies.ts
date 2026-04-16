@@ -123,7 +123,7 @@ export async function companiesRoutes(app: FastifyInstance) {
 
   app.get('/contacts/for-companies', async (req, reply) => {
     const idsParam = String((req.query as { ids?: string }).ids || '');
-    const ids = idsParam.split(',').map(s => s.trim()).filter(Boolean);
+    const ids = idsParam.split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
     if (!ids.length) return reply.send({ success: true, data: {} });
 
     const map = await contactRepository.findByCompanyIds(ids);

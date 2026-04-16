@@ -66,7 +66,7 @@ export async function leadsRoutes(app: FastifyInstance) {
     const filter    = buildLeadsFilter(req.query);
     const sortField = VALID_SORT_FIELDS[sortBy] ?? 'score';
     const sortOrder = sortDir === 'asc' ? 1 : -1;
-    const safeLimit = Math.min(Number(limit), 500);
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 500);
     const skip      = (Number(page) - 1) * safeLimit;
 
     const [companies, total] = await Promise.all([

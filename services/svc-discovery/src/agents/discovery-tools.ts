@@ -10,6 +10,9 @@ import {
   queueManager,
   normalizeDomain,
   getAvailableSources,
+  sanitizeAgentInput,
+  isInjectionAttempt,
+  withTiming,
   logger,
 } from '@genlea/shared';
 import type { DiscoveryJobData, Company } from '@genlea/shared';
@@ -69,7 +72,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
 
     // ── 0. Discovery state — goal check ───────────────────────────────────────
     tool(
-      async () => {
+      withTiming('get_discovery_state', async () => {
         const available  = [...getAvailableSources()].filter(s => s in SCRAPERS);
         const remaining  = available.filter(s => !triedSources.has(s));
         const goalMet    = totalSaved >= 15;
@@ -84,7 +87,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
             ? `Goal met (${totalSaved} companies saved) — call save_companies with any remaining results then stop.`
             : `Need ${Math.max(0, 15 - totalSaved)} more companies. Try: ${remaining.slice(0, 3).join(', ')}.`,
         });
-      },
+      }),
       {
         name:        'get_discovery_state',
         description: 'Check current discovery progress: how many companies have been saved, which sources have been tried, and whether the goal is met. Call this first and after each save.',
@@ -94,12 +97,12 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
 
     // ── 1. Source availability check ──────────────────────────────────────────
     tool(
-      async ({ source }) => {
+      withTiming('check_source_availability', async ({ source }) => {
         const scraper = SCRAPERS[source];
         if (!scraper) return JSON.stringify({ available: false, reason: 'Unknown source' });
         const available = await scraper.isAvailable();
         return JSON.stringify({ available, source });
-      },
+      }),
       {
         name:        'check_source_availability',
         description: 'Check if a scraper source has valid credentials and is ready to use.',
@@ -111,7 +114,11 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
 
     // ── 2. Scrape source ──────────────────────────────────────────────────────
     tool(
-      async ({ source, keywords, location, limit = 25 }) => {
+      withTiming('scrape_source', async ({ source, keywords: rawKeywords, location, limit = 25 }) => {
+        const keywords = sanitizeAgentInput(rawKeywords, 300);
+        if (isInjectionAttempt(rawKeywords)) {
+          logger.warn({ source, rawKeywords }, '[discovery-tools] Injection attempt in keywords — sanitized');
+        }
         // Dedup: prevent re-scraping the same source
         if (triedSources.has(source)) {
           return JSON.stringify({
@@ -164,14 +171,16 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
           logger.warn({ source, keywords, error: msg, cause, code }, '[discovery-tools] Scrape failed');
           return JSON.stringify({ error: msg, cause, code, companies: [] });
         }
-      },
+      }),
       {
         name:        'scrape_source',
         description: 'Scrape a source for companies matching the query. Each source can only be tried once per run.',
         schema: z.object({
-          source:   z.string().describe(`Source to scrape. Available: ${availableSources}`),
-          keywords: z.string().describe('Search keywords'),
-          location: z.string().optional(),
+          source:   z.string().refine(s => s in SCRAPERS, {
+            message: `Unknown source. Valid sources: ${availableSources}`,
+          }).describe(`Source to scrape. Must be one of: ${availableSources}`),
+          keywords: z.string().min(1).max(300).describe('Search keywords — plain text only, max 300 chars'),
+          location: z.string().max(100).optional(),
           limit:    z.number().int().min(1).max(100).default(25),
         }),
       },
@@ -179,7 +188,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
 
     // ── 3. Save companies ─────────────────────────────────────────────────────
     tool(
-      async ({ source, hiringInStack: defaultHiring = true }) => {
+      withTiming('save_companies', async ({ source, hiringInStack: defaultHiring = true }) => {
         const companies = pendingBySource.get(source);
         if (!companies?.length) {
           return JSON.stringify({ error: `No pending results for source "${source}". Call scrape_source first.`, saved: 0, runningTotal: totalSaved });
@@ -252,7 +261,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
         totalSaved += saved;
         logger.info({ source, saved, watchlisted, skipped, runningTotal: totalSaved }, '[discovery-tools] Companies saved');
         return JSON.stringify({ saved, watchlisted, skipped, total: companies.length, runningTotal: totalSaved });
-      },
+      }),
       {
         name:        'save_companies',
         description: 'Persist companies from a completed scrape_source call. Pass the source name — company data is stored internally after scrape_source runs. Actively-hiring companies are queued for enrichment.',
