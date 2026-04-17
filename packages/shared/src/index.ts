@@ -1,6 +1,9 @@
 // ── Types ─────────────────────────────────────────────────────────────────────
 export * from './types/index.js';
 
+// ── Agent framework (planner / executor / DOM summarizer / loop / LangSmith) ──
+export * from './agent/index.js';
+
 // ── Utils ─────────────────────────────────────────────────────────────────────
 export { logger } from './utils/logger.js';
 export * from './utils/random.js';
