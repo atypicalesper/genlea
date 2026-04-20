@@ -18,6 +18,12 @@ export function getAvailableSources(): Set<ScraperSource> {
   available.add('glassdoor');
   available.add('surelyremote');
 
+  // Always available — ATS public JSON APIs via DuckDuckGo dorking
+  available.add('greenhouse');
+  available.add('lever');
+  available.add('ashby');
+  available.add('workable');
+
   // API key required
   if (process.env['EXPLORIUM_API_KEY'])  available.add('explorium');
   if (process.env['APOLLO_API_KEY'])     available.add('apollo');
@@ -33,7 +39,7 @@ export function getAvailableSources(): Set<ScraperSource> {
 
 export function logAvailableSources(): void {
   const available = getAvailableSources();
-  const all: ScraperSource[] = ['explorium', 'wellfound', 'linkedin', 'indeed', 'glassdoor', 'surelyremote', 'crunchbase', 'apollo', 'zoominfo', 'clay'];
+  const all: ScraperSource[] = ['explorium', 'wellfound', 'linkedin', 'indeed', 'glassdoor', 'surelyremote', 'crunchbase', 'apollo', 'zoominfo', 'clay', 'greenhouse', 'lever', 'ashby', 'workable'];
   for (const src of all) {
     if (available.has(src)) {
       logger.info(`  ✓  ${src}`);
@@ -49,71 +55,104 @@ const SEED_QUERIES: Array<{
   keywords: string;
   techStack?: string[];
 }> = [
-  // ── Explorium — API-based, most reliable, no browser needed ─────────────
-  { source: 'explorium', keywords: 'nodejs typescript saas startup',                   techStack: ['nodejs', 'typescript'] },
-  { source: 'explorium', keywords: 'python ai ml generative startup',                  techStack: ['python', 'generative-ai', 'ai'] },
-  { source: 'explorium', keywords: 'react nextjs fullstack saas startup',              techStack: ['react', 'nextjs', 'typescript'] },
-  { source: 'explorium', keywords: 'python django fastapi backend startup',            techStack: ['python', 'django', 'fastapi'] },
-  { source: 'explorium', keywords: 'golang rust backend infrastructure startup',       techStack: ['golang', 'rust'] },
-  { source: 'explorium', keywords: 'nodejs nestjs backend saas startup',              techStack: ['nodejs', 'nestjs'] },
+  // ── Explorium — API-based, most reliable, no browser needed ──────────────
+  { source: 'explorium', keywords: 'nodejs typescript software engineer',            techStack: ['nodejs', 'typescript'] },
+  { source: 'explorium', keywords: 'python software engineer',                       techStack: ['python'] },
+  { source: 'explorium', keywords: 'react nextjs frontend engineer',                 techStack: ['react', 'nextjs'] },
+  { source: 'explorium', keywords: 'java spring backend engineer',                   techStack: ['java'] },
+  { source: 'explorium', keywords: 'golang backend engineer',                        techStack: ['golang'] },
+  { source: 'explorium', keywords: 'machine learning ai engineer',                   techStack: ['python', 'ai', 'ml'] },
+  { source: 'explorium', keywords: 'devops platform engineer cloud',                 techStack: ['devops', 'cloud'] },
+  { source: 'explorium', keywords: 'mobile engineer ios android',                    techStack: ['ios', 'android'] },
+  { source: 'explorium', keywords: 'data engineer analytics',                        techStack: ['data-engineering'] },
+  { source: 'explorium', keywords: 'fullstack software engineer',                    techStack: ['fullstack'] },
 
-  // ── Wellfound — most reliable free source for funded US startups ──────────
-  { source: 'wellfound', keywords: 'YC W24 startup software engineer',                techStack: ['nodejs', 'python', 'react'] },
-  { source: 'wellfound', keywords: 'YC S24 startup software engineer',                techStack: ['nodejs', 'typescript'] },
-  { source: 'wellfound', keywords: 'YC W23 startup backend engineer',                 techStack: ['python', 'react'] },
-  { source: 'wellfound', keywords: 'seed stage fintech startup engineer US',          techStack: ['nodejs', 'python'] },
-  { source: 'wellfound', keywords: 'seed stage AI startup engineer US',               techStack: ['python', 'generative-ai', 'ai'] },
-  { source: 'wellfound', keywords: 'series a saas startup backend engineer US',       techStack: ['nodejs', 'typescript'] },
-  { source: 'wellfound', keywords: 'series a healthtech startup engineer US',         techStack: ['python', 'react'] },
-  { source: 'wellfound', keywords: 'series a fintech startup engineer US',            techStack: ['nodejs', 'typescript'] },
-  { source: 'wellfound', keywords: 'remote first startup fullstack engineer US',      techStack: ['react', 'nodejs', 'fullstack'] },
-  { source: 'wellfound', keywords: 'distributed team startup backend engineer US',    techStack: ['python', 'nodejs'] },
-  { source: 'wellfound', keywords: 'pre-seed startup generative ai llm engineer',     techStack: ['python', 'generative-ai'] },
-  { source: 'wellfound', keywords: 'bootstrapped saas startup nodejs engineer',       techStack: ['nodejs', 'nestjs'] },
+  // ── Wellfound — funded US startups hiring across all sectors ─────────────
+  { source: 'wellfound', keywords: 'YC startup software engineer',                   techStack: ['nodejs', 'python', 'react'] },
+  { source: 'wellfound', keywords: 'seed stage startup software engineer US',        techStack: ['nodejs', 'python'] },
+  { source: 'wellfound', keywords: 'series a startup backend engineer US',           techStack: ['nodejs', 'typescript'] },
+  { source: 'wellfound', keywords: 'series b startup software engineer US',          techStack: ['python', 'react'] },
+  { source: 'wellfound', keywords: 'remote startup software engineer US',            techStack: ['react', 'nodejs', 'fullstack'] },
+  { source: 'wellfound', keywords: 'startup frontend engineer react nextjs US',      techStack: ['react', 'nextjs'] },
+  { source: 'wellfound', keywords: 'startup mobile engineer ios android US',         techStack: ['ios', 'android'] },
+  { source: 'wellfound', keywords: 'startup data engineer python US',                techStack: ['python', 'data-engineering'] },
+  { source: 'wellfound', keywords: 'startup devops platform engineer US',            techStack: ['devops', 'cloud'] },
+  { source: 'wellfound', keywords: 'pre-seed startup generative ai engineer',        techStack: ['python', 'generative-ai', 'ai'] },
+  { source: 'wellfound', keywords: 'bootstrapped startup software engineer US',      techStack: ['nodejs', 'python'] },
+  { source: 'wellfound', keywords: 'startup java backend engineer US',               techStack: ['java'] },
 
-  // ── LinkedIn — requires session but highest quality ────────────────────────
-  { source: 'linkedin', keywords: 'YC startup software engineer seed series a US',   techStack: ['nodejs', 'python'] },
-  { source: 'linkedin', keywords: 'seed funded saas startup engineer 10-50 US',      techStack: ['nodejs', 'typescript'] },
-  { source: 'linkedin', keywords: 'series a AI startup engineer hiring US',           techStack: ['python', 'generative-ai'] },
-  { source: 'linkedin', keywords: 'remote startup fullstack engineer distributed',    techStack: ['react', 'nodejs'] },
+  // ── LinkedIn — highest quality when session available ─────────────────────
+  { source: 'linkedin', keywords: 'startup software engineer seed series a US',     techStack: ['nodejs', 'python'] },
+  { source: 'linkedin', keywords: 'startup backend engineer 10-50 employees US',    techStack: ['nodejs', 'typescript'] },
+  { source: 'linkedin', keywords: 'startup frontend engineer hiring US',             techStack: ['react', 'nextjs'] },
+  { source: 'linkedin', keywords: 'remote startup engineer distributed US',         techStack: ['python', 'nodejs'] },
 
-  // ── Indeed — catches active job postings not on other boards ─────────────
+  // ── Indeed — broadest reach for active job postings ──────────────────────
   { source: 'indeed', keywords: 'startup software engineer seed funded US' },
-  { source: 'indeed', keywords: 'early stage startup backend python nodejs US' },
-  { source: 'indeed', keywords: 'startup fullstack engineer series a US remote' },
-  { source: 'indeed', keywords: 'AI startup machine learning engineer US seed' },
-  { source: 'indeed', keywords: 'saas startup typescript react engineer US' },
+  { source: 'indeed', keywords: 'startup backend engineer series a US' },
+  { source: 'indeed', keywords: 'startup fullstack engineer US remote' },
+  { source: 'indeed', keywords: 'startup mobile engineer ios android US' },
+  { source: 'indeed', keywords: 'startup data engineer analytics US' },
+  { source: 'indeed', keywords: 'startup devops engineer cloud US' },
+  { source: 'indeed', keywords: 'startup machine learning engineer US' },
 
   // ── Glassdoor ─────────────────────────────────────────────────────────────
-  { source: 'glassdoor', keywords: 'startup software engineer seed series a US',     techStack: ['nodejs', 'react', 'python'] },
-  { source: 'glassdoor', keywords: 'AI startup engineer python typescript US',       techStack: ['python', 'typescript', 'generative-ai'] },
-  { source: 'glassdoor', keywords: 'fintech startup backend engineer US',            techStack: ['nodejs', 'python'] },
-  { source: 'glassdoor', keywords: 'remote startup fullstack engineer US',           techStack: ['react', 'nodejs', 'fullstack'] },
+  { source: 'glassdoor', keywords: 'startup software engineer seed series a US',    techStack: ['nodejs', 'react', 'python'] },
+  { source: 'glassdoor', keywords: 'startup backend engineer python nodejs US',     techStack: ['python', 'nodejs'] },
+  { source: 'glassdoor', keywords: 'startup frontend engineer react US',            techStack: ['react', 'typescript'] },
+  { source: 'glassdoor', keywords: 'remote startup fullstack engineer US',          techStack: ['react', 'nodejs', 'fullstack'] },
 
-  // ── Surely Remote — remote-first companies are top outsourcing targets ────
-  { source: 'surelyremote', keywords: 'startup backend engineer nodejs python',      techStack: ['nodejs', 'python'] },
-  { source: 'surelyremote', keywords: 'startup AI engineer generative llm',          techStack: ['python', 'generative-ai', 'ai'] },
-  { source: 'surelyremote', keywords: 'startup fullstack react typescript',          techStack: ['react', 'typescript', 'fullstack'] },
-  { source: 'surelyremote', keywords: 'saas startup backend typescript nestjs',      techStack: ['nodejs', 'nestjs', 'typescript'] },
+  // ── Surely Remote — remote-first companies ────────────────────────────────
+  { source: 'surelyremote', keywords: 'startup backend engineer nodejs python',     techStack: ['nodejs', 'python'] },
+  { source: 'surelyremote', keywords: 'startup frontend engineer react',            techStack: ['react', 'typescript'] },
+  { source: 'surelyremote', keywords: 'startup fullstack engineer',                 techStack: ['fullstack'] },
+  { source: 'surelyremote', keywords: 'startup ai engineer python',                 techStack: ['python', 'ai', 'generative-ai'] },
 
-  // ── Crunchbase — database source (hiringInStack: false → watchlist) ─────
-  { source: 'crunchbase', keywords: 'seed stage saas startup software US',          techStack: ['nodejs', 'python'] },
-  { source: 'crunchbase', keywords: 'series a ai ml startup US',                    techStack: ['python', 'generative-ai', 'ai'] },
-  { source: 'crunchbase', keywords: 'series b fintech devtools startup US',         techStack: ['nodejs', 'typescript', 'golang'] },
+  // ── Crunchbase — watchlist (hiringInStack: false) ─────────────────────────
+  { source: 'crunchbase', keywords: 'seed startup software engineer US',            techStack: ['nodejs', 'python'] },
+  { source: 'crunchbase', keywords: 'series a startup software engineer US',        techStack: ['python', 'react'] },
+  { source: 'crunchbase', keywords: 'series b startup engineer US',                 techStack: ['nodejs', 'typescript', 'golang'] },
 
-  // ── Apollo — database source (hiringInStack: false → watchlist) ──────────
-  { source: 'apollo', keywords: 'saas startup nodejs typescript engineer US',       techStack: ['nodejs', 'typescript'] },
-  { source: 'apollo', keywords: 'ai ml startup python engineer US',                 techStack: ['python', 'generative-ai'] },
-  { source: 'apollo', keywords: 'fintech startup fullstack engineer US',            techStack: ['react', 'nodejs'] },
+  // ── Apollo — watchlist (hiringInStack: false) ─────────────────────────────
+  { source: 'apollo', keywords: 'startup software engineer US',                     techStack: ['nodejs', 'typescript'] },
+  { source: 'apollo', keywords: 'startup backend engineer US',                      techStack: ['python', 'nodejs'] },
+  { source: 'apollo', keywords: 'startup fullstack engineer US',                    techStack: ['react', 'nodejs'] },
 
-  // ── ZoomInfo — database source (hiringInStack: false → watchlist) ────────
-  { source: 'zoominfo', keywords: 'tech startup software engineer US seed series a', techStack: ['nodejs', 'python', 'react'] },
-  { source: 'zoominfo', keywords: 'saas startup backend engineer US',               techStack: ['nodejs', 'typescript'] },
+  // ── ZoomInfo — watchlist (hiringInStack: false) ───────────────────────────
+  { source: 'zoominfo', keywords: 'startup software engineer US seed series a',     techStack: ['nodejs', 'python', 'react'] },
+  { source: 'zoominfo', keywords: 'startup backend engineer US',                    techStack: ['nodejs', 'typescript'] },
 
-  // ── Clay — enrichment-grade database source ───────────────────────────────
-  { source: 'clay', keywords: 'saas startup nodejs typescript engineer US',         techStack: ['nodejs', 'typescript'] },
-  { source: 'clay', keywords: 'ai ml startup python generative engineer US',        techStack: ['python', 'generative-ai', 'ai'] },
-  { source: 'clay', keywords: 'fintech startup fullstack react engineer US',        techStack: ['react', 'nodejs', 'fullstack'] },
+  // ── Clay — enrichment-grade database ─────────────────────────────────────
+  { source: 'clay', keywords: 'startup software engineer US',                       techStack: ['nodejs', 'typescript'] },
+  { source: 'clay', keywords: 'startup ai engineer US',                             techStack: ['python', 'generative-ai', 'ai'] },
+  { source: 'clay', keywords: 'startup fullstack engineer US',                      techStack: ['react', 'nodejs', 'fullstack'] },
+
+  // ── Greenhouse ATS — public JSON API, reliable, actively hiring ──────────
+  { source: 'greenhouse', keywords: '"software engineer" remote',                   techStack: ['nodejs', 'python'] },
+  { source: 'greenhouse', keywords: '"backend engineer" "node"',                    techStack: ['nodejs', 'typescript'] },
+  { source: 'greenhouse', keywords: '"frontend engineer" "react"',                  techStack: ['react', 'nextjs'] },
+  { source: 'greenhouse', keywords: '"fullstack" "typescript"',                     techStack: ['fullstack', 'typescript'] },
+  { source: 'greenhouse', keywords: '"ai engineer" OR "ml engineer"',               techStack: ['python', 'generative-ai', 'ml'] },
+  { source: 'greenhouse', keywords: '"platform engineer" OR "devops"',              techStack: ['devops', 'cloud'] },
+
+  // ── Lever ATS — public JSON API ──────────────────────────────────────────
+  { source: 'lever', keywords: '"software engineer" remote US',                     techStack: ['nodejs', 'python'] },
+  { source: 'lever', keywords: '"backend engineer" "python" OR "node"',             techStack: ['python', 'nodejs'] },
+  { source: 'lever', keywords: '"frontend engineer" react',                         techStack: ['react', 'typescript'] },
+  { source: 'lever', keywords: '"fullstack engineer" startup',                      techStack: ['fullstack'] },
+  { source: 'lever', keywords: '"ai" OR "machine learning" engineer',               techStack: ['python', 'ai', 'generative-ai'] },
+
+  // ── Ashby ATS — modern startup ATS, public posting API ───────────────────
+  { source: 'ashby', keywords: '"software engineer" remote',                        techStack: ['nodejs', 'python'] },
+  { source: 'ashby', keywords: '"backend" OR "fullstack" engineer',                 techStack: ['nodejs', 'typescript', 'fullstack'] },
+  { source: 'ashby', keywords: '"frontend engineer" react nextjs',                  techStack: ['react', 'nextjs'] },
+  { source: 'ashby', keywords: '"ai engineer" OR "llm" engineer',                   techStack: ['python', 'generative-ai'] },
+
+  // ── Workable ATS — widely used, public jobs API ──────────────────────────
+  { source: 'workable', keywords: '"software engineer" remote US',                  techStack: ['nodejs', 'python'] },
+  { source: 'workable', keywords: '"backend engineer" python OR node',              techStack: ['python', 'nodejs'] },
+  { source: 'workable', keywords: '"frontend engineer" react',                      techStack: ['react'] },
+  { source: 'workable', keywords: '"fullstack engineer"',                           techStack: ['fullstack'] },
 ];
 
 // ── Configurable thresholds ────────────────────────────────────────────────────

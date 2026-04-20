@@ -137,8 +137,7 @@ export class ExploriumScraper implements Scraper {
         total_results?: number;
       }>('/v1/businesses', {
         country_code:            'US',
-        company_size:            ['11-50', '51-200'],          // 10–200 employees
-        linkedin_category:       'software',
+        company_size:            ['11-50', '51-200'],
         ...(techTerms.length && { company_tech_stack_tech: techTerms }),
         page_size: Math.min(limit * 2, 100),                   // over-fetch — some will be deduped
       });

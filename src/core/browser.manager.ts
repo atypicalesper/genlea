@@ -5,13 +5,13 @@ import { randomInt, randomBetween } from '../utils/random.js';
 
 // ── User Agent Bank ───────────────────────────────────────────────────────────
 const USER_AGENTS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.4; rv:125.0) Gecko/20100101 Firefox/125.0',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.4; rv:137.0) Gecko/20100101 Firefox/137.0',
 ];
 
 const VIEWPORTS = [
@@ -85,6 +85,9 @@ export class BrowserManager {
         '--disable-setuid-sandbox',
         '--disable-infobars',
         '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--mute-audio',
+        '--hide-scrollbars',
         '--disable-blink-features=AutomationControlled',
         '--disable-extensions',
         '--no-first-run',
@@ -92,6 +95,9 @@ export class BrowserManager {
         '--window-size=1920,1080',
         '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
       ],
     });
 
@@ -148,11 +154,24 @@ export class BrowserManager {
   async newPage(context: BrowserContext): Promise<Page> {
     const page = await context.newPage();
 
-    // Block unnecessary resources to speed up scraping
-    await page.route('**/*.{png,jpg,jpeg,gif,svg,ico,woff,woff2,ttf,eot}', route => route.abort());
-    await page.route('**/analytics**', route => route.abort());
-    await page.route('**/tracking**', route => route.abort());
-    await page.route('**/ads/**', route => route.abort());
+    page.setDefaultTimeout(20_000);
+    page.setDefaultNavigationTimeout(30_000);
+
+    // Block static assets — no value for scraping
+    await page.route('**/*.{png,jpg,jpeg,gif,webp,svg,ico,mp4,webm,ogg,mp3,wav,woff,woff2,ttf,eot}', route => route.abort());
+
+    // Block analytics/tracking/ads — return 204 instead of aborting to avoid JS errors
+    const JUNK_PATTERNS = [
+      '**/analytics**', '**/tracking**', '**/ads/**',
+      '**/gtm.js**', '**/googletagmanager**', '**/google-analytics**',
+      '**/hotjar**', '**/hj.js**', '**/segment.io**', '**/cdn.segment**',
+      '**/intercom**', '**/mixpanel**', '**/amplitude**',
+      '**/fullstory**', '**/logrocket**', '**/crisp.chat**',
+      '**/drift.com**', '**/hs-scripts**', '**/hubspot**',
+    ];
+    for (const pattern of JUNK_PATTERNS) {
+      await page.route(pattern, route => route.fulfill({ status: 204, body: '' }));
+    }
 
     return page;
   }
@@ -174,20 +193,12 @@ export class BrowserManager {
 
   /** Detect if a CAPTCHA is present on the current page */
   async detectCaptcha(page: Page): Promise<boolean> {
-    const captchaSelectors = [
-      '[class*="captcha"]',
-      '[id*="captcha"]',
-      '.challenge-dialog',
-      '#challenge-running',
-      'iframe[src*="recaptcha"]',
-      'iframe[src*="hcaptcha"]',
-    ];
-
-    for (const selector of captchaSelectors) {
-      const el = await page.$(selector);
-      if (el) return true;
-    }
-    return false;
+    const selector = [
+      '[class*="captcha"]', '[id*="captcha"]',
+      '.challenge-dialog', '#challenge-running',
+      'iframe[src*="recaptcha"]', 'iframe[src*="hcaptcha"]',
+    ].join(', ');
+    return page.locator(selector).first().isVisible({ timeout: 1500 }).catch(() => false);
   }
 
   /** Save current page cookies to a file */

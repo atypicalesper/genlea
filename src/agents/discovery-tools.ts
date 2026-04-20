@@ -12,53 +12,86 @@ import { logger }                      from '../utils/logger.js';
 import { getAvailableSources }         from '../core/scheduler.js';
 import { SCRAPERS, BLOCKED_DOMAINS, BLOCKED_NAME_PATTERNS, isJunkDomain } from '../discovery/blocklists.js';
 import { resolvesRealDomain }          from '../discovery/domain-validator.js';
+import { resolveNameToDomain }         from '../discovery/domain-resolver.js';
 import type { DiscoveryJobData }        from '../types/index.js';
 
+const slugifyName = (s: string): string =>
+  s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'unknown';
+
 export function buildSystemPrompt(): string {
-  const available = getAvailableSources();
+  const available  = getAvailableSources();
   const activeList = Object.keys(SCRAPERS).filter(s => available.has(s as any)).join(', ');
   const skipList   = Object.keys(SCRAPERS).filter(s => !available.has(s as any));
 
   const skipNote = skipList.length
-    ? `\nUnavailable sources (no credentials — do NOT attempt): ${skipList.join(', ')}`
+    ? `\nUnavailable sources (no credentials — do NOT call these): ${skipList.join(', ')}`
     : '';
 
   return `You are a B2B lead generation discovery agent for a software agency that sells offshore Indian developer talent to US/UK/CA/AU/EU tech companies.
 
-Your goal: find tech companies with 10–200 employees that are actively hiring software engineers. These are pre-qualified leads because they are in a growth phase and have engineering demand.
+GOAL: Find and save ≥15 valid tech companies matching the query. Stop as soon as the goal is met.
 
-Target profile:
-- Company size: 10–200 employees
-- Age: founded within the last 7 years (2018–present) — includes seed-stage startups AND growth-stage companies 4–7 years old
-- Hiring: actively posting software engineering roles in the target tech stack
-- Verticals (include variety): SaaS, AI/ML, Fintech, HealthTech, DevTools, B2B Software, EdTech, LegalTech, PropTech, InsurTech, Cybersecurity, MarTech, HRTech, CleanTech, LogisticsTech, E-commerce Tech, Data & Analytics, API Platforms, CRMTech, AgriTech
-- Funding: pre-seed to Series C (not bootstrapped micro-businesses or Series D+ mega-rounds)
+WORKFLOW:
+1. Call get_discovery_state — check if goal is already met before scraping anything.
+2. If not met, call scrape_source for the primary source.
+3. After each scrape_source call, immediately call save_companies with source="<same source name>". Do NOT pass company data — just the source name.
+4. Call get_discovery_state again — if goalMet: true, stop.
+5. If not met and < 5 results were found from primary, try 1–2 fallback sources.
+6. Never try the same source twice (get_discovery_state.sourcesTried shows what's been done).
+
+Target company profile:
+- Size: 10–200 employees
+- Hiring: actively posting software engineering roles
+- Any industry or vertical — do not filter by sector
+- Funding: pre-seed to Series C (or bootstrapped if actively hiring engineers)
 
 Available sources: ${activeList}${skipNote}
 
-Hiring status — set hiringInStack per company:
-- Job board sources (wellfound, linkedin, indeed, glassdoor, surelyremote): companies returned ARE actively hiring → hiringInStack: true
-- Database sources (explorium, crunchbase, apollo): hiring status is unknown → hiringInStack: false (enrichment will verify later)
-- If a result includes job titles/open roles that match the target tech stack keywords: hiringInStack: true regardless of source
+Hiring status:
+- Job board / ATS sources (greenhouse, lever, ashby, workable, wellfound, linkedin, indeed, glassdoor, surelyremote): companies ARE hiring → hiringInStack: true
+- Database sources (explorium, crunchbase, apollo): hiring unknown → hiringInStack: false
 
-Decision rules:
-1. Always start with the source specified in the task. If it returns < 5 results, automatically try 2–3 other sources with the same or adapted keywords.
-2. If a source returns an error or is unavailable, skip it and try the next best source.
-3. Good fallback order: explorium → wellfound → linkedin → indeed → glassdoor → crunchbase → apollo → zoominfo → surelyremote
-4. explorium uses API-based company search — very reliable, no browser needed. Prefer it when available.
-5. Adapt keywords when expanding — e.g. if "startup backend engineer" returns little, try "growth stage tech company software engineer" or "series b saas engineer".
-6. Stop when you have ≥ 15 valid companies OR have tried all available sources.
-7. Never return large enterprises (banks, consulting firms, FAANG, >200 employees) — the blocklist handles most, but use your judgment.
-8. A 5–7 year old company with strong engineering hiring is a better lead than a 1-year-old startup with zero team.
-9. Save ALL valid companies — even if not currently hiring in the target stack. These go on a watchlist and will be refreshed automatically.
+Source preference (most reliable first — ATS JSON APIs never get CAPTCHA'd):
+greenhouse → lever → ashby → workable → explorium → wellfound → indeed → glassdoor → crunchbase → apollo → surelyremote
 
-After collecting results, call save_companies with all discovered companies (set hiringInStack accurately per company).`;
+Do NOT save: mega-enterprises (FAANG, Big 4 consulting, banks with >1000 employees), staffing agencies, or job boards themselves.`;
 }
 
 export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
   const availableSources = [...getAvailableSources()].filter(s => s in SCRAPERS).join(', ');
 
+  const triedSources    = new Set<string>();
+  const pendingBySource = new Map<string, Array<Record<string, unknown>>>();
+  let totalSaved = 0;
+
   return [
+
+    // ── 0. Discovery state ──────────────────────────────────────────────────────
+    tool(
+      async () => {
+        const available  = [...getAvailableSources()].filter(s => s in SCRAPERS);
+        const remaining  = available.filter(s => !triedSources.has(s));
+        const goalMet    = totalSaved >= 15;
+        return JSON.stringify({
+          companiesFound:        totalSaved,
+          goalMet,
+          goalTarget:            15,
+          sourcesTried:          [...triedSources],
+          remainingSources:      remaining,
+          nextRecommendedSource: remaining[0] ?? null,
+          message: goalMet
+            ? `Goal met (${totalSaved} companies saved) — stop.`
+            : `Need ${Math.max(0, 15 - totalSaved)} more companies. Try: ${remaining.slice(0, 3).join(', ')}.`,
+        });
+      },
+      {
+        name:        'get_discovery_state',
+        description: 'Check progress: companies saved so far, sources tried, sources remaining, and whether the 15-company goal is met. Call FIRST before scraping anything, and AGAIN after every save_companies call. If `goalMet: true`, stop immediately — do not scrape more sources.',
+        schema: z.object({}),
+      },
+    ),
+
+    // ── 1. Source availability ──────────────────────────────────────────────────
     tool(
       async ({ source }) => {
         const scraper = SCRAPERS[source];
@@ -68,15 +101,24 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
       },
       {
         name:        'check_source_availability',
-        description: 'Check if a scraper source has valid credentials and is available to use.',
+        description: 'Verify a source has credentials and can accept requests. Optional — scrape_source already checks availability internally and returns an error if unavailable. Use this only to pre-screen sources before deciding scrape order.',
         schema: z.object({
           source: z.string().describe(`Source to check. Available: ${availableSources}`),
         }),
       },
     ),
 
+    // ── 2. Scrape source ────────────────────────────────────────────────────────
     tool(
       async ({ source, keywords, location = 'United States', limit = 25 }) => {
+        if (triedSources.has(source)) {
+          return JSON.stringify({
+            error: `${source} already tried this run — use get_discovery_state to see remaining sources`,
+            alreadyTried: true,
+          });
+        }
+        triedSources.add(source);
+
         const scraper = SCRAPERS[source];
         if (!scraper) return JSON.stringify({ error: `Unknown source: ${source}`, companies: [] });
 
@@ -90,13 +132,15 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
           const deduped = deduplicateCompanies(companies);
 
           const filtered = deduped.filter(c => {
-            if (!c.domain || !c.name) return false;
-            if (BLOCKED_DOMAINS.has(c.domain)) return false;
-            if (isJunkDomain(c.domain)) return false;
-            if (c.name && BLOCKED_NAME_PATTERNS.some(re => re.test(c.name!))) return false;
+            if (!c.name) return false;
+            if (c.domain && BLOCKED_DOMAINS.has(c.domain)) return false;
+            if (c.domain && isJunkDomain(c.domain)) return false;
+            if (BLOCKED_NAME_PATTERNS.some(re => re.test(c.name!))) return false;
             if (c.employeeCount && c.employeeCount > 1000) return false;
             return true;
           });
+
+          pendingBySource.set(source, filtered.map(c => ({ ...c, source })));
 
           logger.info({ source, raw: rawResults.length, filtered: filtered.length }, '[discovery-tools] Scraped');
 
@@ -104,14 +148,8 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
             source,
             rawCount:      rawResults.length,
             filteredCount: filtered.length,
-            companies: filtered.map(c => ({
-              name:          c.name,
-              domain:        c.domain,
-              employeeCount: c.employeeCount,
-              fundingStage:  c.fundingStage,
-              techStack:     (c.techStack ?? []).slice(0, 4),
-              source,
-            })),
+            preview:       filtered.slice(0, 3).map(c => ({ name: c.name, domain: c.domain, employees: c.employeeCount })),
+            message:       `${filtered.length} companies ready. Call save_companies with source="${source}".`,
           });
         } catch (err) {
           const msg   = err instanceof Error ? err.message : String(err);
@@ -123,42 +161,80 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
       },
       {
         name:        'scrape_source',
-        description: 'Scrape a source for companies matching the query. Returns companies found.',
+        description: 'Scrape one source for companies matching the query. Each source can only be called ONCE per run — subsequent calls return an error. Returns a short summary with `filteredCount`; company data is held in memory. You MUST call save_companies immediately after — data will be lost otherwise. If `filteredCount` < 5 consider increasing `limit` to 50 on the next source.',
         schema: z.object({
-          source:   z.string().describe(`Source to scrape. Available: ${availableSources}`),
-          keywords: z.string().describe('Search keywords'),
-          location: z.string().default('United States'),
-          limit:    z.number().int().min(1).max(100).default(25).describe('Max results to fetch'),
+          source:   z.string().describe(`Source to scrape. Must be one of: ${availableSources}`),
+          keywords: z.string().min(1).max(300).describe('Search keywords — plain text only, max 300 chars'),
+          location: z.string().max(100).optional(),
+          limit:    z.number().int().min(1).max(100).default(25),
         }),
       },
     ),
 
+    // ── 3. Save companies ───────────────────────────────────────────────────────
     tool(
-      async ({ companies }) => {
-        let saved = 0, watchlisted = 0, skipped = 0;
+      async ({ source, hiringInStack: defaultHiring = true }) => {
+        if (!pendingBySource.has(source)) {
+          return JSON.stringify({
+            error:        `scrape_source("${source}") has not been called yet this run. Call it first.`,
+            saved:        0,
+            runningTotal: totalSaved,
+          });
+        }
+        const companies = pendingBySource.get(source)!;
+        if (!companies.length) {
+          pendingBySource.delete(source);
+          return JSON.stringify({ saved: 0, watchlisted: 0, skipped: 0, total: 0, runningTotal: totalSaved, message: `${source} scraped 0 results — try a different source.` });
+        }
+        pendingBySource.delete(source);
+
+        await Promise.all(companies.map(async co => {
+          if (!co['domain'] && co['name']) {
+            const resolved = await resolveNameToDomain(co['name'] as string);
+            if (resolved) {
+              if (BLOCKED_DOMAINS.has(resolved) || isJunkDomain(resolved)) return;
+              co['domain'] = resolved;
+              logger.debug({ name: co['name'], domain: resolved }, '[discovery-tools] Resolved name→domain via Clearbit');
+            }
+          }
+        }));
+
+        let saved = 0, watchlisted = 0, skipped = 0, resolvedCount = 0;
 
         for (const co of companies) {
-          const domain = normalizeDomain(co.domain ?? '');
-          if (!domain || !co.name) { skipped++; continue; }
-          if (!(await resolvesRealDomain(domain))) { skipped++; continue; }
+          const name = co['name'] as string | undefined;
+          if (!name) { skipped++; continue; }
 
-          const hiringInStack  = co.hiringInStack !== false;
-          const pipelineStatus = hiringInStack ? 'discovered' : 'watchlist';
+          let domain = normalizeDomain((co['domain'] as string) ?? '');
+          let domainResolved = true;
+          if (!domain) {
+            domain = `${slugifyName(name)}.unresolved`;
+            domainResolved = false;
+          } else if (!(await resolvesRealDomain(domain))) {
+            logger.debug({ domain }, '[discovery-tools] DNS unresolved — keeping anyway');
+            domainResolved = false;
+          } else {
+            resolvedCount++;
+          }
+
+          const isJobBoard    = ['wellfound', 'linkedin', 'indeed', 'glassdoor', 'surelyremote', 'greenhouse', 'lever', 'ashby', 'workable'].includes(source);
+          const hiringInStack = isJobBoard || defaultHiring;
+          const pipelineStatus = hiringInStack && domainResolved ? 'discovered' : 'watchlist';
 
           try {
             const company = await companyRepository.upsert({
-              name:          co.name,
+              name,
               domain,
-              linkedinUrl:   co.linkedinUrl,
-              employeeCount: co.employeeCount,
-              fundingStage:  co.fundingStage,
-              techStack:     co.techStack,
-              hqCountry:     co.hqCountry ?? 'US',
-              sources:       [co.source ?? job.source],
+              linkedinUrl:   co['linkedinUrl']   as string   | undefined,
+              employeeCount: co['employeeCount'] as number   | undefined,
+              fundingStage:  co['fundingStage']  as any,
+              techStack:     co['techStack']     as string[] | undefined,
+              hqCountry:     (co['hqCountry'] as string | undefined) ?? 'US',
+              sources:       [source ?? job.source] as any,
               pipelineStatus,
             } as any);
 
-            if (hiringInStack) {
+            if (hiringInStack && domainResolved) {
               if (process.env['HUNTER_API_KEY']) {
                 hunterScraper.enrichDomain(domain).then(async result => {
                   if (!result?.contacts?.length) return;
@@ -195,24 +271,16 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
           } catch { skipped++; }
         }
 
-        logger.info({ saved, watchlisted, skipped }, '[discovery-tools] Companies saved');
-        return JSON.stringify({ saved, watchlisted, skipped, total: companies.length });
+        totalSaved += saved;
+        logger.info({ source, saved, watchlisted, skipped, nameResolved: resolvedCount, runningTotal: totalSaved }, '[discovery-tools] Companies saved');
+        return JSON.stringify({ saved, watchlisted, skipped, nameResolved: resolvedCount, total: companies.length, runningTotal: totalSaved });
       },
       {
         name:        'save_companies',
-        description: 'Save all valid discovered companies to the database. Companies actively hiring in the target stack are queued for enrichment; others go on a watchlist for later refresh. Call once when done collecting.',
+        description: 'Flush companies held from the previous scrape_source call into the database. Pass ONLY the source name — do NOT pass company data. Job-board sources (wellfound, linkedin, indeed, glassdoor, surelyremote) auto-set hiringInStack: true; database sources (explorium, crunchbase, apollo) default to false. Returns `saved` (queued for enrichment), `watchlisted`, and `runningTotal`. Check `runningTotal` — if ≥ 15, call get_discovery_state to confirm goalMet and stop.',
         schema: z.object({
-          companies: z.array(z.object({
-            name:          z.string(),
-            domain:        z.string(),
-            linkedinUrl:   z.string().optional(),
-            employeeCount: z.number().optional(),
-            fundingStage:  z.string().optional(),
-            techStack:     z.array(z.string()).optional(),
-            hqCountry:     z.string().optional(),
-            source:        z.string().optional(),
-            hiringInStack: z.boolean().optional().describe('True if company is confirmed to be actively hiring in the target tech stack'),
-          })).describe('Array of company objects to save'),
+          source:        z.string().describe('The source name you just scraped (e.g. "wellfound", "indeed")'),
+          hiringInStack: z.boolean().optional().describe('Whether these companies are actively hiring (default: true for job-board sources)'),
         }),
       },
     ),

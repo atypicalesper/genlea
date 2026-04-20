@@ -28,7 +28,7 @@ Target         : ≥15 companies
 
 Start with get_discovery_state to check current progress. If the goal is not met, scrape ${source} first.
 After each scrape_source, call save_companies with source="${source}" — do NOT pass company data back, just the source name.
-Prefer: SaaS, AI/ML, Fintech, HealthTech, DevTools. Size 10–200, founded 2018+, pre-seed to Series C.
+Accept any industry. Size 10–200, actively hiring engineers, pre-seed to Series C or bootstrapped.
 `.trim();
 
   const agentName     = `discovery:${source}:${runId.slice(0, 8)}`;

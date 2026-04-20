@@ -36,12 +36,11 @@ Find tech companies for B2B lead generation.
 Primary source: ${source}
 Keywords: ${query.keywords}
 Location: ${query.location ?? 'United States'}
-Target limit: ${query.limit ?? 25} companies
+Target: ≥15 companies
 
-Start with ${source}. If you get fewer than 5 results or it fails, expand to other sources using similar keywords.
-Prefer companies in: SaaS, AI/ML, BioTech, Fintech, HealthTech, DevTools.
-Target size: 10–200 employees. Age: founded 2018–present (up to ~7 years old). Funding: pre-seed to Series C.
-A company founded 5–6 years ago that's actively hiring engineers is a perfect lead — do not skip it just because it's not "early stage".
+Start with get_discovery_state to check current progress. If goal not met, scrape ${source} first.
+After each scrape_source, immediately call save_companies with source="${source}" — do NOT pass company data, just the source name.
+Accept any industry. Size 10–200, actively hiring engineers, pre-seed to Series C or bootstrapped.
 `.trim();
 
   const agentName    = `discovery:${source}:${runId.slice(0, 8)}`;

@@ -3,6 +3,7 @@ import {
   linkedInScraper, apolloScraper, crunchbaseScraper, wellfoundScraper,
   indeedScraper, glassdoorScraper, surelyRemoteScraper, exploriumScraper,
   zoomInfoScraper, clayScraper,
+  greenhouseScraper, leverScraper, ashbyScraper, workableScraper,
 } from '../scrapers/discovery/index.js';
 import type { Scraper } from '../types/index.js';
 
@@ -17,6 +18,10 @@ export const SCRAPERS: Record<string, Scraper> = {
   surelyremote: surelyRemoteScraper,
   zoominfo:     zoomInfoScraper,
   clay:         clayScraper,
+  greenhouse:   greenhouseScraper,
+  lever:        leverScraper,
+  ashby:        ashbyScraper,
+  workable:     workableScraper,
 };
 
 export const BLOCKED_DOMAINS = new Set<string>([
@@ -38,15 +43,16 @@ export const BLOCKED_DOMAINS = new Set<string>([
 ]);
 
 export const BLOCKED_NAME_PATTERNS: RegExp[] = [
-  /\bbank\b/i, /\bchase\b/i, /\bmorgan\b/i, /\bfinancial\b/i,
-  /\binsurance\b/i, /\bhospital\b/i, /\bhealthcare\b/i,
-  /\bdeloitte\b/i, /\baccenture\b/i, /\bcognizant\b/i,
+  /\bchase bank\b/i, /\bjp morgan\b/i, /\bbank of america\b/i, /\bwells fargo\b/i,
+  /\bciti bank\b/i, /\bcitigroup\b/i, /\bgoldman sachs\b/i, /\bmorgan stanley\b/i,
+  /\bdeloitte\b/i, /\baccenture\b/i, /\bcognizant\b/i, /\binfosys\b/i, /\bwipro\b/i,
   /\bgovernment\b/i, /\bfederal\b/i, /\bdepartment of\b/i,
+  /\bstaffing agency\b/i, /\brecruitment agency\b/i,
 ];
 
 export function isJunkDomain(domain: string): boolean {
   if (!domain.includes('.')) return true;
   if (/^\d+\.\d+\.\d+\.\d+$/.test(domain)) return true;
   const tld = domain.split('.').at(-1)!;
-  return tld.length > 6;
+  return tld.length > 10;
 }

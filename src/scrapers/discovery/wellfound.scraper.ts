@@ -5,120 +5,138 @@ import {
 import { browserManager } from '../../core/browser.manager.js';
 import { proxyManager } from '../../core/proxy.manager.js';
 import { logger } from '../../utils/logger.js';
-import { generateRunId, randomBetween } from '../../utils/random.js';
+import { generateRunId } from '../../utils/random.js';
+import { ScrapeDiagnostics } from '../../utils/scrape-diagnostics.js';
 
-/**
- * Wellfound (formerly AngelList Talent) scraper.
- * COMPLETELY FREE — no API key, no login required for job + company data.
- * Best source for early-stage US startups actively hiring.
- */
 export class WellfoundScraper implements Scraper {
   name = 'wellfound' as const;
 
   async isAvailable(): Promise<boolean> {
-    return true; // always available — no auth required
+    return true;
   }
 
   async scrape(query: ScrapeQuery): Promise<RawResult[]> {
-    const browserId = `wellfound-${generateRunId()}`;
+    const runId     = generateRunId();
+    const browserId = `wellfound-${runId}`;
     const results: RawResult[] = [];
-
-    logger.info({ keywords: query.keywords, limit: query.limit }, '[wellfound] Starting scrape');
+    const listingUrl = `https://wellfound.com/jobs?q=${encodeURIComponent(query.keywords)}&location=United+States`;
+    const diag = new ScrapeDiagnostics('wellfound', runId, listingUrl);
+    let page: Page | undefined;
 
     try {
       const proxy = proxyManager.getProxy();
-      const context = await browserManager.createContext(browserId, { proxy });
-      const page = await browserManager.newPage(context);
+      const context = await diag.stage('create_context', () => browserManager.createContext(browserId, { proxy }));
+      page = await browserManager.newPage(context);
 
-      const companies = await this.searchJobs(page, query);
-      logger.info({ found: companies.length }, '[wellfound] Companies found from job search');
+      const companies = await this.scrapeHiringSection(page, query, diag);
+      diag.recordItems(companies.length);
 
       for (const co of companies.slice(0, query.limit ?? 20)) {
         try {
-          const result = await this.scrapeCompanyPage(page, co);
+          const result = await this.fetchCompanyDetail(page, co);
           if (result) results.push(result);
-          await browserManager.humanDelay(2000, 5000);
+          await browserManager.humanDelay(1500, 3500);
         } catch (err) {
-          logger.error({ err, company: co.name }, '[wellfound] Company page failed — skipping');
+          logger.error({ err, company: co.name }, '[wellfound] Company detail failed — skipping');
         }
       }
 
+      const pageText = await page.innerText('body').catch(() => '');
+      const captcha  = await browserManager.detectCaptcha(page);
+      diag.classify({ captcha, pageText });
+
       await context.close();
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      diag.classify({ networkError: /timeout|ENOTFOUND|ECONNREFUSED|net::ERR/i.test(msg) });
       logger.error({ err }, '[wellfound] Fatal scrape error');
     } finally {
+      await diag.finalize(page);
       await browserManager.closeBrowser(browserId);
     }
 
-    logger.info({ results: results.length }, '[wellfound] Scrape complete');
     return results;
   }
 
-  // ── Job Search ──────────────────────────────────────────────────────────────
+  // ── Hiring Section ──────────────────────────────────────────────────────────
+  // Go directly to /jobs, wait for content, extract via JS eval (no CSS class guessing)
 
-  private async searchJobs(
+  private async scrapeHiringSection(
     page: Page,
-    query: ScrapeQuery
+    query: ScrapeQuery,
+    diag: ScrapeDiagnostics,
   ): Promise<Array<{ name: string; slug: string; wellfoundUrl: string }>> {
-    // Wellfound job search — filter by role keywords, US location
-    const techParam = (query.techStack ?? []).join(' ').trim() || query.keywords;
-    const encoded = encodeURIComponent(techParam);
-    const url = `https://wellfound.com/jobs?role=${encoded}&location=United+States`;
+    const q = encodeURIComponent(query.keywords);
+    const url = `https://wellfound.com/jobs?q=${q}&location=United+States`;
 
-    logger.debug({ url }, '[wellfound:search] Navigating to job search');
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await browserManager.humanDelay(2000, 4000);
+    await diag.stage('navigate', async () => {
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 45000 });
+      await browserManager.humanDelay(2000, 4000);
+    });
 
     if (await browserManager.detectCaptcha(page)) {
-      logger.warn('[wellfound:search] CAPTCHA detected on search page');
+      diag.classify({ captcha: true });
+      await diag.dump(page, 'captcha_on_listing');
       return [];
     }
 
-    await browserManager.humanScroll(page, 5);
+    await diag.stage('scroll', async () => {
+      await browserManager.humanScroll(page, 6);
+      await browserManager.humanDelay(1000, 2000);
+    });
 
-    // Extract company cards from job listing
-    const cards = await page.$$('[data-test="StartupResult"], .startup-link, [class*="startupCard"]');
-    logger.debug({ cards: cards.length }, '[wellfound:search] Company cards found');
+    // Extract company slugs via page.evaluate — immune to class name changes
+    const raw = await diag.stage('extract_slugs', () => page.evaluate((): Array<{ name: string; slug: string }> => {
+      const seen = new Set<string>();
+      const out: Array<{ name: string; slug: string }> = [];
 
-    const companies: Array<{ name: string; slug: string; wellfoundUrl: string }> = [];
-    const seen = new Set<string>();
-
-    for (const card of cards) {
-      try {
-        const anchor = await card.$('a[href*="/company/"]') ?? await card.$('a');
-        if (!anchor) continue;
-        const href = await anchor.getAttribute('href') ?? '';
-        const nameEl = await card.$('h2, h3, [class*="name"], [class*="title"]');
-        const name = (await nameEl?.textContent())?.trim() ?? '';
-        if (!name || !href.includes('/company/')) continue;
-
-        const slug = href.replace(/.*\/company\//, '').split('/')[0] ?? '';
-        if (!slug || seen.has(slug)) continue;
+      Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).forEach(a => {
+        const href = a.getAttribute('href') ?? '';
+        const m = href.match(/\/company\/([^/?#]+)/);
+        if (!m) return;
+        const slug = m[1]!;
+        if (seen.has(slug)) return;
         seen.add(slug);
 
-        companies.push({
-          name,
-          slug,
-          wellfoundUrl: `https://wellfound.com/company/${slug}`,
-        });
-      } catch (err) {
-        logger.debug({ err }, '[wellfound:search] Card parse error');
-      }
+        // Walk up to find the nearest container with meaningful text
+        let el: Element | null = a;
+        for (let i = 0; i < 5; i++) {
+          el = el?.parentElement ?? null;
+          if (!el) break;
+          const txt = el.textContent?.trim().split('\n')[0]?.trim() ?? '';
+          if (txt.length > 2 && txt.length < 80) {
+            out.push({ name: txt, slug });
+            return;
+          }
+        }
+        // Fallback: derive name from slug
+        out.push({ name: slug.replace(/-/g, ' '), slug });
+      });
+
+      return out;
+    }));
+
+    if (raw.length === 0) {
+      logger.warn({ url }, '[wellfound:hiring] Zero slugs extracted — selectors may be broken or page is empty');
     }
 
-    return companies;
+    return raw.map(({ name, slug }) => ({
+      name,
+      slug,
+      wellfoundUrl: `https://wellfound.com/company/${slug}`,
+    }));
   }
 
-  // ── Company Page ────────────────────────────────────────────────────────────
+  // ── Company Detail Page ─────────────────────────────────────────────────────
 
-  private async scrapeCompanyPage(
+  private async fetchCompanyDetail(
     page: Page,
-    co: { name: string; slug: string; wellfoundUrl: string }
+    co: { name: string; slug: string; wellfoundUrl: string },
   ): Promise<RawResult | null> {
     logger.info({ company: co.name, url: co.wellfoundUrl }, '[wellfound:company] Scraping page');
 
-    await page.goto(co.wellfoundUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
-    await browserManager.humanDelay(1500, 3000);
+    await page.goto(co.wellfoundUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await browserManager.humanDelay(1200, 2500);
 
     if (await browserManager.detectCaptcha(page)) {
       logger.warn({ company: co.name }, '[wellfound:company] CAPTCHA detected');
@@ -127,51 +145,100 @@ export class WellfoundScraper implements Scraper {
 
     await browserManager.humanScroll(page, 3);
 
-    // ── Company info ────────────────────────────────────────────────────────
-    const websiteEl  = await page.$('a[data-test="website"], a[href*="http"]:not([href*="wellfound"])');
-    const locationEl = await page.$('[data-test="location"], [class*="location"]');
-    const empEl      = await page.$('[data-test="employees"], [class*="employee"]');
-    const descEl     = await page.$('[data-test="about"], [class*="about"] p, [class*="description"] p');
-    const stageEl    = await page.$('[data-test="stage"], [class*="stage"]');
+    // Extract via evaluate — no fragile CSS class selectors
+    const data = await page.evaluate((): {
+      websiteUrl?: string; location?: string; empText?: string;
+      stage?: string; description?: string;
+      jobs: Array<{ title: string }>;
+      founders: Array<{ fullName: string; roleText: string; linkedinUrl?: string }>;
+    } => {
+      // Website: first outbound link that isn't wellfound
+      const websiteAnchor = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="http"]'))
+        .find(a => !a.href.includes('wellfound.com') && !a.href.includes('linkedin.com') && !a.href.includes('twitter.com'));
+      const websiteUrl = websiteAnchor?.href;
 
-    const websiteUrl  = await websiteEl?.getAttribute('href') ?? undefined;
-    const location    = (await locationEl?.textContent())?.trim() ?? '';
-    const empText     = (await empEl?.textContent())?.trim() ?? '';
-    const description = (await descEl?.textContent())?.trim() ?? undefined;
-    const stage       = (await stageEl?.textContent())?.trim() ?? undefined;
+      // Location, employees, stage, description — try common label patterns
+      const allText = Array.from(document.querySelectorAll('span, p, div'))
+        .map(el => el.textContent?.trim() ?? '')
+        .filter(t => t.length > 0 && t.length < 200);
 
-    const locParts = location.split(',').map(s => s.trim());
+      const location    = allText.find(t => /[A-Z][a-z]+(,\s*[A-Z]{2}|,\s*[A-Z][a-z]+)/.test(t) && t.length < 60) ?? '';
+      const empText     = allText.find(t => /\d+[-–]\d+\s*(employees?)?|\d+\+\s*employees?/i.test(t)) ?? '';
+      const stage       = allText.find(t => /seed|series [abc]|pre-seed|bootstrapped/i.test(t) && t.length < 40) ?? '';
+      const description = (document.querySelector('meta[name="description"]') as HTMLMetaElement | null)?.content ?? '';
+
+      // Jobs: any anchor with /jobs/ or job-title-ish text
+      const jobs = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/jobs/"]'))
+        .slice(0, 15)
+        .map(a => ({ title: a.textContent?.trim() ?? '' }))
+        .filter(j => j.title.length > 3);
+
+      // Founders / team: look for LinkedIn links with names nearby
+      const founders: Array<{ fullName: string; roleText: string; linkedinUrl?: string }> = [];
+      Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="linkedin.com/in/"]')).forEach(a => {
+        const container = a.closest('div, li') ?? a.parentElement;
+        const nameEl = container?.querySelector('h3, h4, strong, [class*="name"]');
+        const roleEl = container?.querySelector('p, span');
+        const fullName = nameEl?.textContent?.trim() ?? '';
+        if (!fullName || fullName.length < 3) return;
+        founders.push({
+          fullName,
+          roleText: roleEl?.textContent?.trim() ?? '',
+          linkedinUrl: a.href,
+        });
+      });
+
+      return { websiteUrl, location, empText, stage, description, jobs, founders };
+    });
+
     let domain: string | undefined;
-    if (websiteUrl) {
+    if (data.websiteUrl) {
       try {
-        domain = new URL(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`).hostname.replace(/^www\./, '');
-      } catch {
-        logger.debug({ slug: co.slug, websiteUrl }, '[wellfound] Malformed websiteUrl — skipping domain extraction');
-      }
-    }
-    if (!domain) {
-      // No real domain available — skip rather than invent a slug-based one
-      logger.debug({ slug: co.slug }, '[wellfound] No domain found — company will be filtered downstream');
+        domain = new URL(data.websiteUrl).hostname.replace(/^www\./, '');
+      } catch { /* bad URL */ }
     }
 
+    if (!domain) {
+      logger.debug({ slug: co.slug }, '[wellfound] No domain found — will filter downstream');
+    }
+
+    const locParts = (data.location ?? '').split(',').map(s => s.trim());
     const rawCompany: Partial<RawCompany> = {
       name:          co.name,
       domain,
-      websiteUrl,
-      description,
+      websiteUrl:    data.websiteUrl,
+      description:   data.description || undefined,
       hqCity:        locParts[0],
       hqState:       locParts[1],
       hqCountry:     'US',
-      employeeCount: parseEmployeeText(empText),
-      fundingStage:  mapStage(stage),
+      employeeCount: parseEmployeeText(data.empText ?? ''),
+      fundingStage:  mapStage(data.stage ?? ''),
     };
 
-    // ── Open jobs on the company page ───────────────────────────────────────
-    const jobs = domain ? await this.scrapeCompanyJobs(page, co.slug, domain) : [];
-    logger.info({ company: co.name, domain, jobs: jobs.length }, '[wellfound:company] Page scraped');
+    const jobs = domain
+      ? data.jobs.map(j => ({
+          companyDomain: domain!,
+          title:         j.title,
+          techTags:      extractTechFromTitle(j.title),
+          source:        'wellfound' as const,
+          sourceUrl:     `https://wellfound.com/company/${co.slug}/jobs`,
+          postedAt:      undefined,
+        }))
+      : [];
 
-    // ── Founders / team (visible without auth) ──────────────────────────────
-    const contacts = domain ? await this.scrapeFounders(page, domain) : [];
+    const contacts: Partial<RawContact>[] = data.founders.map(f => {
+      const parts = f.fullName.split(' ');
+      return {
+        fullName:     f.fullName,
+        firstName:    parts[0],
+        lastName:     parts[parts.length - 1],
+        role:         /ceo|founder|co-founder/i.test(f.roleText) ? 'Founder' as const : 'Unknown' as const,
+        linkedinUrl:  f.linkedinUrl,
+        companyDomain: domain,
+      };
+    });
+
+    logger.info({ company: co.name, domain, jobs: jobs.length, contacts: contacts.length }, '[wellfound:company] Page scraped');
 
     return {
       source: 'wellfound',
@@ -181,70 +248,7 @@ export class WellfoundScraper implements Scraper {
       scrapedAt: new Date(),
     };
   }
-
-  private async scrapeCompanyJobs(
-    page: Page,
-    slug: string,
-    domain: string
-  ): Promise<import('../../types/index.js').RawJob[]> {
-    const jobCards = await page.$$('[data-test="JobListing"], [class*="job-listing"], [class*="jobCard"]');
-    const jobs: import('../../types/index.js').RawJob[] = [];
-
-    for (const card of jobCards) {
-      const titleEl  = await card.$('h3, h4, [class*="title"], [class*="role"]');
-      const title    = (await titleEl?.textContent())?.trim();
-      if (!title) continue;
-
-      const tags = extractTechFromTitle(title);
-      jobs.push({
-        companyDomain: domain,
-        title,
-        techTags: tags,
-        source:   'wellfound',
-        sourceUrl: `https://wellfound.com/company/${slug}/jobs`,
-        postedAt:  undefined,
-      });
-    }
-
-    logger.debug({ slug, jobs: jobs.length }, '[wellfound:jobs] Jobs extracted');
-    return jobs;
-  }
-
-  private async scrapeFounders(
-    page: Page,
-    domain: string
-  ): Promise<Partial<import('../../types/index.js').RawContact>[]> {
-    const founderCards = await page.$$('[data-test="founder"], [class*="founder"], [class*="team-member"]');
-    const contacts: Partial<import('../../types/index.js').RawContact>[] = [];
-
-    for (const card of founderCards.slice(0, 5)) {
-      const nameEl  = await card.$('h3, h4, [class*="name"]');
-      const roleEl  = await card.$('[class*="title"], [class*="role"]');
-      const liEl    = await card.$('a[href*="linkedin.com"]');
-
-      const fullName    = (await nameEl?.textContent())?.trim();
-      const roleText    = (await roleEl?.textContent())?.trim() ?? '';
-      const linkedinUrl = await liEl?.getAttribute('href') ?? undefined;
-
-      if (!fullName) continue;
-      const parts = fullName.split(' ');
-
-      contacts.push({
-        fullName,
-        firstName:    parts[0],
-        lastName:     parts[parts.length - 1],
-        role:         /ceo|founder|co-founder/i.test(roleText) ? 'Founder' : 'Unknown',
-        linkedinUrl,
-        companyDomain: domain,
-      });
-    }
-
-    logger.debug({ domain, contacts: contacts.length }, '[wellfound:founders] Founders extracted');
-    return contacts;
-  }
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseEmployeeText(text: string): number | undefined {
   const match = text.match(/(\d+)\s*[-–]\s*(\d+)|(\d+)\+?/);
@@ -271,12 +275,20 @@ function extractTechFromTitle(title: string): string[] {
     [/node\.?js|nodejs/i, 'nodejs'], [/react/i, 'react'],
     [/next\.?js/i, 'nextjs'], [/nest\.?js/i, 'nestjs'],
     [/python/i, 'python'], [/typescript/i, 'typescript'],
+    [/javascript/i, 'javascript'],
     [/frontend|front.end/i, 'frontend'], [/backend|back.end/i, 'backend'],
     [/fullstack|full.stack/i, 'fullstack'], [/machine learning|ml/i, 'ml'],
     [/ai engineer|generative/i, 'generative-ai'], [/fastapi|django|flask/i, 'python'],
     [/graphql/i, 'graphql'], [/golang|go\b/i, 'golang'],
+    [/ruby|rails/i, 'ruby'], [/rust\b/i, 'rust'],
+    [/java\b/i, 'java'], [/swift|ios/i, 'ios'], [/android|kotlin/i, 'android'],
+    [/devops|sre|platform/i, 'devops'], [/cloud|aws|gcp|azure/i, 'cloud'],
+    [/mobile/i, 'mobile'], [/data engineer|analytics engineer/i, 'data-engineering'],
+    [/software engineer|software developer|swe\b/i, 'software'],
+    [/staff engineer|principal engineer|senior engineer/i, 'software'],
   ];
-  return patterns.filter(([re]) => re.test(title)).map(([, tag]) => tag);
+  const tags = [...new Set(patterns.filter(([re]) => re.test(title)).map(([, tag]) => tag))];
+  return tags.length ? tags : ['software'];
 }
 
 export const wellfoundScraper = new WellfoundScraper();

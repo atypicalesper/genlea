@@ -6,6 +6,7 @@ import { browserManager } from '../../core/browser.manager.js';
 import { proxyManager } from '../../core/proxy.manager.js';
 import { logger } from '../../utils/logger.js';
 import { generateRunId } from '../../utils/random.js';
+import { ScrapeDiagnostics } from '../../utils/scrape-diagnostics.js';
 
 /**
  * Indeed scraper — free job listings.
@@ -20,65 +21,64 @@ export class IndeedScraper implements Scraper {
   }
 
   async scrape(query: ScrapeQuery): Promise<RawResult[]> {
-    const browserId = `indeed-${generateRunId()}`;
+    const runId     = generateRunId();
+    const browserId = `indeed-${runId}`;
     const results: RawResult[] = [];
-
-    logger.info({ keywords: query.keywords, limit: query.limit }, '[indeed] Starting scrape');
+    const searchUrl = `https://www.indeed.com/jobs?q=${encodeURIComponent(query.keywords)}&l=United+States&sort=date&radius=0&fromage=14`;
+    const diag = new ScrapeDiagnostics('indeed', runId, searchUrl);
+    let page: Page | undefined;
 
     try {
       const proxy = proxyManager.getProxy();
       const contextOpts = proxy ? { proxy } : {};
-      const context = await browserManager.createContext(browserId, contextOpts);
-      const page = await browserManager.newPage(context);
+      const context = await diag.stage('create_context', () => browserManager.createContext(browserId, contextOpts));
+      page = await browserManager.newPage(context);
 
-      const jobGroups = await this.searchJobs(page, query);
-      logger.info({ companies: jobGroups.size }, '[indeed] Unique companies found');
+      const jobGroups = await this.searchJobs(page, query, diag);
+      diag.recordItems(jobGroups.size);
 
       for (const [companyName, jobs] of jobGroups) {
-        const domain = slugifyName(companyName);
-        const rawCompany: Partial<RawCompany> = {
-          name:      companyName,
-          domain,
-          hqCountry: 'US',
-        };
-
-        results.push({
-          source: 'indeed',
-          company: rawCompany,
-          jobs,
-          scrapedAt: new Date(),
-        });
+        const rawCompany: Partial<RawCompany> = { name: companyName, hqCountry: 'US' };
+        results.push({ source: 'indeed', company: rawCompany, jobs, scrapedAt: new Date() });
       }
+
+      const pageText = await page.innerText('body').catch(() => '');
+      const captcha  = await browserManager.detectCaptcha(page);
+      diag.classify({ captcha, pageText });
 
       await context.close();
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      diag.classify({ networkError: /timeout|ENOTFOUND|ECONNREFUSED|net::ERR/i.test(msg) });
       logger.error({ err }, '[indeed] Fatal scrape error');
     } finally {
+      await diag.finalize(page);
       await browserManager.closeBrowser(browserId);
     }
 
-    logger.info({ results: results.length }, '[indeed] Scrape complete');
     return results;
   }
 
   private async searchJobs(
     page: Page,
-    query: ScrapeQuery
+    query: ScrapeQuery,
+    diag: ScrapeDiagnostics,
   ): Promise<Map<string, RawJob[]>> {
-    // Build URL — Indeed job search for US, sorted by date
     const q = encodeURIComponent(query.keywords);
     const url = `https://www.indeed.com/jobs?q=${q}&l=United+States&sort=date&radius=0&fromage=14`;
 
-    logger.debug({ url }, '[indeed:search] Navigating');
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await browserManager.humanDelay(2000, 5000);
+    await diag.stage('navigate', async () => {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await browserManager.humanDelay(2000, 5000);
+    });
 
     if (await browserManager.detectCaptcha(page)) {
-      logger.warn('[indeed:search] CAPTCHA detected on search page');
+      diag.classify({ captcha: true });
+      await diag.dump(page, 'captcha_on_search');
       return new Map();
     }
 
-    await browserManager.humanScroll(page, 4);
+    await diag.stage('scroll', () => browserManager.humanScroll(page, 4));
 
     // Paginate through up to 3 pages
     const jobGroups = new Map<string, RawJob[]>();
@@ -108,7 +108,7 @@ export class IndeedScraper implements Scraper {
           const postedAt = parsePostedDate(dateText);
 
           const job: RawJob = {
-            companyDomain: slugifyName(companyName),
+            companyDomain: '',
             title,
             techTags,
             source:    'indeed',
@@ -140,31 +140,35 @@ export class IndeedScraper implements Scraper {
   }
 }
 
-function slugifyName(name: string): string {
-  return name.toLowerCase()
-    .replace(/\s+(inc|llc|ltd|corp|co\.?)\.?$/i, '')
-    .replace(/[^a-z0-9]+/g, '')
-    .slice(0, 40) + '.com';
-}
-
 function extractTechFromTitle(title: string): string[] {
   const patterns: [RegExp, string][] = [
     [/node\.?js|nodejs/i, 'nodejs'], [/react(?!.?native)/i, 'react'],
     [/react native/i, 'react-native'], [/next\.?js/i, 'nextjs'],
     [/nest\.?js/i, 'nestjs'], [/python/i, 'python'],
-    [/typescript/i, 'typescript'], [/frontend|front.end/i, 'frontend'],
-    [/backend|back.end/i, 'backend'], [/fullstack|full.stack/i, 'fullstack'],
+    [/typescript/i, 'typescript'], [/javascript/i, 'javascript'],
+    [/frontend|front.end/i, 'frontend'], [/backend|back.end/i, 'backend'],
+    [/fullstack|full.stack/i, 'fullstack'],
     [/machine learning|ml engineer/i, 'ml'],
     [/ai engineer|generative ai|llm/i, 'generative-ai'],
     [/fastapi|django|flask/i, 'python'], [/graphql/i, 'graphql'],
     [/golang|go\b/i, 'golang'], [/java\b/i, 'java'],
+    [/ruby|rails/i, 'ruby'], [/rust\b/i, 'rust'],
     [/swift|ios/i, 'ios'], [/android|kotlin/i, 'android'],
     [/devops|sre|platform engineer/i, 'devops'],
     [/data engineer|spark|airflow/i, 'data-engineering'],
+    [/cloud|aws|gcp|azure/i, 'cloud'],
+    [/mobile/i, 'mobile'],
+    // Generic engineering roles — company is hiring engineers regardless of stack
+    [/software engineer|software developer|swe\b/i, 'software'],
+    [/staff engineer|principal engineer|senior engineer/i, 'software'],
+    [/engineering manager|vp of eng|head of eng/i, 'software'],
+    [/cto\b/i, 'software'],
   ];
-  return [...new Set(
+  const tags = [...new Set(
     patterns.filter(([re]) => re.test(title)).map(([, tag]) => tag)
   )];
+  // Ensure at least one tag so the company isn't zero-scored on tech
+  return tags.length ? tags : ['software'];
 }
 
 function parsePostedDate(text: string): Date | undefined {

@@ -40,3 +40,6 @@ coverage/
 
 # Playwright browser cache
 .playwright/
+
+# Scrape diagnostics artifacts (HTML/PNG/JSON dumps)
+debug/

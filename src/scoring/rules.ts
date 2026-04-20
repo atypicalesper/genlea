@@ -3,7 +3,7 @@ import { Company, Contact, Job, ScoreBreakdown, FundingStage } from '../types/in
 const ENV_TARGET_TAGS = (process.env['TARGET_TECH_STACK'] ?? 'nodejs,typescript,python,react,nextjs,nestjs,frontend,backend,fullstack,ai,ml,generative-ai,fastapi')
   .split(',').map(t => t.trim());
 
-const ENV_HIGH_VALUE_INDUSTRIES = ['ai', 'saas', 'fintech', 'healthtech', 'edtech'];
+const ENV_HIGH_VALUE_INDUSTRIES: string[] = []; // no vertical filter — all industries qualify
 
 // ── 1. Dev Origin Concentration (0–30) ───────────────────────────────────────
 export function originRatioScore(company: Company): number {
@@ -88,14 +88,8 @@ export function companyFitScore(company: Company, highValueIndustries: string[] 
   };
   score += stageScores[company.fundingStage ?? 'Unknown'] ?? 0;
 
-  // Industry bonus — unknown industry (no data fetched yet) → grant bonus as failsafe
-  const companyIndustries = (company.industry ?? []).map(i => i.toLowerCase());
-  if (
-    companyIndustries.length === 0 ||
-    highValueIndustries.some(i => companyIndustries.some(ci => ci.includes(i)))
-  ) {
-    score += 3;
-  }
+  // Industry bonus — all industries qualify, always grant
+  score += 3;
 
   return Math.min(score, 15);
 }

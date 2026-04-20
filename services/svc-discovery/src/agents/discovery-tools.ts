@@ -44,8 +44,8 @@ WORKFLOW:
 Target company profile:
 - Size: 10–200 employees
 - Hiring: actively posting software engineering roles
-- Verticals: SaaS, AI/ML, Fintech, HealthTech, DevTools, B2B Software, EdTech, LegalTech, Cybersecurity, MarTech, HRTech, CleanTech, E-commerce Tech, Data & Analytics, PropTech, InsurTech, LogisticsTech, SupplyChainTech, AdTech, IoT, AR/VR, GovTech, RetailTech, TravelTech, FoodTech, ConstructionTech, AutoTech, DeepTech, Web3, AgriTech
-- Funding: pre-seed to Series C
+- Any industry or vertical — do not filter by sector
+- Funding: pre-seed to Series C (or bootstrapped if actively hiring engineers)
 
 Available sources: ${activeList}${skipNote}
 
@@ -55,7 +55,7 @@ Hiring status — set hiringInStack per company:
 
 Fallback order (if primary fails or returns < 5): explorium → wellfound → indeed → glassdoor → crunchbase → apollo → surelyremote
 
-Do NOT save large enterprises (banks, consulting firms, FAANG, >500 employees).`;
+Do NOT save: mega-enterprises (FAANG, Big 4 consulting, banks with >1000 employees), staffing agencies, or job boards themselves.`;
 }
 
 export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
@@ -189,11 +189,14 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
     // ── 3. Save companies ─────────────────────────────────────────────────────
     tool(
       withTiming('save_companies', async ({ source, hiringInStack: defaultHiring = true }) => {
-        const companies = pendingBySource.get(source);
-        if (!companies?.length) {
-          return JSON.stringify({ error: `No pending results for source "${source}". Call scrape_source first.`, saved: 0, runningTotal: totalSaved });
+        if (!pendingBySource.has(source)) {
+          return JSON.stringify({ error: `scrape_source("${source}") has not been called yet this run. Call it first.`, saved: 0, runningTotal: totalSaved });
         }
-        // Consume the pending batch
+        const companies = pendingBySource.get(source)!;
+        if (!companies.length) {
+          pendingBySource.delete(source);
+          return JSON.stringify({ saved: 0, watchlisted: 0, skipped: 0, total: 0, runningTotal: totalSaved, message: `${source} scraped 0 results — try a different source.` });
+        }
         pendingBySource.delete(source);
 
         let saved = 0, watchlisted = 0, skipped = 0;
