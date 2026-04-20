@@ -77,6 +77,7 @@ export const companyRepository = {
         openRoles: data.openRoles ?? [],
         sources: data.sources ?? [],
         score: data.score ?? 0,
+        disqualificationReason: data.disqualificationReason,
         status: data.status ?? 'pending',
         pipelineStatus: data.pipelineStatus ?? 'discovered',
         manuallyReviewed: false,
@@ -114,6 +115,7 @@ export const companyRepository = {
         ...(data.toleranceIncluded !== undefined && { toleranceIncluded: data.toleranceIncluded }),
         ...(data.lastEnrichedAt && { lastEnrichedAt: data.lastEnrichedAt }),
         ...(data.status !== undefined && { status: data.status }),
+        ...(data.disqualificationReason !== undefined && { disqualificationReason: data.disqualificationReason }),
         ...(data.pipelineStatus !== undefined && { pipelineStatus: data.pipelineStatus }),
         ...(data.manuallyReviewed !== undefined && { manuallyReviewed: data.manuallyReviewed }),
       },
@@ -144,6 +146,7 @@ export const companyRepository = {
     score: number,
     status: LeadStatus,
     scoreBreakdown: Company['scoreBreakdown'],
+    disqualificationReason?: string,
     openRoles?: string[],
   ): Promise<void> {
     const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
@@ -155,6 +158,13 @@ export const companyRepository = {
           scoreBreakdown,
           pipelineStatus: 'scored',
           updatedAt: new Date(),
+          disqualificationReason: {
+            $cond: {
+              if:   { $eq: ['$manuallyReviewed', true] },
+              then: '$disqualificationReason',
+              else: status === 'disqualified' ? disqualificationReason : '$$REMOVE',
+            },
+          },
           ...(openRoles !== undefined && { openRoles: [...new Set(openRoles)] }),
           status: {
             $cond: {
@@ -169,11 +179,11 @@ export const companyRepository = {
     logger.info({ id, score, status }, '[company.repository] Score updated');
   },
 
-  async disqualify(id: string): Promise<void> {
+  async disqualify(id: string, reason?: string): Promise<void> {
     const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
     await col.updateOne(
       { _id: new ObjectId(id), manuallyReviewed: { $ne: true } },
-      { $set: { status: 'disqualified', updatedAt: new Date() } }
+      { $set: { status: 'disqualified', disqualificationReason: reason, updatedAt: new Date() } }
     );
     logger.info({ id }, '[company.repository] Company disqualified');
   },

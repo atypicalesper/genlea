@@ -1,5 +1,5 @@
 import { ObjectId } from 'mongodb';
-import { ScrapeLog, ScrapeJobStatus, ScraperSource } from '../../types/index.js';
+import { ScrapeLog, ScrapeJobStatus, ScraperSource, ScrapeDiagnosticsSummary } from '../../types/index.js';
 import { getCollection, COLLECTIONS } from '../mongo.client.js';
 
 type ScrapeLogDoc = Omit<ScrapeLog, '_id'> & { _id?: ObjectId };
@@ -20,6 +20,7 @@ export const scrapeLogRepository = {
       jobsFound: number;
       errors: string[];
       durationMs: number;
+      diagnostics?: ScrapeDiagnosticsSummary;
     }
   ): Promise<void> {
     const col = getCollection<ScrapeLogDoc>(COLLECTIONS.SCRAPE_LOGS);

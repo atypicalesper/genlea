@@ -35,8 +35,10 @@ export function scoreCompany(
     breakdown.contactScore +
     breakdown.companyFitScore;
 
-  // Status is derived after the full numeric score so threshold changes stay centralized.
-  const status = resolveStatus(breakdown.total, thresholds);
+  const hardDisqualificationReason = getHardDisqualificationReason(input);
+  const status = hardDisqualificationReason ? 'disqualified' : resolveStatus(breakdown.total, thresholds);
+  const disqualificationReason = hardDisqualificationReason
+    ?? (status === 'disqualified' ? deriveDisqualificationReason(input, breakdown, thresholds?.cold) : undefined);
 
   logger.debug(
     {
@@ -54,5 +56,63 @@ export function scoreCompany(
     '[scorer] Company scored'
   );
 
-  return { score: breakdown.total, status, breakdown };
+  return { score: breakdown.total, status, breakdown, disqualificationReason };
+}
+
+function deriveDisqualificationReason(
+  input: ScoringInput,
+  breakdown: ScoreBreakdown,
+  coldThreshold = 20,
+): string {
+  const { company, contacts, jobs } = input;
+  const activeJobs = jobs.filter(job => job.isActive);
+
+  if (activeJobs.length === 0 || breakdown.jobFreshnessScore <= 0) {
+    return 'No recent active engineering hiring signal was found.';
+  }
+  if ((company.originRatio ?? 0) <= 0 && breakdown.originRatioScore <= 0) {
+    return 'No India-team signal was verified from collected employee data.';
+  }
+  if (breakdown.techStackScore <= 0) {
+    return 'No matching target tech stack signal was found.';
+  }
+  if (contacts.length === 0 && breakdown.contactScore <= 0) {
+    return 'No relevant contacts were found for outreach.';
+  }
+  if ((company.employeeCount ?? 0) > 1000) {
+    return 'Company is above the target size range for outbound pitching.';
+  }
+
+  return `Lead score ${breakdown.total} fell below the qualification threshold of ${coldThreshold}.`;
+}
+
+function getHardDisqualificationReason(input: ScoringInput): string | undefined {
+  const { company, jobs } = input;
+  const activeJobs = jobs.filter(job => job.isActive);
+  const hqCountry = company.hqCountry?.toLowerCase() ?? '';
+  const foundedYear = company.foundedYear;
+  const companyAge = foundedYear ? new Date().getFullYear() - foundedYear : undefined;
+  const hasVerifiedFunding =
+    (!!company.fundingStage && !['Unknown', 'Bootstrapped'].includes(company.fundingStage))
+    || ((company.fundingTotalUsd ?? 0) > 0);
+
+  if (hqCountry.includes('india')) {
+    return 'Company is India-headquartered, which is outside the target market.';
+  }
+  if ((company.employeeCount ?? 0) > 1000) {
+    return 'Company is too large and looks more like a big enterprise than a target startup.';
+  }
+  if (companyAge !== undefined && companyAge > 12) {
+    return 'Company is older than the target “relatively new” startup profile.';
+  }
+  if (!hasVerifiedFunding) {
+    return 'Funding was not verified, so the company does not meet the funded-company target.';
+  }
+  if (activeJobs.length === 0) {
+    return 'No active development or engineering hiring signal was found.';
+  }
+  if ((company.originDevCount ?? 0) <= 0 || (company.originRatio ?? 0) <= 0) {
+    return 'No Indian-origin employee signal was verified for this company.';
+  }
+  return undefined;
 }

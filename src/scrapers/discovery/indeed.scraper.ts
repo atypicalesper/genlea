@@ -1,6 +1,6 @@
 import { Page } from 'playwright';
 import {
-  Scraper, ScrapeQuery, RawResult, RawCompany, RawJob,
+  Scraper, ScrapeQuery, RawResult, RawCompany, RawJob, ScrapeDiagnosticsSummary,
 } from '../../types/index.js';
 import { browserManager } from '../../core/browser.manager.js';
 import { proxyManager } from '../../core/proxy.manager.js';
@@ -15,9 +15,14 @@ import { ScrapeDiagnostics } from '../../utils/scrape-diagnostics.js';
  */
 export class IndeedScraper implements Scraper {
   name = 'indeed' as const;
+  private lastDiagnostics?: ScrapeDiagnosticsSummary;
 
   async isAvailable(): Promise<boolean> {
     return true; // always available — no auth required
+  }
+
+  getLastDiagnostics(): ScrapeDiagnosticsSummary | undefined {
+    return this.lastDiagnostics;
   }
 
   async scrape(query: ScrapeQuery): Promise<RawResult[]> {
@@ -54,7 +59,7 @@ export class IndeedScraper implements Scraper {
       diag.classify({ networkError: /timeout|ENOTFOUND|ECONNREFUSED|net::ERR/i.test(msg) });
       logger.error({ err }, '[indeed] Fatal scrape error');
     } finally {
-      await diag.finalize(page);
+      this.lastDiagnostics = await diag.finalize(page);
       await browserManager.closeBrowser(browserId);
     }
 
@@ -89,6 +94,10 @@ export class IndeedScraper implements Scraper {
     for (let p = 0; p < 3; p++) {
       const cards = await page.$$('[class*="job_seen_beacon"], [data-testid="job-title"]');
       logger.debug({ page: p + 1, cards: cards.length }, '[indeed:search] Job cards found');
+      if (p === 0 && cards.length === 0) {
+        const pageText = await page.innerText('body').catch(() => '');
+        diag.classify({ selectorMismatch: !!pageText, pageText });
+      }
 
       for (const card of cards) {
         if ([...jobGroups.values()].flat().length >= limit) break;
@@ -103,6 +112,8 @@ export class IndeedScraper implements Scraper {
           const companyName = (await companyEl?.textContent())?.trim();
           const location    = (await locationEl?.textContent())?.trim() ?? '';
           const dateText    = (await dateEl?.textContent())?.trim() ?? '';
+          const jobHref     = await titleEl?.getAttribute('href');
+          const companyHref = await companyEl?.getAttribute('href');
 
           if (!title || !companyName) continue;
 
@@ -115,7 +126,8 @@ export class IndeedScraper implements Scraper {
             title,
             techTags,
             source:    'indeed',
-            sourceUrl: undefined,
+            sourceUrl: absolutizeUrl(jobHref, 'https://www.indeed.com'),
+            applyUrl:  absolutizeUrl(companyHref, 'https://www.indeed.com'),
             postedAt,
           };
 
@@ -189,3 +201,12 @@ function parsePostedDate(text: string): Date | undefined {
 }
 
 export const indeedScraper = new IndeedScraper();
+
+function absolutizeUrl(href: string | null | undefined, base: string): string | undefined {
+  if (!href) return undefined;
+  try {
+    return new URL(href, base).toString();
+  } catch {
+    return undefined;
+  }
+}

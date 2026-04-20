@@ -36,7 +36,7 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     );
 
     // ── Score ────────────────────────────────────────────────────────────────
-    const { score, status, breakdown } = scoreCompany(
+    const { score, status, breakdown, disqualificationReason } = scoreCompany(
       { company, contacts, jobs },
       {
         // All runtime tuning comes from settings so scoring stays reproducible across workers.
@@ -62,7 +62,7 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     }
 
     // ── Persist score ─────────────────────────────────────────────────────────
-    await companyRepository.updateScore(companyId, score, status, breakdown);
+    await companyRepository.updateScore(companyId, score, status, breakdown, disqualificationReason);
 
     const durationMs = Date.now() - startedAt;
     logger.info(

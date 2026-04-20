@@ -1,9 +1,9 @@
 import type { LeadStatus } from '../types/index.js';
 
 const ENV_HOT_VERIFIED_THRESHOLD = parseInt(process.env['LEAD_SCORE_HOT_VERIFIED_THRESHOLD'] ?? '80', 10);
-const ENV_HOT_THRESHOLD          = parseInt(process.env['LEAD_SCORE_HOT_THRESHOLD']           ?? '55', 10);
-const ENV_WARM_THRESHOLD         = parseInt(process.env['LEAD_SCORE_WARM_THRESHOLD']          ?? '38', 10);
-const ENV_COLD_THRESHOLD         = parseInt(process.env['LEAD_SCORE_COLD_THRESHOLD']          ?? '20', 10);
+const ENV_HOT_THRESHOLD          = parseInt(process.env['LEAD_SCORE_HOT_THRESHOLD']           ?? '65', 10);
+const ENV_WARM_THRESHOLD         = parseInt(process.env['LEAD_SCORE_WARM_THRESHOLD']          ?? '50', 10);
+const ENV_COLD_THRESHOLD         = parseInt(process.env['LEAD_SCORE_COLD_THRESHOLD']          ?? '35', 10);
 
 export function resolveStatus(
   score: number,

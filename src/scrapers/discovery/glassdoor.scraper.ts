@@ -1,11 +1,12 @@
 import { Page } from 'playwright';
 import {
-  Scraper, ScrapeQuery, RawResult, RawCompany, RawJob,
+  Scraper, ScrapeQuery, RawResult, RawCompany, RawJob, ScrapeDiagnosticsSummary,
 } from '../../types/index.js';
 import { browserManager } from '../../core/browser.manager.js';
 import { proxyManager } from '../../core/proxy.manager.js';
 import { logger } from '../../utils/logger.js';
-import { generateRunId, randomBetween } from '../../utils/random.js';
+import { generateRunId } from '../../utils/random.js';
+import { ScrapeDiagnostics } from '../../utils/scrape-diagnostics.js';
 
 /**
  * Glassdoor scraper — free job listings + company data.
@@ -14,23 +15,33 @@ import { generateRunId, randomBetween } from '../../utils/random.js';
  */
 export class GlassdoorScraper implements Scraper {
   name = 'glassdoor' as const;
+  private lastDiagnostics?: ScrapeDiagnosticsSummary;
 
   async isAvailable(): Promise<boolean> {
     return true; // always available — no auth required
   }
 
+  getLastDiagnostics(): ScrapeDiagnosticsSummary | undefined {
+    return this.lastDiagnostics;
+  }
+
   async scrape(query: ScrapeQuery): Promise<RawResult[]> {
-    const browserId = `glassdoor-${generateRunId()}`;
+    const runId = generateRunId();
+    const browserId = `glassdoor-${runId}`;
     const results: RawResult[] = [];
+    const searchUrl = `https://www.glassdoor.com/Job/jobs.htm?sc.keyword=${encodeURIComponent(query.keywords)}&locT=N&locId=1&jobType=fulltime`;
+    const diag = new ScrapeDiagnostics('glassdoor', runId, searchUrl);
+    let page: Page | undefined;
 
     logger.info({ keywords: query.keywords, limit: query.limit }, '[glassdoor] Starting scrape');
 
     try {
       const proxy = proxyManager.getProxy();
-      const context = await browserManager.createContext(browserId, proxy ? { proxy } : {});
-      const page    = await browserManager.newPage(context);
+      const context = await diag.stage('create_context', () => browserManager.createContext(browserId, proxy ? { proxy } : {}));
+      page = await browserManager.newPage(context);
 
-      const listings = await this.searchJobs(page, query);
+      const listings = await this.searchJobs(page, query, diag);
+      diag.recordItems(listings.length);
       logger.info({ found: listings.length }, '[glassdoor] Job listings found');
 
       // Glassdoor is scraped as many job cards first, then collapsed into one company result per employer.
@@ -39,12 +50,12 @@ export class GlassdoorScraper implements Scraper {
       for (const listing of listings) {
         const key = listing.companyName.toLowerCase().trim();
         // This slug is only a temporary identity; discovery may later demote unresolved hosts to watchlist.
-        const domain = slugifyName(listing.companyName);
         if (!byCompany.has(key)) {
           byCompany.set(key, {
             company: {
               name:          listing.companyName,
-              domain,
+              websiteUrl:    listing.websiteUrl,
+              identityHintUrls: listing.identityHintUrls,
               hqCity:        listing.city,
               hqState:       listing.state,
               hqCountry:     'US',
@@ -55,10 +66,12 @@ export class GlassdoorScraper implements Scraper {
           });
         }
         byCompany.get(key)!.jobs.push({
-          companyDomain: domain,
+          companyDomain: '',
           title:         listing.jobTitle,
           techTags:      listing.techTags,
           source:        'glassdoor',
+          sourceUrl:     listing.jobUrl,
+          applyUrl:      listing.companyUrl,
           postedAt:      listing.postedAt,
         });
       }
@@ -74,9 +87,18 @@ export class GlassdoorScraper implements Scraper {
       }
 
       await context.close();
+      const pageText = await page.innerText('body').catch(() => '');
+      const captcha = await browserManager.detectCaptcha(page);
+      diag.classify({ captcha, pageText });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      diag.classify({
+        networkError: /ENOTFOUND|ECONNREFUSED|net::ERR/i.test(msg),
+        timeout: /timeout/i.test(msg),
+      });
       logger.error({ err }, '[glassdoor] Fatal scrape error');
     } finally {
+      this.lastDiagnostics = await diag.finalize(page);
       await browserManager.closeBrowser(browserId);
     }
 
@@ -86,17 +108,21 @@ export class GlassdoorScraper implements Scraper {
 
   // ── Job search ────────────────────────────────────────────────────────────
 
-  private async searchJobs(page: Page, query: ScrapeQuery): Promise<GlassdoorListing[]> {
+  private async searchJobs(page: Page, query: ScrapeQuery, diag: ScrapeDiagnostics): Promise<GlassdoorListing[]> {
     const encoded = encodeURIComponent(query.keywords);
     const url = `https://www.glassdoor.com/Job/jobs.htm?sc.keyword=${encoded}&locT=N&locId=1&jobType=fulltime`;
 
     logger.debug({ url }, '[glassdoor] Navigating to job search');
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await browserManager.humanDelay(2000, 5000);
+    await diag.stage('navigate', async () => {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await browserManager.humanDelay(2000, 5000);
+    });
 
     if (await browserManager.detectCaptcha(page)) {
       // Glassdoor often presents blocks as soft-empty pages, so log this explicitly.
       logger.warn('[glassdoor] CAPTCHA detected — returning empty');
+      diag.classify({ captcha: true });
+      await diag.dump(page, 'captcha_on_search');
       return [];
     }
 
@@ -105,7 +131,7 @@ export class GlassdoorScraper implements Scraper {
       .click().catch(() => {});
     await browserManager.humanDelay(500, 1000);
 
-    await browserManager.humanScroll(page, 4);
+    await diag.stage('scroll', () => browserManager.humanScroll(page, 4));
 
     const limit = query.limit ?? 25;
     const listings: GlassdoorListing[] = [];
@@ -114,6 +140,10 @@ export class GlassdoorScraper implements Scraper {
     while (listings.length < limit && attempts < 3) {
       const cards = page.locator('[data-test="jobListing"], .react-job-listing, li.JobsList_jobListItem__wjTHv');
       const count = await cards.count();
+      if (attempts === 0 && count === 0) {
+        const pageText = await page.innerText('body').catch(() => '');
+        diag.classify({ selectorMismatch: !!pageText, pageText });
+      }
 
       for (let i = 0; i < count && listings.length < limit; i++) {
         try {
@@ -144,10 +174,14 @@ export class GlassdoorScraper implements Scraper {
     const locationEl   = card.locator('[data-test="emp-location"], .JobCard_location__rCz3x, .location').first();
     const salaryEl     = card.locator('[data-test="detailSalary"], .JobCard_salaryEstimate__arV5J').first();
     const sizeEl       = card.locator('.employerSize, [data-test="employer-size"]').first();
+    const companyWebsiteEl = card.locator('a[href*="http"]:not([href*="glassdoor.com"])').first();
 
     const jobTitle   = ((await jobTitleEl.textContent().catch(() => '')) ?? '').trim();
     const companyName = ((await companyEl.textContent().catch(() => '')) ?? '').trim();
     const location   = ((await locationEl.textContent().catch(() => '')) ?? '').trim();
+    const jobUrl = absolutizeUrl(await jobTitleEl.getAttribute('href').catch(() => null), 'https://www.glassdoor.com');
+    const companyUrl = absolutizeUrl(await companyEl.getAttribute('href').catch(() => null), 'https://www.glassdoor.com');
+    const websiteUrl = absolutizeUrl(await companyWebsiteEl.getAttribute('href').catch(() => null), 'https://www.glassdoor.com');
 
     if (!jobTitle || !companyName) return null;
     // This keeps the discovery funnel US-focused even when Glassdoor mixes in global cards.
@@ -166,6 +200,10 @@ export class GlassdoorScraper implements Scraper {
       employeeCount: parseEmployeeCount(sizeText),
       industry:      '',
       techTags:      extractTechTags(jobTitle + ' ' + salaryText),
+      jobUrl,
+      companyUrl,
+      websiteUrl,
+      identityHintUrls: [websiteUrl, companyUrl, jobUrl].filter(Boolean) as string[],
       postedAt:      undefined, // Glassdoor card doesn't expose post date — leave blank
     };
   }
@@ -189,6 +227,10 @@ interface GlassdoorListing {
   employeeCount: number | undefined;
   industry:      string;
   techTags:      string[];
+  jobUrl?:       string;
+  companyUrl?:   string;
+  websiteUrl?:   string;
+  identityHintUrls: string[];
   postedAt?:     Date;
 }
 
@@ -234,3 +276,12 @@ function extractTechTags(text: string): string[] {
 }
 
 export const glassdoorScraper = new GlassdoorScraper();
+
+function absolutizeUrl(href: string | null | undefined, base: string): string | undefined {
+  if (!href) return undefined;
+  try {
+    return new URL(href, base).toString();
+  } catch {
+    return undefined;
+  }
+}

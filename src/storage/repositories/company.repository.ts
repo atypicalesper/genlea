@@ -87,6 +87,7 @@ export const companyRepository = {
         openRoles: data.openRoles ?? [],
         sources: data.sources ?? [],
         score: data.score ?? 0,
+        disqualificationReason: data.disqualificationReason,
         status: data.status ?? 'pending',
         pipelineStatus: data.pipelineStatus ?? 'discovered',
         manuallyReviewed: false,
@@ -129,6 +130,7 @@ export const companyRepository = {
         ...(data.lastEnrichedAt && { lastEnrichedAt: data.lastEnrichedAt }),
         // Manual status overrides — only written when explicitly passed (status API, dashboard)
         ...(data.status !== undefined && { status: data.status }),
+        ...(data.disqualificationReason !== undefined && { disqualificationReason: data.disqualificationReason }),
         ...(data.pipelineStatus !== undefined && { pipelineStatus: data.pipelineStatus }),
         ...(data.manuallyReviewed !== undefined && { manuallyReviewed: data.manuallyReviewed }),
       },
@@ -161,7 +163,8 @@ export const companyRepository = {
     id: string,
     score: number,
     status: LeadStatus,
-    scoreBreakdown: Company['scoreBreakdown']
+    scoreBreakdown: Company['scoreBreakdown'],
+    disqualificationReason?: string,
   ): Promise<void> {
     const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
     // Preserve manual decisions from the UI while still refreshing the numeric score/breakdown.
@@ -173,6 +176,13 @@ export const companyRepository = {
           scoreBreakdown,
           pipelineStatus: 'scored',
           updatedAt: new Date(),
+          disqualificationReason: {
+            $cond: {
+              if:   { $eq: ['$manuallyReviewed', true] },
+              then: '$disqualificationReason',
+              else: status === 'disqualified' ? disqualificationReason : '$$REMOVE',
+            },
+          },
           status: {
             $cond: {
               if:   { $eq: ['$manuallyReviewed', true] },
@@ -187,11 +197,11 @@ export const companyRepository = {
   },
 
   /** Disqualify a company — respects manuallyReviewed flag */
-  async disqualify(id: string): Promise<void> {
+  async disqualify(id: string, reason?: string): Promise<void> {
     const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
     await col.updateOne(
       { _id: new ObjectId(id), manuallyReviewed: { $ne: true } },
-      { $set: { status: 'disqualified', updatedAt: new Date() } }
+      { $set: { status: 'disqualified', disqualificationReason: reason, updatedAt: new Date() } }
     );
     logger.info({ id }, '[company.repository] Company disqualified');
   },

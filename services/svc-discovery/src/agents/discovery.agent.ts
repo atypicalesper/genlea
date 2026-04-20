@@ -19,7 +19,7 @@ export async function runDiscoveryAgent(job: DiscoveryJobData): Promise<void> {
   const safeLocation = query.location ? sanitizeAgentInput(query.location, 100) : undefined;
 
   const userMessage = `
-Find tech companies for B2B lead generation.
+Find companies that fit this outreach ICP.
 
 Primary source : ${source}
 Keywords       : ${safeKeywords}
@@ -28,7 +28,8 @@ Target         : ≥15 companies
 
 Start with get_discovery_state to check current progress. If the goal is not met, scrape ${source} first.
 After each scrape_source, call save_companies with source="${source}" — do NOT pass company data back, just the source name.
-Accept any industry. Size 10–200, actively hiring engineers, pre-seed to Series C or bootstrapped.
+Focus on funded, relatively new, non-India companies that are hiring development or engineering roles.
+Avoid big MNCs, avoid companies above 1000 employees, and prefer companies likely to already employ Indian-origin engineers.
 `.trim();
 
   const agentName     = `discovery:${source}:${runId.slice(0, 8)}`;

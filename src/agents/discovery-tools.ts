@@ -12,11 +12,15 @@ import { logger }                      from '../utils/logger.js';
 import { getAvailableSources }         from '../core/scheduler.js';
 import { SCRAPERS, BLOCKED_DOMAINS, BLOCKED_NAME_PATTERNS, isJunkDomain } from '../discovery/blocklists.js';
 import { resolvesRealDomain }          from '../discovery/domain-validator.js';
-import { resolveNameToDomain }         from '../discovery/domain-resolver.js';
-import type { DiscoveryJobData }        from '../types/index.js';
+import { resolveDomainFromHintUrls, resolveNameToDomain } from '../discovery/domain-resolver.js';
+import type { DiscoveryJobData, RawResult } from '../types/index.js';
 
 const slugifyName = (s: string): string =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'unknown';
+
+type PendingDiscoveryCompany = Record<string, unknown> & {
+  _candidateUrls?: string[];
+};
 
 export function buildSystemPrompt(): string {
   const available  = getAvailableSources();
@@ -27,41 +31,46 @@ export function buildSystemPrompt(): string {
     ? `\nUnavailable sources (no credentials — do NOT call these): ${skipList.join(', ')}`
     : '';
 
-  return `You are a B2B lead generation discovery agent for a software agency that sells offshore Indian developer talent to US/UK/CA/AU/EU tech companies.
+  return `You are a B2B lead discovery agent for a software agency pitching software development services.
 
-GOAL: Find and save ≥15 valid tech companies matching the query. Stop as soon as the goal is met.
+GOAL: Find and save at least 15 companies that match this ICP:
+- funded startup or scale-up
+- relatively new company; prefer founded in the last 12 years
+- not a big MNC or enterprise; avoid companies above 1000 employees
+- not India-based; prefer US/UK/CA/AU/EU companies
+- actively hiring software engineering or development roles
+- likely to already employ Indian-origin engineers, or at minimum look promising enough for enrichment to verify that signal
 
 WORKFLOW:
-1. Call get_discovery_state — check if goal is already met before scraping anything.
-2. If not met, call scrape_source for the primary source.
-3. After each scrape_source call, immediately call save_companies with source="<same source name>". Do NOT pass company data — just the source name.
-4. Call get_discovery_state again — if goalMet: true, stop.
-5. If not met and < 5 results were found from primary, try 1–2 fallback sources.
-6. Never try the same source twice (get_discovery_state.sourcesTried shows what's been done).
-
-Target company profile:
-- Size: 10–200 employees
-- Hiring: actively posting software engineering roles
-- Any industry or vertical — do not filter by sector
-- Funding: pre-seed to Series C (or bootstrapped if actively hiring engineers)
+1. Call get_discovery_state first.
+2. Scrape the primary source.
+3. Immediately call save_companies with the same source.
+4. Check get_discovery_state again.
+5. If results are thin, try 1-2 fallback sources.
+6. Never try the same source twice.
 
 Available sources: ${activeList}${skipNote}
 
-Hiring status:
-- Job board / ATS sources (greenhouse, lever, ashby, workable, wellfound, linkedin, indeed, glassdoor, surelyremote): companies ARE hiring → hiringInStack: true
-- Database sources (explorium, crunchbase, apollo): hiring unknown → hiringInStack: false
+Interpret hiring like this:
+- job board / ATS sources mean the company is actively hiring engineers
+- database sources mean hiring is unknown until later enrichment
 
-Source preference (most reliable first — ATS JSON APIs never get CAPTCHA'd):
+Source preference:
 greenhouse → lever → ashby → workable → explorium → wellfound → indeed → glassdoor → crunchbase → apollo → surelyremote
 
-Do NOT save: mega-enterprises (FAANG, Big 4 consulting, banks with >1000 employees), staffing agencies, or job boards themselves.`;
+Do NOT save:
+- big enterprises, FAANG, banks, consulting giants, or companies above 1000 employees
+- India-headquartered companies
+- staffing agencies, outsourcing vendors, and job boards
+- obviously old or legacy non-startup companies
+- companies with no engineering hiring signal at all`;
 }
 
 export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
   const availableSources = [...getAvailableSources()].filter(s => s in SCRAPERS).join(', ');
 
   const triedSources    = new Set<string>();
-  const pendingBySource = new Map<string, Array<Record<string, unknown>>>();
+  const pendingBySource = new Map<string, PendingDiscoveryCompany[]>();
   let totalSaved = 0;
 
   return [
@@ -128,8 +137,10 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
 
         try {
           const rawResults = await scraper.scrape({ keywords, location, limit });
+          const diagnostics = scraper.getLastDiagnostics?.();
           const { companies } = normalizer.processResults(rawResults);
           const deduped = deduplicateCompanies(companies);
+          const identityHints = collectIdentityHints(rawResults);
 
           const filtered = deduped.filter(c => {
             if (!c.name) return false;
@@ -140,7 +151,17 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
             return true;
           });
 
-          pendingBySource.set(source, filtered.map(c => ({ ...c, source })));
+          pendingBySource.set(
+            source,
+            filtered.map(c => {
+              const urls = identityHints.get(normalizeNameKey(c.name));
+              return {
+                ...c,
+                source,
+                _candidateUrls: urls,
+              };
+            }),
+          );
 
           logger.info({ source, raw: rawResults.length, filtered: filtered.length }, '[discovery-tools] Scraped');
 
@@ -149,6 +170,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
             rawCount:      rawResults.length,
             filteredCount: filtered.length,
             preview:       filtered.slice(0, 3).map(c => ({ name: c.name, domain: c.domain, employees: c.employeeCount })),
+            diagnostics,
             message:       `${filtered.length} companies ready. Call save_companies with source="${source}".`,
           });
         } catch (err) {
@@ -188,24 +210,14 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
         }
         pendingBySource.delete(source);
 
-        await Promise.all(companies.map(async co => {
-          if (!co['domain'] && co['name']) {
-            const resolved = await resolveNameToDomain(co['name'] as string);
-            if (resolved) {
-              if (BLOCKED_DOMAINS.has(resolved) || isJunkDomain(resolved)) return;
-              co['domain'] = resolved;
-              logger.debug({ name: co['name'], domain: resolved }, '[discovery-tools] Resolved name→domain via Clearbit');
-            }
-          }
-        }));
-
-        let saved = 0, watchlisted = 0, skipped = 0, resolvedCount = 0;
+        let saved = 0, watchlisted = 0, skipped = 0, resolvedCount = 0, urlResolved = 0;
 
         for (const co of companies) {
           const name = co['name'] as string | undefined;
           if (!name) { skipped++; continue; }
 
-          let domain = normalizeDomain((co['domain'] as string) ?? '');
+          const resolved = await resolveDiscoveryDomain(name, co);
+          let domain = resolved.domain;
           let domainResolved = true;
           if (!domain) {
             // Preserve unresolved companies so discovery can still surface them for manual review.
@@ -217,6 +229,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
             domainResolved = false;
           } else {
             resolvedCount++;
+            if (resolved.method === 'hint_url') urlResolved++;
           }
 
           // Auto-enrichment only makes sense once we have a trustworthy domain to hand downstream.
@@ -275,8 +288,8 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
         }
 
         totalSaved += saved;
-        logger.info({ source, saved, watchlisted, skipped, nameResolved: resolvedCount, runningTotal: totalSaved }, '[discovery-tools] Companies saved');
-        return JSON.stringify({ saved, watchlisted, skipped, nameResolved: resolvedCount, total: companies.length, runningTotal: totalSaved });
+        logger.info({ source, saved, watchlisted, skipped, nameResolved: resolvedCount, urlResolved, runningTotal: totalSaved }, '[discovery-tools] Companies saved');
+        return JSON.stringify({ saved, watchlisted, skipped, nameResolved: resolvedCount, urlResolved, total: companies.length, runningTotal: totalSaved });
       },
       {
         name:        'save_companies',
@@ -288,4 +301,62 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
       },
     ),
   ];
+}
+
+async function resolveDiscoveryDomain(
+  name: string,
+  company: PendingDiscoveryCompany,
+): Promise<{ domain: string; method: 'existing' | 'hint_url' | 'name_lookup' } | { domain: null; method: 'unresolved' }> {
+  const existing = normalizeDomain(String(company['domain'] ?? ''));
+  if (existing) return { domain: existing, method: 'existing' };
+
+  const hintUrls = dedupeStrings([
+    company['websiteUrl'],
+    company['linkedinUrl'],
+    ...(company._candidateUrls ?? []),
+  ]);
+  if (hintUrls.length) {
+    const fromHints = await resolveDomainFromHintUrls(hintUrls);
+    if (fromHints && !BLOCKED_DOMAINS.has(fromHints) && !isJunkDomain(fromHints)) {
+      logger.debug({ name, domain: fromHints }, '[discovery-tools] Resolved domain from URL hints');
+      return { domain: fromHints, method: 'hint_url' };
+    }
+  }
+
+  const resolved = await resolveNameToDomain(name);
+  if (resolved && !BLOCKED_DOMAINS.has(resolved) && !isJunkDomain(resolved)) {
+    logger.debug({ name, domain: resolved }, '[discovery-tools] Resolved name→domain via Clearbit');
+    return { domain: resolved, method: 'name_lookup' };
+  }
+
+  return { domain: null, method: 'unresolved' };
+}
+
+function collectIdentityHints(rawResults: RawResult[]): Map<string, string[]> {
+  const hints = new Map<string, Set<string>>();
+  for (const result of rawResults) {
+    const key = normalizeNameKey(result.company?.name);
+    if (!key) continue;
+    const urls = [
+      result.company?.websiteUrl,
+      result.company?.linkedinUrl,
+      result.company?.crunchbaseUrl,
+      ...(result.company?.identityHintUrls ?? []),
+      ...(result.jobs?.flatMap(job => [job.sourceUrl, job.applyUrl]) ?? []),
+      ...(result.contacts?.flatMap(contact => [contact.linkedinUrl, contact.twitterUrl]) ?? []),
+    ];
+    for (const url of dedupeStrings(urls)) {
+      if (!hints.has(key)) hints.set(key, new Set());
+      hints.get(key)!.add(url);
+    }
+  }
+  return new Map([...hints.entries()].map(([key, urls]) => [key, [...urls]]));
+}
+
+function dedupeStrings(values: unknown[]): string[] {
+  return [...new Set(values.map(v => typeof v === 'string' ? v.trim() : '').filter(Boolean))];
+}
+
+function normalizeNameKey(name: unknown): string {
+  return typeof name === 'string' ? name.trim().toLowerCase() : '';
 }

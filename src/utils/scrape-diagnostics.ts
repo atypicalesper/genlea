@@ -2,34 +2,7 @@ import type { Page } from 'playwright';
 import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { logger } from './logger.js';
-
-export type FailureMode =
-  | 'success'
-  | 'captcha'
-  | 'blocked'
-  | 'empty'
-  | 'network_error'
-  | 'selector_mismatch'
-  | 'timeout'
-  | 'unknown';
-
-interface StageRecord {
-  name: string;
-  durationMs: number;
-  ok: boolean;
-  detail?: string;
-}
-
-interface DiagSummary {
-  scraper: string;
-  runId: string;
-  url: string;
-  outcome: FailureMode;
-  totalMs: number;
-  itemsFound: number;
-  stages: StageRecord[];
-  artifactBase?: string;
-}
+import type { FailureMode, ScrapeStageRecord, ScrapeDiagnosticsSummary } from '../types/index.js';
 
 const DEBUG_DIR = process.env['SCRAPE_DEBUG_DIR'] ?? 'debug/scrapes';
 const DUMP_ON_EMPTY = process.env['SCRAPE_DUMP_ON_EMPTY'] !== 'false';
@@ -40,7 +13,7 @@ const DUMP_ON_EMPTY = process.env['SCRAPE_DUMP_ON_EMPTY'] !== 'false';
  */
 export class ScrapeDiagnostics {
   private readonly startedAt = Date.now();
-  private readonly stages: StageRecord[] = [];
+  private readonly stages: ScrapeStageRecord[] = [];
   private outcome: FailureMode = 'unknown';
   private itemsFound = 0;
   private artifactBase?: string;
@@ -72,13 +45,15 @@ export class ScrapeDiagnostics {
     this.itemsFound = n;
   }
 
-  classify(signals: { captcha?: boolean; networkError?: boolean; pageText?: string }): FailureMode {
+  classify(signals: { captcha?: boolean; networkError?: boolean; timeout?: boolean; selectorMismatch?: boolean; pageText?: string }): FailureMode {
     // Classify from most explicit to least explicit so "empty" becomes a fallback, not a false root cause.
     if (signals.captcha)      return this.outcome = 'captcha';
+    if (signals.timeout)      return this.outcome = 'timeout';
     if (signals.networkError) return this.outcome = 'network_error';
     if (signals.pageText && /access denied|you have been blocked|forbidden|unusual traffic/i.test(signals.pageText.slice(0, 3000))) {
       return this.outcome = 'blocked';
     }
+    if (signals.selectorMismatch) return this.outcome = 'selector_mismatch';
     if (this.itemsFound === 0) return this.outcome = 'empty';
     return this.outcome = 'success';
   }
@@ -101,8 +76,8 @@ export class ScrapeDiagnostics {
     return base;
   }
 
-  async finalize(page?: Page): Promise<DiagSummary> {
-    const summary: DiagSummary = {
+  async finalize(page?: Page): Promise<ScrapeDiagnosticsSummary> {
+    const summary: ScrapeDiagnosticsSummary = {
       scraper: this.scraper,
       runId: this.runId,
       url: this.url,

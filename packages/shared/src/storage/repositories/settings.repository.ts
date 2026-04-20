@@ -18,14 +18,14 @@ export interface AppSettings {
 type SettingsDoc = AppSettings & { _id: string };
 
 const DEFAULTS: AppSettings = {
-  originRatioThreshold:          0.60,
-  originRatioMinSample:          5,
+  originRatioThreshold:          0.10,
+  originRatioMinSample:          8,
   targetTechTags:                ['nodejs', 'typescript', 'python', 'react', 'nextjs', 'nestjs', 'frontend', 'backend', 'fullstack', 'ai', 'ml', 'generative-ai', 'fastapi'],
   highValueIndustries:           ['ai', 'saas', 'fintech', 'healthtech', 'edtech'],
   leadScoreHotVerifiedThreshold: 80,
-  leadScoreHotThreshold:         55,
-  leadScoreWarmThreshold:        38,
-  leadScoreColdThreshold:        20,
+  leadScoreHotThreshold:         65,
+  leadScoreWarmThreshold:        50,
+  leadScoreColdThreshold:        35,
   workerConcurrencyDiscovery:    10,
   workerConcurrencyEnrichment:   15,
   workerConcurrencyScoring:      30,

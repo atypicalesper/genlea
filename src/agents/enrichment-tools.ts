@@ -471,6 +471,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           techStack:     z.array(z.string()).optional(),
           employeeCount: z.number().optional(),
           fundingStage:  z.string().optional(),
+          fundingTotalUsd: z.number().optional(),
+          foundedYear:   z.number().int().optional(),
           hqCountry:     z.string().optional(),
           websiteUrl:    z.string().optional(),
           githubOrg:     z.string().optional(),
@@ -480,7 +482,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     tool(
       async ({ reason }) => {
-        await companyRepository.disqualify(companyId);
+        await companyRepository.disqualify(companyId, reason);
         logger.info({ domain, reason }, '[enrichment-tools] Disqualified');
         return JSON.stringify({ disqualified: true, reason });
       },

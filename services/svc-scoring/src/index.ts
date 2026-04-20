@@ -36,7 +36,7 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     '[scoring.worker] Scoring inputs loaded'
   );
 
-  const { score, status, breakdown } = scoreCompany(
+  const { score, status, breakdown, disqualificationReason } = scoreCompany(
     { company, contacts, jobs },
     {
       hotVerified:         settings.leadScoreHotVerifiedThreshold,
@@ -56,7 +56,14 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     if (!seenTitles.has(key)) { seenTitles.add(key); openRoles.push(j.title.trim()); }
   }
 
-  await companyRepository.updateScore(companyId, score, status, breakdown, openRoles.length > 0 ? openRoles : undefined);
+  await companyRepository.updateScore(
+    companyId,
+    score,
+    status,
+    breakdown,
+    disqualificationReason,
+    openRoles.length > 0 ? openRoles : undefined,
+  );
 
   const durationMs = Date.now() - startedAt;
   logger.info(

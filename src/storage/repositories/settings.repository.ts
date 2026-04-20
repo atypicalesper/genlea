@@ -2,13 +2,13 @@ import { getCollection } from '../mongo.client.js';
 
 export interface AppSettings {
   originRatioThreshold: number;         // min Indian dev ratio to flag — default 0.10
-  originRatioMinSample: number;         // min names needed for reliable ratio — default 5
+  originRatioMinSample: number;         // min names needed for reliable ratio — default 8
   targetTechTags: string[];             // tech tags that score positively — default nodejs,typescript,…
   highValueIndustries: string[];        // industry keywords that grant bonus points — default ai,saas,…
   leadScoreHotVerifiedThreshold: number; // score to become hot_verified — default 80
-  leadScoreHotThreshold: number;        // score to become hot — default 55
-  leadScoreWarmThreshold: number;       // score to become warm — default 38
-  leadScoreColdThreshold: number;       // score to become cold (below = disqualified) — default 20
+  leadScoreHotThreshold: number;        // score to become hot — default 65
+  leadScoreWarmThreshold: number;       // score to become warm — default 50
+  leadScoreColdThreshold: number;       // score to become cold (below = disqualified) — default 35
   workerConcurrencyDiscovery: number;   // concurrent discovery jobs — default 10
   workerConcurrencyEnrichment: number;  // concurrent enrichment jobs — default 15
   workerConcurrencyScoring: number;     // concurrent scoring jobs — default 30
@@ -19,13 +19,13 @@ type SettingsDoc = AppSettings & { _id: string };
 
 const DEFAULTS: AppSettings = {
   originRatioThreshold:         0.10,
-  originRatioMinSample:         5,
+  originRatioMinSample:         8,
   targetTechTags:               ['nodejs', 'typescript', 'python', 'react', 'nextjs', 'nestjs', 'frontend', 'backend', 'fullstack', 'ai', 'ml', 'generative-ai', 'fastapi'],
   highValueIndustries:          ['ai', 'saas', 'fintech', 'healthtech', 'edtech'],
   leadScoreHotVerifiedThreshold: 80,
-  leadScoreHotThreshold:        55,
-  leadScoreWarmThreshold:       38,
-  leadScoreColdThreshold:       20,
+  leadScoreHotThreshold:        65,
+  leadScoreWarmThreshold:       50,
+  leadScoreColdThreshold:       35,
   workerConcurrencyDiscovery:   10,
   workerConcurrencyEnrichment:  15,
   workerConcurrencyScoring:     30,

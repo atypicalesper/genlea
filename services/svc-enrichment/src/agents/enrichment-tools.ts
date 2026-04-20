@@ -613,6 +613,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           techStack:     z.array(z.string().max(50)).max(30).optional(),
           employeeCount: z.number().int().min(1).max(500_000).optional(),
           fundingStage:  z.string().max(50).optional(),
+          fundingTotalUsd: z.number().min(0).optional(),
+          foundedYear:   z.number().int().min(1900).max(2100).optional(),
           hqCountry:     z.string().max(100).optional(),
           websiteUrl:    z.string().url().max(500).optional(),
           githubOrg:     z.string().max(100).optional(),
@@ -623,7 +625,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
     // ── 13. Disqualify ────────────────────────────────────────────────────────
     tool(
       withTiming('disqualify_company', async ({ reason }) => {
-        await companyRepository.disqualify(companyId);
+        await companyRepository.disqualify(companyId, reason);
         logger.info({ domain, reason }, '[enrichment-tools] Disqualified');
         return JSON.stringify({ disqualified: true, reason });
       }),

@@ -3,15 +3,14 @@ import type { Company, Contact, Job, FundingStage } from '@genlea/shared';
 const ENV_TARGET_TAGS = (process.env['TARGET_TECH_STACK'] ?? 'nodejs,typescript,python,react,nextjs,nestjs,frontend,backend,fullstack,ai,ml,generative-ai,fastapi')
   .split(',').map(t => t.trim());
 
-const ENV_HIGH_VALUE_INDUSTRIES = ['ai', 'saas', 'fintech', 'healthtech', 'edtech'];
-
 export function originRatioScore(company: Company): number {
   const ratio = company.originRatio;
-  if (ratio === undefined || ratio === null) return 10;
-  if (ratio >= 0.90) return 30;
-  if (ratio >= 0.75) return 25;
-  if (ratio >= 0.60) return 17;
-  if (ratio >= 0.50) return 10;
+  if (ratio === undefined || ratio === null) return 0;
+  if (ratio >= 0.75) return 30;
+  if (ratio >= 0.50) return 24;
+  if (ratio >= 0.25) return 16;
+  if (ratio >= 0.10) return 8;
+  if (ratio > 0) return 4;
   return 0;
 }
 
@@ -63,26 +62,33 @@ export function contactScore(contacts: Contact[]): number {
   return Math.min(score, 15);
 }
 
-export function companyFitScore(company: Company, highValueIndustries: string[] = ENV_HIGH_VALUE_INDUSTRIES): number {
+export function companyFitScore(company: Company, _highValueIndustries: string[] = []): number {
   let score = 0;
 
   const emp = company.employeeCount;
-  if (emp === undefined || emp === null) score += 2;
-  else if (emp >= 30 && emp <= 200) score += 7;
-  else if ((emp >= 11 && emp < 30) || (emp > 200 && emp <= 500)) score += 4;
+  if (emp !== undefined && emp !== null) {
+    if (emp >= 20 && emp <= 250) score += 6;
+    else if ((emp >= 10 && emp < 20) || (emp > 250 && emp <= 500)) score += 3;
+  }
 
   const stageScores: Partial<Record<FundingStage, number>> = {
-    'Series A': 5, 'Series B': 5, 'Series C': 4,
-    'Bootstrapped': 3, 'Seed': 2, 'Pre-seed': 1,
+    'Pre-seed': 4,
+    'Seed': 6,
+    'Series A': 6,
+    'Series B': 5,
+    'Series C': 3,
   };
   score += stageScores[company.fundingStage ?? 'Unknown'] ?? 0;
 
-  const companyIndustries = (company.industry ?? []).map(i => i.toLowerCase());
-  if (
-    companyIndustries.length === 0 ||
-    highValueIndustries.some(i => companyIndustries.some(ci => ci.includes(i)))
-  ) {
-    score += 3;
+  if (company.fundingTotalUsd && company.fundingTotalUsd > 0) {
+    score += 2;
+  }
+
+  const foundedYear = company.foundedYear;
+  if (foundedYear) {
+    const companyAge = new Date().getFullYear() - foundedYear;
+    if (companyAge <= 12) score += 3;
+    else if (companyAge <= 15) score += 1;
   }
 
   return Math.min(score, 15);

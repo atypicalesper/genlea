@@ -53,6 +53,16 @@ export type PipelineStatus = 'discovered' | 'watchlist' | 'enriching' | 'enriche
 
 export type ScrapeJobStatus = 'queued' | 'processing' | 'success' | 'failed' | 'partial' | 'skipped';
 
+export type FailureMode =
+  | 'success'
+  | 'captcha'
+  | 'blocked'
+  | 'empty'
+  | 'network_error'
+  | 'selector_mismatch'
+  | 'timeout'
+  | 'unknown';
+
 // ── Scraper Interface ─────────────────────────────────────────────────────────
 
 export interface ScrapeQuery {
@@ -70,6 +80,7 @@ export interface RawCompany {
   linkedinSlug?: string;
   crunchbaseUrl?: string;
   websiteUrl?: string;
+  identityHintUrls?: string[];
   hqCountry?: string;
   hqState?: string;
   hqCity?: string;
@@ -105,6 +116,7 @@ export interface RawJob {
   source?: ScraperSource;
   techTags?: string[];
   sourceUrl?: string;
+  applyUrl?: string;
   postedAt?: Date;
   description?: string;
 }
@@ -122,6 +134,7 @@ export interface Scraper {
   name: ScraperSource;
   scrape(query: ScrapeQuery): Promise<RawResult[]>;
   isAvailable(): Promise<boolean>;
+  getLastDiagnostics?(): ScrapeDiagnosticsSummary | undefined;
 }
 
 // ── Normalized / DB Types ─────────────────────────────────────────────────────
@@ -155,6 +168,7 @@ export interface Company {
   sources: ScraperSource[];
   score: number;
   scoreBreakdown?: ScoreBreakdown;
+  disqualificationReason?: string;
   status: LeadStatus;
   pipelineStatus: PipelineStatus;
   manuallyReviewed: boolean;
@@ -219,6 +233,25 @@ export interface ScrapeLog {
   startedAt: Date;
   completedAt?: Date;
   agentSteps?: AgentStep[];
+  diagnostics?: ScrapeDiagnosticsSummary;
+}
+
+export interface ScrapeStageRecord {
+  name: string;
+  durationMs: number;
+  ok: boolean;
+  detail?: string;
+}
+
+export interface ScrapeDiagnosticsSummary {
+  scraper: string;
+  runId: string;
+  url: string;
+  outcome: FailureMode;
+  totalMs: number;
+  itemsFound: number;
+  stages: ScrapeStageRecord[];
+  artifactBase?: string;
 }
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
@@ -242,6 +275,7 @@ export interface ScoringResult {
   score: number;
   status: LeadStatus;
   breakdown: ScoreBreakdown;
+  disqualificationReason?: string;
 }
 
 // ── Queue ─────────────────────────────────────────────────────────────────────

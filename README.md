@@ -7,10 +7,32 @@
 ## What it does
 
 1. **Discovers** companies via Wellfound, LinkedIn, Indeed, Crunchbase, Apollo, Glassdoor, ZoomInfo, Clay, SurelyRemote, Explorium, Hunter
-2. **Enriches** each company — tech stack, employee count, funding stage, decision-maker contacts — using an LLM agent backed by Ollama / Groq / Anthropic
+2. **Enriches** each company to verify funding, startup/newness, hiring signal, HQ country, contacts, and India-team signal
 3. **Analyses** employee names to estimate the Indian-origin developer ratio via a dedicated Python microservice
-4. **Scores** each lead 0–100 across 5 signals: origin ratio, job freshness, tech stack match, contact completeness, company fit
-5. **Exports** hot leads as CSV or via REST API
+4. **Scores and filters** each lead against a strict outbound ICP instead of a generic prospecting rubric
+5. **Exports** only the strongest pitchable leads as CSV or via REST API
+
+---
+
+## Ideal customer profile
+
+GenLea is tuned for one specific outbound goal:
+
+- funded startups or scale-ups
+- relatively new companies, preferably founded within the last 12 years
+- not big MNCs or legacy enterprises
+- not India-headquartered
+- actively hiring software engineering or development roles
+- already showing Indian-origin employees on the team, so India hiring is plausible
+
+The pipeline is intentionally opinionated. It should reject:
+
+- large enterprises and global MNCs
+- India-based companies
+- unfunded or unverified-funding companies
+- old companies that look more like established enterprises than startups
+- companies without a current engineering hiring signal
+- companies where no Indian-origin employee signal can be verified
 
 ---
 
@@ -41,8 +63,25 @@ svc-discovery (cron every 2h)
          → origin ratio (via name-origin service on :5050) → enqueue scoring
 
   → genlea-scoring queue → svc-scoring worker
-      └─ rule engine (0–100) → status: hot_verified / hot / warm / cold / disqualified
+      └─ rule engine (0–100) + hard ICP gates
+         → status: hot_verified / hot / warm / cold / disqualified
 ```
+
+### Qualification flow
+
+1. **Discovery** finds companies with engineering hiring evidence and basic company identity.
+2. **Enrichment** verifies:
+   - funding
+   - company size
+   - HQ country
+   - startup/newness signal
+   - engineering hiring signal
+   - India-team signal
+   - decision-maker contacts
+3. **Scoring** applies both:
+   - numeric scoring across origin ratio, jobs, tech, contacts, and company fit
+   - hard disqualification gates for India HQ, enterprise size, missing funding, old-company profile, missing engineering hiring, or missing India-team signal
+4. **Export** should be used only for leads that survived those ICP checks
 
 ---
 
@@ -102,7 +141,7 @@ GROQ_API_KEY=gsk_...
 Strongly recommended:
 
 ```env
-EXPLORIUM_API_KEY=...     # Best discovery source — company DB + verified contacts
+EXPLORIUM_API_KEY=...     # Best discovery source — funding/company metadata + verified contacts
 HUNTER_API_KEY=...        # Email discovery (25 free/month)
 GITHUB_TOKEN=...          # Tech stack extraction (5000 req/hr vs 60 without)
 ```
@@ -200,6 +239,27 @@ npm run seed:100      # 100 rounds — full bulk run
 ```
 
 The scheduler in `svc-discovery` also auto-seeds every 2 hours.
+
+---
+
+## Qualification defaults
+
+The current defaults are intentionally stricter than a generic lead-gen setup:
+
+- `originRatioThreshold=0.10`
+- `originRatioMinSample=8`
+- `leadScoreHotVerifiedThreshold=80`
+- `leadScoreHotThreshold=65`
+- `leadScoreWarmThreshold=50`
+- `leadScoreColdThreshold=35`
+
+Important behavior:
+
+- A company can be disqualified even with a decent raw score if it fails the ICP directly.
+- Missing verified funding is treated as a disqualifier.
+- Missing India-team signal is treated as a disqualifier.
+- Active engineering hiring is required.
+- India-headquartered companies are disqualified.
 
 ---
 

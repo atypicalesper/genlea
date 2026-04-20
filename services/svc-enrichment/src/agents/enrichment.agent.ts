@@ -7,45 +7,44 @@ import {
 import type { EnrichmentJobData, AgentStep } from '@genlea/shared';
 import { makeTools } from './enrichment-tools.js';
 
-const SYSTEM_PROMPT = `You are a B2B lead enrichment agent for a software agency that sells offshore Indian developer talent to US/UK/CA/EU tech startups.
+const SYSTEM_PROMPT = `You are a B2B lead enrichment agent for a software agency pitching software development services.
 
-GOAL: For each company, collect the following before calling queue_for_scoring:
-  ✓ Tech stack (≥2 tags)
-  ✓ ≥N developer names for Indian-origin ratio analysis (N = originRatioMinSample from settings)
-  ✓ ≥1 decision-maker contact (CEO, CTO, VP Engineering, Head of Engineering, HR, or Recruiter)
+GOAL: qualify companies only if they match this ICP:
+- funded startup or scale-up
+- relatively new; prefer founded in the last 12 years
+- not a big MNC or enterprise
+- not India-headquartered
+- actively hiring development or engineering roles
+- already showing Indian-origin engineers or developers on the team
 
-WORKFLOW — follow this loop, don't follow a fixed sequence:
-1. Call get_company_state to understand the starting point.
-2. Call check_enrichment_progress — it tells you exactly what's missing and the nextBestAction.
-3. Execute the nextBestAction.
-4. Repeat from step 2 until goalMet: true.
-5. Call compute_origin_ratio (if not done), then queue_for_scoring.
+WORKFLOW:
+1. Call get_company_state.
+2. Call check_enrichment_progress.
+3. Do the next best action.
+4. Repeat until goalMet.
+5. Compute origin ratio, then queue for scoring.
 
-STOP IMMEDIATELY and call disqualify_company if:
-- playwright_scrape_url returns defunct: true (unreachable domain, parked page, shutdown language)
+DISQUALIFY IMMEDIATELY if:
+- the site is defunct
 - employeeCount > 1000
-- hqCountry is India or non-target market
-- No tech signal after trying ≥3 sources
+- HQ is India or another non-target market
+- the company looks like an old enterprise rather than a newer startup/scale-up
+- no engineering hiring signal is found
 
-AVAILABILITY RULE:
-If any tool returns { available: false }, skip it immediately — do NOT retry it.
-Fall back to playwright_scrape_url on /team /about /careers /contact pages.
+RULES:
+- if a tool returns { available: false }, skip it
+- use playwright_scrape_url heavily on /team, /about, /careers, /engineering, /jobs, /contact
+- always save partial data
 
-KEY FACTS:
-- playwright_scrape_url auto-saves people it finds — no separate save_contacts call needed for them.
-- Each API source (enrich_github, enrich_explorium, enrich_clay, enrich_clearbit, enrich_hunter, scrape_website_team, verify_contacts, compute_origin_ratio) can only be called once per company.
-- check_enrichment_progress can be called as many times as needed — call it after every action.
-- Always save partial data: partial data is better than nothing. Call save_company_data with any metadata found.
-
-SOURCE ORDER (skip if available: false):
-1. enrich_github — free, always try first (tech stack + contributor names)
-2. enrich_explorium — best for contacts (requires EXPLORIUM_API_KEY)
-3. enrich_clay — good for contacts (requires CLAY_API_KEY)
-4. scrape_website_team — free, finds team names
-5. playwright_scrape_url — use aggressively on /team /about /careers /people /contact
-6. enrich_clearbit — company metadata (requires CLEARBIT_API_KEY; skip if Explorium/Clay gave metadata)
-7. enrich_hunter — email discovery (requires HUNTER_API_KEY)
-8. verify_contacts — SMTP verify emails`;
+SOURCE ORDER:
+1. enrich_github
+2. scrape_website_team
+3. enrich_explorium
+4. enrich_clay
+5. playwright_scrape_url
+6. enrich_clearbit
+7. enrich_hunter
+8. verify_contacts`;
 
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -60,7 +59,7 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
   }
 
   if (company.employeeCount && company.employeeCount > 1000) {
-    await companyRepository.disqualify(companyId);
+    await companyRepository.disqualify(companyId, 'Company is above the target size range for outbound pitching.');
     return;
   }
 
@@ -82,15 +81,16 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
   }))._id!;
 
   const userMessage = `
-Enrich this company for lead scoring:
+Enrich this company against the outreach ICP:
 
 Company ID : ${companyId}
 Domain     : ${domain}
 Name       : ${company.name}
 Known data : employees=${company.employeeCount ?? 'unknown'}, tech=${JSON.stringify(company.techStack ?? [])}, status=${company.status}
 
-Start with get_company_state, then follow the goal loop (check_enrichment_progress → act → repeat).
-Disqualify immediately if the domain is defunct or company is too large.
+Start with get_company_state, then follow the goal loop.
+Verify funding, company size, startup/newness, non-India HQ, engineering hiring, and Indian-origin engineer signal.
+Disqualify if it is a big MNC, old enterprise, India-based, weak-fit, or not hiring engineers.
 `.trim();
 
   const agentName     = `enrichment:${domain}`;

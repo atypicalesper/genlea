@@ -1,21 +1,17 @@
-import { Company, Contact, Job, ScoreBreakdown, FundingStage } from '../types/index.js';
+import { Company, Contact, Job, FundingStage } from '../types/index.js';
 
 const ENV_TARGET_TAGS = (process.env['TARGET_TECH_STACK'] ?? 'nodejs,typescript,python,react,nextjs,nestjs,frontend,backend,fullstack,ai,ml,generative-ai,fastapi')
   .split(',').map(t => t.trim());
 
-const ENV_HIGH_VALUE_INDUSTRIES: string[] = []; // no vertical filter — all industries qualify
-
 // ── 1. Dev Origin Concentration (0–30) ───────────────────────────────────────
 export function originRatioScore(company: Company): number {
   const ratio = company.originRatio;
-  // Unknown ratio (no GitHub org / private repos) → neutral 10pts
-  // Company might still be a great lead — don't zero-penalise before we know
-  if (ratio === undefined || ratio === null) return 10;
-  if (ratio >= 0.90) return 30;
-  if (ratio >= 0.75) return 25;
-  if (ratio >= 0.60) return 17;
-  if (ratio >= 0.50) return 10;
-  // Confirmed low ratio → 0 (not a target)
+  if (ratio === undefined || ratio === null) return 0;
+  if (ratio >= 0.75) return 30;
+  if (ratio >= 0.50) return 24;
+  if (ratio >= 0.25) return 16;
+  if (ratio >= 0.10) return 8;
+  if (ratio > 0) return 4;
   return 0;
 }
 
@@ -75,24 +71,34 @@ export function contactScore(contacts: Contact[]): number {
 }
 
 // ── 5. Company Profile Fit (0–15) ─────────────────────────────────────────────
-export function companyFitScore(company: Company, highValueIndustries: string[] = ENV_HIGH_VALUE_INDUSTRIES): number {
+export function companyFitScore(company: Company, _highValueIndustries: string[] = []): number {
   let score = 0;
 
-  // Size — undefined means unknown (not 0 employees), give neutral credit
   const emp = company.employeeCount;
-  if (emp === undefined || emp === null) score += 2; // unknown size → neutral
-  else if (emp >= 30 && emp <= 200) score += 7;
-  else if ((emp >= 11 && emp < 30) || (emp > 200 && emp <= 500)) score += 4;
+  if (emp !== undefined && emp !== null) {
+    if (emp >= 20 && emp <= 250) score += 6;
+    else if ((emp >= 10 && emp < 20) || (emp > 250 && emp <= 500)) score += 3;
+  }
 
-  // Funding stage
   const stageScores: Partial<Record<FundingStage, number>> = {
-    'Series A': 5, 'Series B': 5, 'Series C': 4,
-    'Bootstrapped': 3, 'Seed': 2, 'Pre-seed': 1,
+    'Pre-seed': 4,
+    'Seed': 6,
+    'Series A': 6,
+    'Series B': 5,
+    'Series C': 3,
   };
   score += stageScores[company.fundingStage ?? 'Unknown'] ?? 0;
 
-  // Industry bonus — all industries qualify, always grant
-  score += 3;
+  if (company.fundingTotalUsd && company.fundingTotalUsd > 0) {
+    score += 2;
+  }
+
+  const foundedYear = company.foundedYear;
+  if (foundedYear) {
+    const companyAge = new Date().getFullYear() - foundedYear;
+    if (companyAge <= 12) score += 3;
+    else if (companyAge <= 15) score += 1;
+  }
 
   return Math.min(score, 15);
 }

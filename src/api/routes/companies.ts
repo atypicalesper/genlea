@@ -99,11 +99,11 @@ export async function companiesRoutes(app: FastifyInstance) {
   });
 
   // PATCH /api/companies/:id/status — manually override lead status
-  app.patch<{ Params: { id: string }; Body: { status: LeadStatus } }>(
+  app.patch<{ Params: { id: string }; Body: { status: LeadStatus; reason?: string } }>(
     '/companies/:id/status',
     async (req, reply) => {
       const { id } = req.params;
-      const { status } = req.body;
+      const { status, reason } = req.body;
       const validStatuses: LeadStatus[] = ['hot_verified', 'hot', 'warm', 'cold', 'disqualified', 'pending'];
       if (!validStatuses.includes(status)) {
         return reply.status(400).send({ success: false, error: 'Invalid status' });
@@ -111,7 +111,13 @@ export async function companiesRoutes(app: FastifyInstance) {
       const company = await companyRepository.findById(id);
       if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
 
-      await companyRepository.upsert({ domain: company.domain, name: company.name, status, manuallyReviewed: true });
+      await companyRepository.upsert({
+        domain: company.domain,
+        name: company.name,
+        status,
+        disqualificationReason: status === 'disqualified' ? (reason ?? 'Manually disqualified') : '',
+        manuallyReviewed: true,
+      });
       logger.info({ id, domain: company.domain, status }, '[api:companies] Status overridden');
       return reply.send({ success: true, data: { status } });
     }

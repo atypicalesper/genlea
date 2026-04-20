@@ -22,44 +22,42 @@ import { logger }                from '../utils/logger.js';
 import { makeTools }             from './enrichment-tools.js';
 import type { EnrichmentJobData } from '../types/index.js';
 
-const SYSTEM_PROMPT = `You are a B2B lead enrichment agent for a software agency that sells offshore Indian developer talent to US/UK/CA/EU tech startups.
+const SYSTEM_PROMPT = `You are a B2B lead enrichment agent for a software agency pitching software development services.
 
-Your job: given a company domain, gather comprehensive data about:
-1. Tech stack (languages, frameworks, tools they use)
-2. Employee count and funding stage
-3. Key decision-maker contacts — CEO, CTO, VP of Engineering, Head of Engineering, Director of Engineering, HR, Head of Talent, Recruiter. Save ALL of them as a rich array with name, role, email, LinkedIn URL.
-4. Indian-origin developer ratio (what fraction of their engineers appear to be of Indian origin)
-5. Whether the company is still active and worth pursuing
+GOAL: qualify companies only if they match this ICP:
+- funded startup or scale-up
+- relatively new; prefer founded in the last 12 years
+- not a big MNC or enterprise
+- not India-headquartered
+- actively hiring development or engineering roles
+- already showing Indian-origin engineers or developers on the team
 
-CRITICAL — availability rule:
-If a tool returns { available: false }, skip it immediately — do NOT retry it. Some tools require API keys that may not be configured. In that case, playwright_scrape_url is your primary data source; it requires no API key and works for any URL.
+Collect:
+1. tech stack
+2. employee count, funding stage, and any age/startup signal
+3. key decision-maker contacts for outreach
+4. Indian-origin engineer signal and ratio
+5. whether the company should be disqualified
 
-Decision rules:
-- ALWAYS start with get_company_state.
-- enrich_github is free and always worth trying — great for tech stack + dev names.
-- scrape_website_team is free — always try it.
-- If enrich_clearbit returns available:false → skip it; use playwright_scrape_url on the company homepage to find employee count, funding info, description instead.
-- If enrich_hunter returns available:false → skip it; use playwright_scrape_url on /team, /about, /contact, /people pages to collect emails and names.
-- If tech stack is still missing → playwright_scrape_url on /careers, /jobs, /stack, /engineering pages.
-- Mark DEFUNCT and stop if: DNS failure, 404, parked page, or shutdown language detected.
-- Mark DISQUALIFIED if: employee count > 1000, or HQ is India/non-target country.
-- When sufficient data is collected (tech stack + ≥5 names for ratio OR 1+ contact), proceed to scoring.
-- Always save partial data — partial data is better than nothing.
+RULES:
+- always start with get_company_state
+- if a tool returns { available: false }, skip it and move on
+- use playwright_scrape_url aggressively on /team, /about, /careers, /engineering, /jobs, /contact
+- disqualify immediately if the company is defunct, India-headquartered, above 1000 employees, obviously an old enterprise, or shows no engineering hiring signal
+- if funding is unknown after multiple sources, treat that as a weak fit and prefer other companies
+- always save partial data
 
-Source order (skip if available:false):
-1. get_company_state — always first
-2. enrich_explorium — best single source: returns company metadata + contacts with email/phone/LinkedIn in one call (requires EXPLORIUM_API_KEY)
-3. enrich_clay — requires CLAY_API_KEY — returns company + decision-maker contacts with verified emails; great complement to Explorium
-4. enrich_github — free, no key required — great for tech stack + dev names
-5. enrich_clearbit — requires CLEARBIT_API_KEY — skip if Explorium or Clay already returned metadata
-6. scrape_website_team — free, no key required
-7. playwright_scrape_url — free, no key required — use aggressively on /team /about /careers /contact
-8. enrich_hunter — requires HUNTER_API_KEY — skip if Explorium or Clay already returned contacts
-9. verify_contacts — SMTP verify + fill gaps
-10. compute_origin_ratio — after gathering names
-11. save_company_data — save partial results anytime
-12. disqualify_company — if company should be excluded
-13. queue_for_scoring — when enrichment is complete`;
+Best source order:
+1. enrich_github
+2. scrape_website_team
+3. enrich_explorium
+4. enrich_clay
+5. playwright_scrape_url
+6. enrich_clearbit
+7. enrich_hunter
+8. verify_contacts
+9. compute_origin_ratio
+10. queue_for_scoring`;
 
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -74,7 +72,7 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
   }
 
   if (company.employeeCount && company.employeeCount > 1000) {
-    await companyRepository.disqualify(companyId);
+    await companyRepository.disqualify(companyId, 'Company is above the target size range for outbound pitching.');
     return;
   }
 
@@ -90,7 +88,7 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
   }
 
   const userMessage = `
-Enrich this company for lead scoring:
+Enrich this company against the outreach ICP:
 
 Company ID : ${companyId}
 Domain     : ${domain}
@@ -100,11 +98,12 @@ Known data : employee count=${company.employeeCount ?? 'unknown'}, tech stack=${
 
 Steps:
 1. Call get_company_state first to see what's already available.
-2. Fill ALL missing fields — if data is insufficient, try every available source.
-3. Gather decision-maker contacts (CEO, CTO, VP Engineering, Head of Engineering, HR) and save them all as a detailed array via save_contacts.
-4. Collect as many names as possible for Indian-origin ratio analysis (target ≥ 10 names).
-5. Disqualify immediately if company is defunct or too large.
-6. When enrichment is done, call compute_origin_ratio then queue_for_scoring.
+2. Verify funding, company size, and whether the company is relatively new.
+3. Verify it is not India-headquartered.
+4. Verify active development or engineering hiring.
+5. Gather decision-maker contacts and collect names for Indian-origin engineer analysis.
+6. Disqualify if it is a big MNC, old enterprise, India-based, unfunded/weak-fit, or not hiring engineers.
+7. When enrichment is done, call compute_origin_ratio then queue_for_scoring.
 `.trim();
 
   const agentName    = `enrichment:${domain}`;
