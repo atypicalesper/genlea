@@ -26,6 +26,7 @@ export function jobFreshnessScore(jobs: Job[]): number {
 
   let score = 0;
   for (const job of active) {
+    // Some scrapers only prove that a role is open, not when it was posted.
     if (!job.postedAt) { score += 1; continue; } // unknown date → minimal credit
     const daysAgo = Math.floor((Date.now() - new Date(job.postedAt).getTime()) / 86_400_000);
     if (daysAgo <= 7)  score += 5;
@@ -38,6 +39,7 @@ export function jobFreshnessScore(jobs: Job[]): number {
 
 // ── 3. Tech Stack Alignment (0–20) ───────────────────────────────────────────
 export function techStackScore(company: Company, jobs: Job[], targetTags: string[] = ENV_TARGET_TAGS): number {
+  // Company-level and job-level tags are combined because each source sees a different slice of reality.
   const allTags = new Set([
     ...(company.techStack ?? []),
     ...jobs.flatMap(j => j.techTags ?? []),
@@ -59,6 +61,7 @@ export function techStackScore(company: Company, jobs: Job[], targetTags: string
 export function contactScore(contacts: Contact[]): number {
   let score = 0;
 
+  // The funnel values decision-makers and hiring contacts more than generic employee records.
   const ceo = contacts.find(c => ['CEO', 'Founder', 'CTO'].includes(c.role));
   const hr  = contacts.find(c => ['HR', 'Recruiter', 'Head of Talent'].includes(c.role));
 

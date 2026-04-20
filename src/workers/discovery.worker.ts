@@ -8,6 +8,7 @@ import { runDiscoveryAgent } from '../agents/discovery.agent.js';
 import { logger } from '../utils/logger.js';
 
 async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
+  // Keep worker logic thin so retries/restarts always execute the same agent entrypoint.
   logger.info({ runId: job.data.runId, source: job.data.source }, '[discovery.worker] Delegating to discovery agent');
   await runDiscoveryAgent(job.data);
 }
@@ -23,6 +24,7 @@ export async function startDiscoveryWorker(): Promise<void> {
   );
   logger.info({ concurrency: initialSettings.workerConcurrencyDiscovery }, '[discovery.worker] Worker started (agent mode)');
 
+  // Poll settings so concurrency can be tuned without restarting the worker process.
   const settingsInterval = setInterval(async () => {
     try {
       const s = await settingsRepository.get();

@@ -18,6 +18,7 @@ export function scoreCompany(
 ): ScoringResult {
   const { company, contacts, jobs } = input;
 
+  // Keep the breakdown explicit so exports/UI can explain why a lead ranked where it did.
   const breakdown: ScoreBreakdown = {
     originRatioScore:  originRatioScore(company),
     jobFreshnessScore: jobFreshnessScore(jobs),
@@ -34,6 +35,7 @@ export function scoreCompany(
     breakdown.contactScore +
     breakdown.companyFitScore;
 
+  // Status is derived after the full numeric score so threshold changes stay centralized.
   const status = resolveStatus(breakdown.total, thresholds);
 
   logger.debug(
@@ -54,4 +56,3 @@ export function scoreCompany(
 
   return { score: breakdown.total, status, breakdown };
 }
-

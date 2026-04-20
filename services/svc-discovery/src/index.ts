@@ -9,6 +9,7 @@ import { runDiscoveryAgent } from './agents/discovery.agent.js';
 import { startScheduler }   from './scheduler.js';
 
 async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
+  // The service process is just orchestration; discovery logic lives in the agent/tool layer.
   logger.info({ runId: job.data.runId, source: job.data.source }, '[discovery.worker] Delegating to agent');
   await runDiscoveryAgent(job.data);
 }
@@ -24,6 +25,7 @@ async function bootstrap(): Promise<void> {
   );
   logger.info({ concurrency: initialSettings.workerConcurrencyDiscovery }, '[discovery] Worker started');
 
+  // Hot-reload concurrency from settings so operators can widen/narrow throughput live.
   const settingsInterval = setInterval(async () => {
     try {
       const s = await settingsRepository.get();

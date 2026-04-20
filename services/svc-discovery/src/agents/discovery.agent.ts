@@ -66,6 +66,7 @@ Accept any industry. Size 10–200, actively hiring engineers, pre-seed to Serie
       }
       if (msg instanceof ToolMessage && msg.name) {
         const ts = (msg.tool_call_id && toolCallTimes.get(msg.tool_call_id)) ?? new Date().toISOString();
+        // Tool payloads double as an execution trace for the dashboard and scrape logs.
         let parsed: unknown = msg.content;
         try { parsed = JSON.parse(msg.content as string); } catch { /* leave as string */ }
         const p = parsed as Record<string, unknown>;

@@ -7,6 +7,7 @@ interface ClearbitSuggestion { name: string; domain: string; logo?: string }
 export async function resolveNameToDomain(name: string): Promise<string | null> {
   const key = name.trim().toLowerCase();
   if (!key) return null;
+  // Name resolution is a hot path in discovery, so cache misses aggressively to avoid repeated network calls.
   if (_cache.has(key)) return _cache.get(key)!;
 
   try {
@@ -15,6 +16,7 @@ export async function resolveNameToDomain(name: string): Promise<string | null> 
     if (!res.ok) { _cache.set(key, null); return null; }
 
     const suggestions = await res.json() as ClearbitSuggestion[];
+    // Prefer close name matches, but fall back to the top suggestion rather than failing closed.
     const best = suggestions.find(s => fuzzyNameMatch(s.name, name)) ?? suggestions[0];
     const domain = best?.domain?.toLowerCase() ?? null;
 

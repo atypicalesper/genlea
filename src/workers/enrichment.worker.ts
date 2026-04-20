@@ -8,6 +8,7 @@ import { runEnrichmentAgent } from '../agents/enrichment.agent.js';
 import { logger } from '../utils/logger.js';
 
 async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> {
+  // The enrichment agent owns source selection and stopping conditions for each company.
   logger.info({ runId: job.data.runId, domain: job.data.domain }, '[enrichment.worker] Delegating to enrichment agent');
   await runEnrichmentAgent(job.data);
 }
@@ -23,6 +24,7 @@ export async function startEnrichmentWorker(): Promise<void> {
   );
   logger.info({ concurrency: initialSettings.workerConcurrencyEnrichment }, '[enrichment.worker] Worker started (agent mode)');
 
+  // Keep worker concurrency aligned with DB-backed settings during long-running sessions.
   const settingsInterval = setInterval(async () => {
     try {
       const s = await settingsRepository.get();

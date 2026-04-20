@@ -60,6 +60,8 @@ Do NOT save: mega-enterprises (FAANG, Big 4 consulting, banks with >1000 employe
 
 export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
   const availableSources = [...getAvailableSources()].filter(s => s in SCRAPERS).join(', ');
+  const slugifyName = (s: string): string =>
+    s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'unknown';
 
   // ── Per-job closure state ────────────────────────────────────────────────────
   const triedSources = new Set<string>();
@@ -142,9 +144,9 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
           const deduped = deduplicateCompanies(companies);
 
           const filtered = deduped.filter(c => {
-            if (!c.domain || !c.name) return false;
-            if (BLOCKED_DOMAINS.has(c.domain)) return false;
-            if (isJunkDomain(c.domain)) return false;
+            if (!c.name) return false;
+            if (c.domain && BLOCKED_DOMAINS.has(c.domain)) return false;
+            if (c.domain && isJunkDomain(c.domain)) return false;
             if (c.name && BLOCKED_NAME_PATTERNS.some(re => re.test(c.name!))) return false;
             if (c.employeeCount && c.employeeCount > 1000) return false;
             return true;
@@ -199,17 +201,30 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
         }
         pendingBySource.delete(source);
 
-        let saved = 0, watchlisted = 0, skipped = 0;
+        let saved = 0, watchlisted = 0, skipped = 0, resolvedCount = 0;
 
         for (const co of companies) {
-          const domain = normalizeDomain((co as any).domain ?? '');
-          if (!domain || !(co as any).name) { skipped++; continue; }
-          if (!(await resolvesRealDomain(domain))) { skipped++; continue; }
+          const name = (co as any).name as string | undefined;
+          if (!name) { skipped++; continue; }
 
-          // Job-board sources (wellfound, linkedin, indeed, glassdoor, surelyremote) are always hiring
+          let domain = normalizeDomain((co as any).domain ?? '');
+          let domainResolved = true;
+          if (!domain) {
+            // Persist unresolved ATS hits instead of dropping them; they can still be reviewed later.
+            domain = `${slugifyName(name)}.unresolved`;
+            domainResolved = false;
+          } else if (!(await resolvesRealDomain(domain))) {
+            // Keep a synthetic key so discovery isn't reported as empty just because DNS failed.
+            domain = `${slugifyName(name)}.unresolved`;
+            domainResolved = false;
+          } else {
+            resolvedCount++;
+          }
+
+          // Only resolved domains are safe to enrich automatically; unresolved ones stay in watchlist.
           const isJobBoard = ['wellfound', 'linkedin', 'indeed', 'glassdoor', 'surelyremote'].includes(source);
           const hiringInStack = isJobBoard || defaultHiring;
-          const pipelineStatus = hiringInStack ? 'discovered' : 'watchlist';
+          const pipelineStatus = hiringInStack && domainResolved ? 'discovered' : 'watchlist';
 
           try {
             const company = await companyRepository.upsert({
@@ -224,7 +239,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
               pipelineStatus,
             } as any);
 
-            if (hiringInStack) {
+            if (hiringInStack && domainResolved) {
               // Pre-populate contacts from Hunter (non-blocking, best-effort)
               if (process.env['HUNTER_API_KEY']) {
                 hunterScraper.enrichDomain(domain).then(async result => {
@@ -262,8 +277,8 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
         }
 
         totalSaved += saved;
-        logger.info({ source, saved, watchlisted, skipped, runningTotal: totalSaved }, '[discovery-tools] Companies saved');
-        return JSON.stringify({ saved, watchlisted, skipped, total: companies.length, runningTotal: totalSaved });
+        logger.info({ source, saved, watchlisted, skipped, nameResolved: resolvedCount, runningTotal: totalSaved }, '[discovery-tools] Companies saved');
+        return JSON.stringify({ saved, watchlisted, skipped, nameResolved: resolvedCount, total: companies.length, runningTotal: totalSaved });
       }),
       {
         name:        'save_companies',

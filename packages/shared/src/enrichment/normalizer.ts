@@ -5,17 +5,17 @@ import { normalizeTechTags } from './tech-aliases.js';
 
 export const normalizer = {
   normalizeCompany(raw: Partial<import('../types/index.js').RawCompany>, source: ScraperSource): Partial<Company> {
-    if (!raw.domain && !raw.linkedinUrl) return {};
+    if (!raw.name && !raw.domain && !raw.linkedinUrl && !raw.websiteUrl) return {};
 
     const domain = raw.domain
       ? normalizeDomain(raw.domain)
       : extractDomainFromUrl(raw.linkedinUrl ?? raw.websiteUrl ?? '');
 
-    if (!domain) return {};
-
     return {
       name: raw.name?.trim(),
-      domain,
+      // Discovery scrapers often know the company name before they can prove the domain.
+      // Keep those candidates so discovery can persist them as watchlist entries.
+      ...(domain ? { domain } : {}),
       linkedinUrl: normalizeUrl(raw.linkedinUrl),
       crunchbaseUrl: normalizeUrl(raw.crunchbaseUrl),
       websiteUrl: normalizeUrl(raw.websiteUrl),
@@ -95,7 +95,8 @@ export const normalizer = {
     for (const result of results) {
       if (result.company) {
         const c = this.normalizeCompany(result.company, result.source);
-        if (c.domain) companies.push(c);
+        // Name-only companies are still useful in discovery; domain resolution can happen later.
+        if (c.domain || c.name) companies.push(c);
       }
 
       for (const contact of result.contacts ?? []) {

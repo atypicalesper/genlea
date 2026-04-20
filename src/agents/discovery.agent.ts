@@ -15,6 +15,7 @@ import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
 import { buildLlm }              from './llm.client.js';
 import { alertAgentFailure }     from '../utils/alert.js';
 import { scrapeLogRepository }   from '../storage/repositories/scrape-log.repository.js';
+import { recordResult }          from '../discovery/source-health.js';
 import { logger }                from '../utils/logger.js';
 import { makeTools, buildSystemPrompt } from './discovery-tools.js';
 import type { DiscoveryJobData }  from '../types/index.js';
@@ -67,6 +68,7 @@ Accept any industry. Size 10–200, actively hiring engineers, pre-seed to Serie
         }
       }
       if (msg instanceof ToolMessage && msg.name) {
+        // Keep the last payload per tool so we can summarize the run without replaying tool logic.
         let parsed: unknown = msg.content;
         try { parsed = JSON.parse(msg.content as string); } catch { /* leave as string */ }
         toolResults.set(msg.name, parsed);
@@ -90,6 +92,7 @@ Accept any industry. Size 10–200, actively hiring engineers, pre-seed to Serie
       errors:         [],
       durationMs:     Date.now() - startedAt,
     });
+    recordResult(source, saved);
 
     logger.info({ runId, source, saved, iterations }, '[discovery.agent] Complete');
   } catch (err) {
@@ -98,6 +101,7 @@ Accept any industry. Size 10–200, actively hiring engineers, pre-seed to Serie
       status: 'failed', companiesFound: 0, contactsFound: 0, jobsFound: 0,
       errors: [msg], durationMs: Date.now() - startedAt,
     }).catch(() => {});
+    recordResult(source, 0);
     logger.error({ err, runId, source }, '[discovery.agent] Failed');
     await alertAgentFailure({ agent: `discovery:${source}`, runId, error: err });
     throw err;

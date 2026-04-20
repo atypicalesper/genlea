@@ -33,11 +33,12 @@ export class GlassdoorScraper implements Scraper {
       const listings = await this.searchJobs(page, query);
       logger.info({ found: listings.length }, '[glassdoor] Job listings found');
 
-      // Group listings by company to build RawResult per company
+      // Glassdoor is scraped as many job cards first, then collapsed into one company result per employer.
       const byCompany = new Map<string, { company: Partial<RawCompany>; jobs: Partial<RawJob>[] }>();
 
       for (const listing of listings) {
         const key = listing.companyName.toLowerCase().trim();
+        // This slug is only a temporary identity; discovery may later demote unresolved hosts to watchlist.
         const domain = slugifyName(listing.companyName);
         if (!byCompany.has(key)) {
           byCompany.set(key, {
@@ -94,6 +95,7 @@ export class GlassdoorScraper implements Scraper {
     await browserManager.humanDelay(2000, 5000);
 
     if (await browserManager.detectCaptcha(page)) {
+      // Glassdoor often presents blocks as soft-empty pages, so log this explicitly.
       logger.warn('[glassdoor] CAPTCHA detected — returning empty');
       return [];
     }
@@ -123,7 +125,7 @@ export class GlassdoorScraper implements Scraper {
         }
       }
 
-      // Try to load more results
+      // "Load more" is best-effort; missing it should still yield partial data rather than a hard failure.
       const moreBtn = page.locator('button[data-test="load-more"], .JobsList_buttonWrapper__ticwb button').first();
       const hasMore = await moreBtn.isVisible().catch(() => false);
       if (!hasMore || listings.length >= limit) break;
@@ -148,6 +150,7 @@ export class GlassdoorScraper implements Scraper {
     const location   = ((await locationEl.textContent().catch(() => '')) ?? '').trim();
 
     if (!jobTitle || !companyName) return null;
+    // This keeps the discovery funnel US-focused even when Glassdoor mixes in global cards.
     if (!isUSLocation(location)) return null;
 
     const sizeText = ((await sizeEl.textContent().catch(() => '')) ?? '').trim();
@@ -171,6 +174,7 @@ export class GlassdoorScraper implements Scraper {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function slugifyName(name: string): string {
+  // Placeholder host used only as a stable key until better company identity is found.
   return name.toLowerCase()
     .replace(/\s+(inc|llc|ltd|corp|co\.?)\.?$/i, '')
     .replace(/[^a-z0-9]+/g, '')

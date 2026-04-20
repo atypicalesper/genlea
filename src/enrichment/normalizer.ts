@@ -11,17 +11,16 @@ import { normalizeTechTags } from './tech-aliases.js';
  */
 export const normalizer = {
   normalizeCompany(raw: Partial<import('../types/index.js').RawCompany>, source: ScraperSource): Partial<Company> {
-    if (!raw.domain && !raw.linkedinUrl) return {};
+    if (!raw.name && !raw.domain && !raw.linkedinUrl && !raw.websiteUrl) return {};
 
     const domain = raw.domain
       ? normalizeDomain(raw.domain)
       : extractDomainFromUrl(raw.linkedinUrl ?? raw.websiteUrl ?? '');
 
-    if (!domain) return {};
-
     return {
       name: raw.name?.trim(),
-      domain,
+      // Discovery can promote name-only companies to watchlist entries even before domain resolution succeeds.
+      ...(domain ? { domain } : {}),
       linkedinUrl: normalizeUrl(raw.linkedinUrl),
       crunchbaseUrl: normalizeUrl(raw.crunchbaseUrl),
       websiteUrl: normalizeUrl(raw.websiteUrl),
@@ -102,7 +101,8 @@ export const normalizer = {
     for (const result of results) {
       if (result.company) {
         const c = this.normalizeCompany(result.company, result.source);
-        if (c.domain) companies.push(c);
+        // Preserve company names even when the scraper could not yet derive a domain.
+        if (c.domain || c.name) companies.push(c);
       }
 
       for (const contact of result.contacts ?? []) {
@@ -189,4 +189,3 @@ export function normalizeRole(raw?: string): ContactRole {
 function dedupeArray(arr: string[]): string[] {
   return [...new Set(arr.map(s => s.toLowerCase().trim()).filter(Boolean))];
 }
-

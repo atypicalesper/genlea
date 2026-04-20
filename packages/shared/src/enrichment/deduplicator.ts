@@ -7,16 +7,15 @@ export function deduplicateCompanies(companies: Partial<Company>[]): Partial<Com
   const seen = new Map<string, Partial<Company>>();
 
   for (const co of companies) {
-    if (!co.domain) {
-      logger.debug('[deduplicator] Skipping company with no domain');
+    const key = companyKey(co);
+    if (!key) {
+      logger.debug('[deduplicator] Skipping company with no domain or name');
       continue;
     }
-
-    const key = normalizeDomain(co.domain);
     const existing = seen.get(key);
 
     if (!existing) {
-      seen.set(key, { ...co, domain: key });
+      seen.set(key, co.domain ? { ...co, domain: normalizeDomain(co.domain) } : { ...co });
       continue;
     }
 
@@ -59,6 +58,17 @@ function mergeCompanyRecords(base: Partial<Company>, incoming: Partial<Company>)
     openRoles:       uniqueArray([...(base.openRoles ?? []), ...(incoming.openRoles ?? [])]),
     sources:         uniqueArray([...(base.sources ?? []), ...(incoming.sources ?? [])]),
   };
+}
+
+function companyKey(co: Partial<Company>): string | null {
+  // Prefer domain when present, otherwise collapse obvious duplicates by normalized name.
+  if (co.domain) return `domain:${normalizeDomain(co.domain)}`;
+  const name = normalizeNameKey(co.name);
+  return name ? `name:${name}` : null;
+}
+
+function normalizeNameKey(name?: string): string {
+  return (name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
 function maxDefined(a?: number, b?: number): number | undefined {

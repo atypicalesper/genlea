@@ -34,10 +34,12 @@ export class IndeedScraper implements Scraper {
       const context = await diag.stage('create_context', () => browserManager.createContext(browserId, contextOpts));
       page = await browserManager.newPage(context);
 
+      // Indeed is strongest as a hiring signal; company identity often needs later enrichment.
       const jobGroups = await this.searchJobs(page, query, diag);
       diag.recordItems(jobGroups.size);
 
       for (const [companyName, jobs] of jobGroups) {
+        // Do not invent a domain here; discovery/watchlist handles name-only companies downstream.
         const rawCompany: Partial<RawCompany> = { name: companyName, hqCountry: 'US' };
         results.push({ source: 'indeed', company: rawCompany, jobs, scrapedAt: new Date() });
       }
@@ -80,7 +82,7 @@ export class IndeedScraper implements Scraper {
 
     await diag.stage('scroll', () => browserManager.humanScroll(page, 4));
 
-    // Paginate through up to 3 pages
+    // Keep pagination shallow; Indeed gets brittle fast and we care more about freshness than depth.
     const jobGroups = new Map<string, RawJob[]>();
     const limit = query.limit ?? 50;
 
@@ -108,6 +110,7 @@ export class IndeedScraper implements Scraper {
           const postedAt = parsePostedDate(dateText);
 
           const job: RawJob = {
+            // Company domain is intentionally left blank until a later resolver can prove it.
             companyDomain: '',
             title,
             techTags,
@@ -167,7 +170,7 @@ function extractTechFromTitle(title: string): string[] {
   const tags = [...new Set(
     patterns.filter(([re]) => re.test(title)).map(([, tag]) => tag)
   )];
-  // Ensure at least one tag so the company isn't zero-scored on tech
+  // Fall back to a generic engineering tag so clearly-hiring companies are not discarded as "no tech signal".
   return tags.length ? tags : ['software'];
 }
 

@@ -59,6 +59,7 @@ export const companyRepository = {
     const domain = normalizeDomain(data.domain);
     const now = new Date();
 
+    // Domain is the canonical identity for discovery/enrichment merges.
     const existing = await col.findOne({ domain });
 
     if (!existing) {
@@ -163,7 +164,7 @@ export const companyRepository = {
     scoreBreakdown: Company['scoreBreakdown']
   ): Promise<void> {
     const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
-    // Aggregation pipeline update: score always updates; status only updates if not manuallyReviewed
+    // Preserve manual decisions from the UI while still refreshing the numeric score/breakdown.
     await col.updateOne(
       { _id: new ObjectId(id) },
       [{

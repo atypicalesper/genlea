@@ -4,6 +4,7 @@ import { logger } from '../utils/logger.js';
 const _dnsCache = new Map<string, boolean>();
 
 export async function resolvesRealDomain(domain: string): Promise<boolean> {
+  // DNS validation is used as a lightweight guard before expensive enrichment work is queued.
   if (_dnsCache.has(domain)) return _dnsCache.get(domain)!;
   try {
     await dns.lookup(domain);

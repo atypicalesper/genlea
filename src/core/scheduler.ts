@@ -3,48 +3,59 @@ import { discoveryQueue } from './queue.manager.js';
 import { generateRunId } from '../utils/random.js';
 import { logger } from '../utils/logger.js';
 import { jobRepository } from '../storage/repositories/job.repository.js';
+import { hydrateSourceHealth, isMuted } from '../discovery/source-health.js';
 import { ScraperSource } from '../types/index.js';
 
 // ── Available sources — derived from env at startup ───────────────────────────
 // Sync checks only (no I/O) — scrapers do their own full check inside isAvailable().
 // This just prevents queueing jobs for sources we know won't work.
 
-export function getAvailableSources(): Set<ScraperSource> {
-  const available = new Set<ScraperSource>();
+export function getConfiguredSources(): Set<ScraperSource> {
+  const configured = new Set<ScraperSource>();
 
   // Always available — browser-only, no credentials required
-  available.add('wellfound');
-  available.add('indeed');
-  available.add('glassdoor');
-  available.add('surelyremote');
+  configured.add('wellfound');
+  configured.add('indeed');
+  configured.add('glassdoor');
+  configured.add('surelyremote');
 
-  // Always available — ATS public JSON APIs via DuckDuckGo dorking
-  available.add('greenhouse');
-  available.add('lever');
-  available.add('ashby');
-  available.add('workable');
+  // These sources are credential-free, but their public search/discovery layer can still go stale.
+  configured.add('greenhouse');
+  configured.add('lever');
+  configured.add('ashby');
+  configured.add('workable');
 
   // API key required
-  if (process.env['EXPLORIUM_API_KEY'])  available.add('explorium');
-  if (process.env['APOLLO_API_KEY'])     available.add('apollo');
-  if (process.env['CLAY_API_KEY'])       available.add('clay');
-  if (process.env['CRUNCHBASE_API_KEY']) available.add('crunchbase');
+  if (process.env['EXPLORIUM_API_KEY'])  configured.add('explorium');
+  if (process.env['APOLLO_API_KEY'])     configured.add('apollo');
+  if (process.env['CLAY_API_KEY'])       configured.add('clay');
+  if (process.env['CRUNCHBASE_API_KEY']) configured.add('crunchbase');
 
   // Full credentials required
-  if (process.env['ZOOMINFO_USERNAME'] && process.env['ZOOMINFO_PASSWORD']) available.add('zoominfo');
-  if (process.env['LI_USERNAME'])        available.add('linkedin');
+  if (process.env['ZOOMINFO_USERNAME'] && process.env['ZOOMINFO_PASSWORD']) configured.add('zoominfo');
+  if (process.env['LI_USERNAME'])        configured.add('linkedin');
 
-  return available;
+  return configured;
+}
+
+export function getAvailableSources(): Set<ScraperSource> {
+  const out = new Set<ScraperSource>();
+  for (const src of getConfiguredSources()) {
+    if (!isMuted(src)) out.add(src);
+  }
+  return out;
 }
 
 export function logAvailableSources(): void {
-  const available = getAvailableSources();
+  const configured = getConfiguredSources();
   const all: ScraperSource[] = ['explorium', 'wellfound', 'linkedin', 'indeed', 'glassdoor', 'surelyremote', 'crunchbase', 'apollo', 'zoominfo', 'clay', 'greenhouse', 'lever', 'ashby', 'workable'];
   for (const src of all) {
-    if (available.has(src)) {
-      logger.info(`  ✓  ${src}`);
-    } else {
+    if (!configured.has(src)) {
       logger.warn(`  ✗  ${src}  — credentials not configured, skipping`);
+    } else if (isMuted(src)) {
+      logger.warn(`  ⏸  ${src}  — muted (consecutive empty responses)`);
+    } else {
+      logger.info(`  ✓  ${src}`);
     }
   }
 }
@@ -213,6 +224,11 @@ export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: st
 // ── Start scheduler (cron every 2 hours + immediate run on startup) ───────────
 
 export async function startScheduler(): Promise<void> {
+  // Restore source-health state from recent scrape_logs so mutes survive restarts
+  await hydrateSourceHealth().catch(err =>
+    logger.error({ err }, '[scheduler] Source-health hydrate failed')
+  );
+
   // Run immediately on startup so there's always fresh data after a restart
   await enqueueSeedRound('startup').catch(err =>
     logger.error({ err }, '[scheduler] Startup seed failed')

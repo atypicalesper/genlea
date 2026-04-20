@@ -73,6 +73,7 @@ export class ScrapeDiagnostics {
   }
 
   classify(signals: { captcha?: boolean; networkError?: boolean; pageText?: string }): FailureMode {
+    // Classify from most explicit to least explicit so "empty" becomes a fallback, not a false root cause.
     if (signals.captcha)      return this.outcome = 'captcha';
     if (signals.networkError) return this.outcome = 'network_error';
     if (signals.pageText && /access denied|you have been blocked|forbidden|unusual traffic/i.test(signals.pageText.slice(0, 3000))) {
@@ -112,6 +113,7 @@ export class ScrapeDiagnostics {
       artifactBase: this.artifactBase,
     };
 
+    // Auto-dump the page only for failure-like outcomes so debug artifacts stay useful and bounded.
     const shouldDump = page && !this.artifactBase && (
       this.outcome === 'captcha' ||
       this.outcome === 'blocked' ||

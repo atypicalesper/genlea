@@ -28,6 +28,7 @@ export class WellfoundScraper implements Scraper {
       const context = await diag.stage('create_context', () => browserManager.createContext(browserId, { proxy }));
       page = await browserManager.newPage(context);
 
+      // Wellfound gives better startup identity than generic job boards, but the listing page is selector-fragile.
       const companies = await this.scrapeHiringSection(page, query, diag);
       diag.recordItems(companies.length);
 
@@ -59,7 +60,7 @@ export class WellfoundScraper implements Scraper {
   }
 
   // ── Hiring Section ──────────────────────────────────────────────────────────
-  // Go directly to /jobs, wait for content, extract via JS eval (no CSS class guessing)
+  // Go directly to /jobs, then use DOM evaluation instead of brittle class names.
 
   private async scrapeHiringSection(
     page: Page,
@@ -85,7 +86,7 @@ export class WellfoundScraper implements Scraper {
       await browserManager.humanDelay(1000, 2000);
     });
 
-    // Extract company slugs via page.evaluate — immune to class name changes
+    // Company slugs are the most stable identifier on the listing page.
     const raw = await diag.stage('extract_slugs', () => page.evaluate((): Array<{ name: string; slug: string }> => {
       const seen = new Set<string>();
       const out: Array<{ name: string; slug: string }> = [];
@@ -98,7 +99,7 @@ export class WellfoundScraper implements Scraper {
         if (seen.has(slug)) return;
         seen.add(slug);
 
-        // Walk up to find the nearest container with meaningful text
+        // Walk upward because the anchor text is often just an icon or nested fragment.
         let el: Element | null = a;
         for (let i = 0; i < 5; i++) {
           el = el?.parentElement ?? null;
@@ -145,14 +146,14 @@ export class WellfoundScraper implements Scraper {
 
     await browserManager.humanScroll(page, 3);
 
-    // Extract via evaluate — no fragile CSS class selectors
+    // Detail pages are parsed via evaluate to survive class-name churn better than locators.
     const data = await page.evaluate((): {
       websiteUrl?: string; location?: string; empText?: string;
       stage?: string; description?: string;
       jobs: Array<{ title: string }>;
       founders: Array<{ fullName: string; roleText: string; linkedinUrl?: string }>;
     } => {
-      // Website: first outbound link that isn't wellfound
+      // The company website is the best place to get a real domain for downstream enrichment.
       const websiteAnchor = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="http"]'))
         .find(a => !a.href.includes('wellfound.com') && !a.href.includes('linkedin.com') && !a.href.includes('twitter.com'));
       const websiteUrl = websiteAnchor?.href;
@@ -199,6 +200,7 @@ export class WellfoundScraper implements Scraper {
     }
 
     if (!domain) {
+      // Missing domains are expected on some startup profiles; discovery can still keep the company by name.
       logger.debug({ slug: co.slug }, '[wellfound] No domain found — will filter downstream');
     }
 
@@ -217,6 +219,7 @@ export class WellfoundScraper implements Scraper {
 
     const jobs = domain
       ? data.jobs.map(j => ({
+          // Only attach jobs when they can be tied to a concrete company domain.
           companyDomain: domain!,
           title:         j.title,
           techTags:      extractTechFromTitle(j.title),
@@ -251,6 +254,7 @@ export class WellfoundScraper implements Scraper {
 }
 
 function parseEmployeeText(text: string): number | undefined {
+  // Convert ranges like "11-50" into a midpoint so size scoring can work on scraped text.
   const match = text.match(/(\d+)\s*[-–]\s*(\d+)|(\d+)\+?/);
   if (!match) return undefined;
   if (match[1] && match[2]) return Math.floor((parseInt(match[1], 10) + parseInt(match[2], 10)) / 2);

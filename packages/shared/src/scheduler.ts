@@ -78,6 +78,7 @@ export const SEED_QUERIES: Array<{
 export function getAvailableSources(): Set<ScraperSource> {
   const available = new Set<ScraperSource>();
 
+  // These are the zero-credential discovery sources that should work in a bare local setup.
   available.add('wellfound');
   available.add('indeed');
   available.add('glassdoor');
@@ -111,6 +112,7 @@ export function getSeedQueryCount(): number { return SEED_QUERIES.length; }
 
 export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: string; queries: number }> {
   if (label === 'cron' || label === 'scheduled') {
+    // Backpressure guard so a stuck worker pool does not let cron enqueue forever.
     const counts = await discoveryQueue.getJobCounts();
     const waiting = counts.waiting ?? 0;
     if (waiting > DISCOVERY_BACKLOG_THRESHOLD) {
@@ -126,6 +128,7 @@ export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: st
   logger.info({ runId, total: SEED_QUERIES.length, active: activeQueries.length, label }, '[scheduler] Enqueueing seed round');
 
   for (const q of activeQueries) {
+    // Each query becomes its own queue job so failing sources can retry independently.
     await discoveryQueue.add(
       `${label}:${q.source}:${runId}`,
       {

@@ -39,6 +39,7 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     const { score, status, breakdown } = scoreCompany(
       { company, contacts, jobs },
       {
+        // All runtime tuning comes from settings so scoring stays reproducible across workers.
         hotVerified:         settings.leadScoreHotVerifiedThreshold,
         hot:                 settings.leadScoreHotThreshold,
         warm:                settings.leadScoreWarmThreshold,

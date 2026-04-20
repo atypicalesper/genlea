@@ -208,15 +208,18 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
           let domain = normalizeDomain((co['domain'] as string) ?? '');
           let domainResolved = true;
           if (!domain) {
+            // Preserve unresolved companies so discovery can still surface them for manual review.
             domain = `${slugifyName(name)}.unresolved`;
             domainResolved = false;
           } else if (!(await resolvesRealDomain(domain))) {
             logger.debug({ domain }, '[discovery-tools] DNS unresolved — keeping anyway');
+            // Keep the real hostname for visibility, but avoid auto-enrichment until it resolves cleanly.
             domainResolved = false;
           } else {
             resolvedCount++;
           }
 
+          // Auto-enrichment only makes sense once we have a trustworthy domain to hand downstream.
           const isJobBoard    = ['wellfound', 'linkedin', 'indeed', 'glassdoor', 'surelyremote', 'greenhouse', 'lever', 'ashby', 'workable'].includes(source);
           const hiringInStack = isJobBoard || defaultHiring;
           const pipelineStatus = hiringInStack && domainResolved ? 'discovered' : 'watchlist';
