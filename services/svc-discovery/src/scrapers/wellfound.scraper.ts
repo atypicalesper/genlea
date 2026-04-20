@@ -128,11 +128,11 @@ export class WellfoundScraper implements Scraper {
       jobs: Array<{ title: string }>;
       founders: Array<{ fullName: string; roleText: string; linkedinUrl?: string }>;
     } => {
-      const allText = [...document.querySelectorAll('span, p, div')]
+      const allText = Array.from(document.querySelectorAll('span, p, div'))
         .map(el => el.textContent?.trim() ?? '')
         .filter(t => t.length > 0 && t.length < 200);
 
-      const websiteAnchor = [...document.querySelectorAll<HTMLAnchorElement>('a[href^="http"]')]
+      const websiteAnchor = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="http"]'))
         .find(a => !a.href.includes('wellfound.com') && !a.href.includes('linkedin.com') && !a.href.includes('twitter.com'));
 
       const location    = allText.find(t => /[A-Z][a-z]+(,\s*[A-Z]{2}|,\s*[A-Z][a-z]+)/.test(t) && t.length < 60) ?? '';
@@ -140,7 +140,7 @@ export class WellfoundScraper implements Scraper {
       const stage       = allText.find(t => /seed|series [abc]|pre-seed|bootstrapped/i.test(t) && t.length < 40) ?? '';
       const description = (document.querySelector('meta[name="description"]') as HTMLMetaElement | null)?.content ?? '';
 
-      const jobs = [...document.querySelectorAll<HTMLAnchorElement>('a[href*="/jobs/"]')]
+      const jobs = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/jobs/"]'))
         .slice(0, 15)
         .map(a => ({ title: a.textContent?.trim() ?? '' }))
         .filter(j => j.title.length > 3);

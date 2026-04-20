@@ -3,6 +3,8 @@ import { logger } from '../utils/logger.js';
 
 // LangSmith auto-instruments all LangChain calls when LANGCHAIN_TRACING_V2=true.
 // This module adds explicit span wrapping for non-LangChain code (agent loop steps).
+// Tracing is hard-disabled for now because the LangSmith tenant is rate-limited.
+const LANGSMITH_DISABLED = true;
 
 let tracingSuppressed = false;
 let quotaWarningSeen = false;
@@ -15,6 +17,7 @@ const QUOTA_PATTERNS = [
 ];
 
 const isEnabled = () =>
+  !LANGSMITH_DISABLED &&
   !tracingSuppressed &&
   !!process.env['LANGCHAIN_API_KEY'] && process.env['LANGCHAIN_TRACING_V2'] === 'true';
 
@@ -84,7 +87,9 @@ export function wrapToolTraceable<TArgs extends unknown[], TReturn>(
 
 // Called once at service startup to validate LangSmith config.
 export function logLangSmithStatus(): void {
-  if (isEnabled()) {
+  if (LANGSMITH_DISABLED) {
+    logger.info('[langsmith] Tracing hard-disabled in code');
+  } else if (isEnabled()) {
     logger.info({
       project: process.env['LANGCHAIN_PROJECT'] ?? 'default',
       endpoint: process.env['LANGCHAIN_ENDPOINT'] ?? 'https://api.smith.langchain.com',
