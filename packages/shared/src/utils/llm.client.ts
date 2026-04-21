@@ -17,6 +17,44 @@ function is429(err: unknown): boolean {
   return e.status === 429 || e.statusCode === 429 || e.message.includes('429') || e.message.toLowerCase().includes('rate limit');
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isTransientOllamaError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const message = err.message.toLowerCase();
+  return message.includes('headers timeout') || message.includes('fetch failed') || message.includes('socket hang up');
+}
+
+function withTransientRetry(model: BaseChatModel): BaseChatModel {
+  return new Proxy(model, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop !== 'invoke' || typeof value !== 'function') return value;
+
+      return async function(...args: unknown[]) {
+        const maxAttempts = parseInt(process.env['OLLAMA_RETRY_ATTEMPTS'] ?? '3', 10);
+        const retryDelayMs = parseInt(process.env['OLLAMA_RETRY_DELAY_MS'] ?? '1500', 10);
+
+        let lastErr: unknown;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            return await (value as (...input: unknown[]) => Promise<unknown>).call(target, ...args);
+          } catch (err) {
+            lastErr = err;
+            if (!isTransientOllamaError(err) || attempt === maxAttempts) throw err;
+            logger.warn({ attempt, maxAttempts, err }, '[llm] Ollama transient failure — retrying');
+            await sleep(retryDelayMs * attempt);
+          }
+        }
+
+        throw lastErr;
+      };
+    },
+  }) as unknown as BaseChatModel;
+}
+
 function withOllamaFallback(primary: BaseChatModel, fallback: BaseChatModel): BaseChatModel {
   return new Proxy(primary, {
     get(target, prop, receiver) {
@@ -59,7 +97,7 @@ export async function buildLlm(): Promise<BaseChatModel> {
       numPredict,
       keepAlive:   '30m',
     }) as unknown as BaseChatModel;
-    return withOllamaFallback(groqLlm, ollamaLlm);
+    return withTransientRetry(withOllamaFallback(groqLlm, ollamaLlm));
   }
 
   if (PROVIDER === 'anthropic') {
@@ -77,7 +115,7 @@ export async function buildLlm(): Promise<BaseChatModel> {
   // Override via OLLAMA_NUM_CTX if you need to reduce for a larger model.
   const numCtx     = parseInt(process.env['OLLAMA_NUM_CTX']     ?? '32768', 10);
   const numPredict = parseInt(process.env['OLLAMA_NUM_PREDICT'] ?? '8192',  10);
-  return new ChatOllama({
+  const ollama = new ChatOllama({
     model:      MODEL,
     baseUrl:    process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
     temperature: 0.2,
@@ -85,4 +123,5 @@ export async function buildLlm(): Promise<BaseChatModel> {
     numPredict,
     keepAlive:  '30m',  // keep model loaded between agent runs — avoids ~3s cold-start per job
   }) as unknown as BaseChatModel;
+  return withTransientRetry(ollama);
 }

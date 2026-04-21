@@ -90,11 +90,16 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     tool(
       async ({ name: companyName }) => {
-        if (!process.env['EXPLORIUM_API_KEY']) {
-          return JSON.stringify({ available: false, reason: 'EXPLORIUM_API_KEY not configured' });
+        const unavailableReason = exploriumScraper.getUnavailableReason();
+        if (unavailableReason) {
+          return JSON.stringify({ available: false, reason: unavailableReason });
         }
         const result = await exploriumScraper.enrichDomain(domain, companyName).catch(() => null);
-        if (!result) return JSON.stringify({ found: false });
+        if (!result) {
+          const reason = exploriumScraper.getUnavailableReason();
+          if (reason) return JSON.stringify({ available: false, reason });
+          return JSON.stringify({ found: false });
+        }
 
         const company = await companyRepository.findById(companyId);
         if (result.company) {

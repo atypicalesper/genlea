@@ -10,7 +10,7 @@
  * Auth header: api_key: <key>   (NOT Bearer)
  */
 
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosError, AxiosInstance } from 'axios';
 import {
   Scraper, ScrapeQuery, RawResult, RawCompany, RawContact, FundingStage,
 } from '../../types/index.js';
@@ -92,6 +92,7 @@ interface ContactInfoResult {
 export class ExploriumScraper implements Scraper {
   name = 'explorium' as const;
   private client: AxiosInstance;
+  private unavailableReason: string | null = null;
 
   constructor() {
     this.client = axios.create({
@@ -109,7 +110,12 @@ export class ExploriumScraper implements Scraper {
   }
 
   async isAvailable(): Promise<boolean> {
-    return !!process.env['EXPLORIUM_API_KEY'];
+    return !!process.env['EXPLORIUM_API_KEY'] && !this.unavailableReason;
+  }
+
+  getUnavailableReason(): string | null {
+    if (!process.env['EXPLORIUM_API_KEY']) return 'EXPLORIUM_API_KEY not configured';
+    return this.unavailableReason;
   }
 
   /**
@@ -117,7 +123,7 @@ export class ExploriumScraper implements Scraper {
    * Keywords are mapped to tech stack filters; location defaults to US.
    */
   async scrape(query: ScrapeQuery): Promise<RawResult[]> {
-    if (!process.env['EXPLORIUM_API_KEY']) return [];
+    if (!(await this.isAvailable())) return [];
 
     const techTerms = keywordsToTechStack(query.keywords);
     const limit     = Math.min(query.limit ?? 25, 500);
@@ -198,7 +204,8 @@ export class ExploriumScraper implements Scraper {
       logger.info({ keywords: query.keywords, found: results.length }, '[explorium:discovery] Companies found');
       return results;
     } catch (err) {
-      logger.error({ err, keywords: query.keywords }, '[explorium:discovery] scrape failed');
+      const handled = this.handleAvailabilityError(err, { mode: 'discovery', keywords: query.keywords });
+      if (!handled) logger.error({ err, keywords: query.keywords }, '[explorium:discovery] scrape failed');
       return [];
     }
   }
@@ -206,8 +213,8 @@ export class ExploriumScraper implements Scraper {
   // ── Main public method ────────────────────────────────────────────────────
 
   async enrichDomain(domain: string, companyName?: string): Promise<RawResult | null> {
-    if (!process.env['EXPLORIUM_API_KEY']) {
-      logger.debug({ domain }, '[explorium] No API key — skipping');
+    if (!(await this.isAvailable())) {
+      logger.debug({ domain, reason: this.getUnavailableReason() }, '[explorium] Provider unavailable — skipping');
       return null;
     }
 
@@ -274,7 +281,8 @@ export class ExploriumScraper implements Scraper {
         scrapedAt: new Date(),
       };
     } catch (err) {
-      logger.error({ err, domain }, '[explorium] enrichDomain failed');
+      const handled = this.handleAvailabilityError(err, { domain });
+      if (!handled) logger.error({ err, domain }, '[explorium] enrichDomain failed');
       return null;
     }
   }
@@ -290,7 +298,8 @@ export class ExploriumScraper implements Scraper {
       });
       return res.data.matched_businesses?.[0]?.business_id ?? null;
     } catch (err) {
-      logger.warn({ err, domain }, '[explorium] matchBusiness failed');
+      const handled = this.handleAvailabilityError(err, { domain });
+      if (!handled) logger.warn({ err, domain }, '[explorium] matchBusiness failed');
       return null;
     }
   }
@@ -387,6 +396,43 @@ export class ExploriumScraper implements Scraper {
       return [];
     }
   }
+
+  private handleAvailabilityError(err: unknown, context: Record<string, unknown>): boolean {
+    const details = getExploriumErrorDetails(err);
+    if (!details) return false;
+
+    this.unavailableReason = details.reason;
+    logger.warn({ ...context, status: details.status, reason: details.reason }, '[explorium] Provider unavailable');
+    return true;
+  }
+}
+
+function getExploriumErrorDetails(err: unknown): { status?: number; reason: string } | null {
+  if (!axios.isAxiosError(err)) return null;
+
+  const status = err.response?.status;
+  const details = extractExploriumMessage(err);
+  const message = details.toLowerCase();
+
+  if (status === 401 || status === 403) {
+    if (message.includes('insufficient credits')) {
+      return { status, reason: 'Explorium credits exhausted' };
+    }
+    return { status, reason: 'Explorium access forbidden or API key invalid' };
+  }
+
+  if (status === 429) {
+    return { status, reason: 'Explorium rate limited' };
+  }
+
+  return null;
+}
+
+function extractExploriumMessage(err: AxiosError): string {
+  const data = err.response?.data;
+  if (!data || typeof data !== 'object') return err.message;
+  const details = (data as { details?: unknown }).details;
+  return typeof details === 'string' && details.trim() ? details : err.message;
 }
 
 export const exploriumScraper = new ExploriumScraper();

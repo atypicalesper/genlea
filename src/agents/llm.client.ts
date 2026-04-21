@@ -11,25 +11,39 @@ const DEFAULT_MODELS: Record<string, string> = {
 
 export const MODEL = process.env['AGENT_LLM_MODEL'] ?? DEFAULT_MODELS[PROVIDER] ?? 'qwen3.5';
 
-function is429(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const e = err as Error & { status?: number; statusCode?: number };
-  return e.status === 429 || e.statusCode === 429 || e.message.includes('429') || e.message.toLowerCase().includes('rate limit');
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function withOllamaFallback(primary: BaseChatModel, fallback: BaseChatModel): BaseChatModel {
-  return new Proxy(primary, {
+function isTransientOllamaError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const message = err.message.toLowerCase();
+  return message.includes('headers timeout') || message.includes('fetch failed') || message.includes('socket hang up');
+}
+
+function withTransientRetry(model: BaseChatModel): BaseChatModel {
+  return new Proxy(model, {
     get(target, prop, receiver) {
-      const val = Reflect.get(target, prop, receiver);
-      if (prop !== 'invoke' || typeof val !== 'function') return val;
+      const value = Reflect.get(target, prop, receiver);
+      if (prop !== 'invoke' || typeof value !== 'function') return value;
+
       return async function(...args: unknown[]) {
-        try {
-          return await (val as (...a: unknown[]) => Promise<unknown>).call(target, ...args);
-        } catch (err) {
-          if (!is429(err)) throw err;
-          logger.warn('[llm] Groq 429 — falling back to Ollama');
-          return await (fallback.invoke as (...a: unknown[]) => Promise<unknown>).call(fallback, ...args);
+        const maxAttempts = parseInt(process.env['OLLAMA_RETRY_ATTEMPTS'] ?? '3', 10);
+        const retryDelayMs = parseInt(process.env['OLLAMA_RETRY_DELAY_MS'] ?? '1500', 10);
+
+        let lastErr: unknown;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            return await (value as (...input: unknown[]) => Promise<unknown>).call(target, ...args);
+          } catch (err) {
+            lastErr = err;
+            if (!isTransientOllamaError(err) || attempt === maxAttempts) throw err;
+            logger.warn({ attempt, maxAttempts, err }, '[llm] Ollama transient failure — retrying');
+            await sleep(retryDelayMs * attempt);
+          }
         }
+
+        throw lastErr;
       };
     },
   }) as unknown as BaseChatModel;
@@ -39,23 +53,13 @@ export async function buildLlm(): Promise<BaseChatModel> {
   logger.debug({ provider: PROVIDER, model: MODEL }, '[llm] Building LangChain model');
 
   if (PROVIDER === 'groq') {
-    const [{ ChatGroq }, { ChatOllama }] = await Promise.all([
-      import('@langchain/groq'),
-      import('@langchain/ollama'),
-    ]);
-    const groqLlm = new ChatGroq({
+    const { ChatGroq } = await import('@langchain/groq');
+    return new ChatGroq({
       model:       MODEL,
       apiKey:      process.env['GROQ_API_KEY'],
       temperature: 0.2,
       maxTokens:   1024,
     }) as unknown as BaseChatModel;
-    const ollamaLlm = new ChatOllama({
-      model:       DEFAULT_MODELS['ollama'],
-      baseUrl:     process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
-      temperature: 0.2,
-      numPredict:  1024,
-    }) as unknown as BaseChatModel;
-    return withOllamaFallback(groqLlm, ollamaLlm);
   }
 
   if (PROVIDER === 'anthropic') {
@@ -69,10 +73,13 @@ export async function buildLlm(): Promise<BaseChatModel> {
   }
 
   const { ChatOllama } = await import('@langchain/ollama');
-  return new ChatOllama({
+  const ollama = new ChatOllama({
     model:       MODEL,
     baseUrl:     process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
     temperature: 0.2,
-    numPredict:  1024,
+    numPredict:  parseInt(process.env['OLLAMA_NUM_PREDICT'] ?? '1024', 10),
+    numCtx:      parseInt(process.env['OLLAMA_NUM_CTX'] ?? '8192', 10),
+    keepAlive:   process.env['OLLAMA_KEEP_ALIVE'] ?? '30m',
   }) as unknown as BaseChatModel;
+  return withTransientRetry(ollama);
 }
