@@ -1,7 +1,11 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { logger } from './logger.js';
 
-const PROVIDER = (process.env['AGENT_LLM_PROVIDER'] ?? 'ollama').toLowerCase();
+const REQUESTED_PROVIDER = (process.env['AGENT_LLM_PROVIDER'] ?? 'ollama').toLowerCase();
+const HOSTED_MODELS_ENABLED = (process.env['ENABLE_HOSTED_LLM'] ?? 'false').toLowerCase() === 'true';
+const PROVIDER = !HOSTED_MODELS_ENABLED && REQUESTED_PROVIDER !== 'ollama'
+  ? 'ollama'
+  : REQUESTED_PROVIDER;
 
 const DEFAULT_MODELS: Record<string, string> = {
   ollama:    'qwen3.5',
@@ -74,6 +78,11 @@ function withOllamaFallback(primary: BaseChatModel, fallback: BaseChatModel): Ba
 }
 
 export async function buildLlm(): Promise<BaseChatModel> {
+  if (!HOSTED_MODELS_ENABLED && REQUESTED_PROVIDER !== 'ollama') {
+    // Hosted providers remain wired for later, but the MVP defaults to the free local model path.
+    logger.info({ requestedProvider: REQUESTED_PROVIDER }, '[llm] Hosted provider disabled — falling back to Ollama');
+  }
+
   logger.debug({ provider: PROVIDER, model: MODEL }, '[llm] Building LangChain model');
 
   if (PROVIDER === 'groq') {

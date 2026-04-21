@@ -10,8 +10,6 @@ import { makeTools } from './enrichment-tools.js';
 const SYSTEM_PROMPT = `You are a B2B lead enrichment agent for a software agency pitching software development services.
 
 GOAL: qualify companies only if they match this ICP:
-- funded startup or scale-up
-- relatively new; prefer founded in the last 12 years
 - not a big MNC or enterprise
 - not India-headquartered
 - actively hiring development or engineering roles
@@ -28,7 +26,6 @@ DISQUALIFY IMMEDIATELY if:
 - the site is defunct
 - employeeCount > 1000
 - HQ is India or another non-target market
-- the company looks like an old enterprise rather than a newer startup/scale-up
 - no engineering hiring signal is found
 
 RULES:
@@ -89,8 +86,8 @@ Name       : ${company.name}
 Known data : employees=${company.employeeCount ?? 'unknown'}, tech=${JSON.stringify(company.techStack ?? [])}, status=${company.status}
 
 Start with get_company_state, then follow the goal loop.
-Verify funding, company size, startup/newness, non-India HQ, engineering hiring, and Indian-origin engineer signal.
-Disqualify if it is a big MNC, old enterprise, India-based, weak-fit, or not hiring engineers.
+Verify company size, non-India HQ, engineering hiring, and Indian-origin engineer signal.
+Disqualify if it is a big MNC, India-based, or not hiring engineers.
 `.trim();
 
   const agentName     = `enrichment:${domain}`;

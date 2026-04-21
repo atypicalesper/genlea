@@ -1,4 +1,4 @@
-import { Company, Contact, Job, FundingStage } from '../types/index.js';
+import { Company, Contact, Job } from '../types/index.js';
 
 const ENV_TARGET_TAGS = (process.env['TARGET_TECH_STACK'] ?? 'nodejs,typescript,python,react,nextjs,nestjs,frontend,backend,fullstack,ai,ml,generative-ai,fastapi')
   .split(',').map(t => t.trim());
@@ -78,26 +78,6 @@ export function companyFitScore(company: Company, _highValueIndustries: string[]
   if (emp !== undefined && emp !== null) {
     if (emp >= 20 && emp <= 250) score += 6;
     else if ((emp >= 10 && emp < 20) || (emp > 250 && emp <= 500)) score += 3;
-  }
-
-  const stageScores: Partial<Record<FundingStage, number>> = {
-    'Pre-seed': 4,
-    'Seed': 6,
-    'Series A': 6,
-    'Series B': 5,
-    'Series C': 3,
-  };
-  score += stageScores[company.fundingStage ?? 'Unknown'] ?? 0;
-
-  if (company.fundingTotalUsd && company.fundingTotalUsd > 0) {
-    score += 2;
-  }
-
-  const foundedYear = company.foundedYear;
-  if (foundedYear) {
-    const companyAge = new Date().getFullYear() - foundedYear;
-    if (companyAge <= 12) score += 3;
-    else if (companyAge <= 15) score += 1;
   }
 
   return Math.min(score, 15);

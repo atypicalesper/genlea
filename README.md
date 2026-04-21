@@ -7,7 +7,7 @@
 ## What it does
 
 1. **Discovers** companies via Wellfound, LinkedIn, Indeed, Crunchbase, Apollo, Glassdoor, ZoomInfo, Clay, SurelyRemote, Explorium, Hunter
-2. **Enriches** each company to verify funding, startup/newness, hiring signal, HQ country, contacts, and India-team signal
+2. **Enriches** each company to verify hiring signal, HQ country, contacts, company size, and India-team signal
 3. **Analyses** employee names to estimate the Indian-origin developer ratio via a dedicated Python microservice
 4. **Scores and filters** each lead against a strict outbound ICP instead of a generic prospecting rubric
 5. **Exports** only the strongest pitchable leads as CSV or via REST API
@@ -18,8 +18,6 @@
 
 GenLea is tuned for one specific outbound goal:
 
-- funded startups or scale-ups
-- relatively new companies, preferably founded within the last 12 years
 - not big MNCs or legacy enterprises
 - not India-headquartered
 - actively hiring software engineering or development roles
@@ -29,8 +27,6 @@ The pipeline is intentionally opinionated. It should reject:
 
 - large enterprises and global MNCs
 - India-based companies
-- unfunded or unverified-funding companies
-- old companies that look more like established enterprises than startups
 - companies without a current engineering hiring signal
 - companies where no Indian-origin employee signal can be verified
 
@@ -71,16 +67,14 @@ svc-discovery (cron every 2h)
 
 1. **Discovery** finds companies with engineering hiring evidence and basic company identity.
 2. **Enrichment** verifies:
-   - funding
    - company size
    - HQ country
-   - startup/newness signal
    - engineering hiring signal
    - India-team signal
    - decision-maker contacts
 3. **Scoring** applies both:
    - numeric scoring across origin ratio, jobs, tech, contacts, and company fit
-   - hard disqualification gates for India HQ, enterprise size, missing funding, old-company profile, missing engineering hiring, or missing India-team signal
+   - hard disqualification gates for India HQ, enterprise size, missing engineering hiring, or missing India-team signal
 4. **Export** should be used only for leads that survived those ICP checks
 
 ---
@@ -93,8 +87,8 @@ svc-discovery (cron every 2h)
 | Python 3.9+ | `services/name-origin` microservice |
 | Docker + Docker Compose | MongoDB + Redis |
 | [Ollama](https://ollama.com) + `qwen3.5` | Local LLM for agents (free, runs offline) |
-| Groq API key | Cloud LLM alternative — free tier at console.groq.com |
-| (Optional) Anthropic API key | Cloud LLM alternative |
+| (Optional) Groq API key | Hosted LLM alternative, disabled by default |
+| (Optional) Anthropic API key | Hosted LLM alternative, disabled by default |
 | (Optional) LinkedIn account | LinkedIn scraping — session stored in `sessions/` |
 | (Optional) Residential proxy | Prevents IP bans on LinkedIn / ZoomInfo |
 
@@ -125,15 +119,17 @@ Open `.env` and set at minimum:
 MONGO_URI=mongodb://localhost:27017/genlea
 REDIS_URL=redis://localhost:6379
 
-# LLM — pick one:
-AGENT_LLM_PROVIDER=groq        # easiest — free tier at console.groq.com
-GROQ_API_KEY=gsk_...
+# LLM — free-first default:
+AGENT_LLM_PROVIDER=ollama
+AGENT_LLM_MODEL=qwen3.5
+ENABLE_HOSTED_LLM=false
 
-# OR local Ollama (no API key needed):
-# AGENT_LLM_PROVIDER=ollama
-# AGENT_LLM_MODEL=qwen3.5
+# Optional hosted providers are wired but stay off unless you explicitly enable them:
+# ENABLE_HOSTED_LLM=true
+# AGENT_LLM_PROVIDER=groq
+# GROQ_API_KEY=gsk_...
 
-# OR Anthropic:
+# ENABLE_HOSTED_LLM=true
 # AGENT_LLM_PROVIDER=anthropic
 # ANTHROPIC_API_KEY=sk-ant-...
 ```
@@ -181,7 +177,7 @@ ollama pull qwen3.5      # one-time
 ollama serve             # keep running in background
 ```
 
-Skip this step if using Groq or Anthropic.
+Skip this step only if you later choose to enable a hosted provider.
 
 **Step 7: Start the services**
 
@@ -435,6 +431,8 @@ npm run db:init
 | `ollama` (default) | `OLLAMA_BASE_URL` | `qwen3.5` |
 | `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
 | `anthropic` | `ANTHROPIC_API_KEY` | `claude-haiku-4-5-20251001` |
+
+Hosted providers stay disabled unless `ENABLE_HOSTED_LLM=true`.
 
 Override the model: `AGENT_LLM_MODEL=qwen3:32b`
 

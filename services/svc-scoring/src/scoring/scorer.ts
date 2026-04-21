@@ -89,23 +89,12 @@ function getHardDisqualificationReason(input: ScoringInput): string | undefined 
   const { company, jobs } = input;
   const activeJobs = jobs.filter(job => job.isActive);
   const hqCountry = company.hqCountry?.toLowerCase() ?? '';
-  const foundedYear = company.foundedYear;
-  const companyAge = foundedYear ? new Date().getFullYear() - foundedYear : undefined;
-  const hasVerifiedFunding =
-    (!!company.fundingStage && !['Unknown', 'Bootstrapped'].includes(company.fundingStage))
-    || ((company.fundingTotalUsd ?? 0) > 0);
 
   if (hqCountry.includes('india')) {
     return 'Company is India-headquartered, which is outside the target market.';
   }
   if ((company.employeeCount ?? 0) > 1000) {
-    return 'Company is too large and looks more like a big enterprise than a target startup.';
-  }
-  if (companyAge !== undefined && companyAge > 12) {
-    return 'Company is older than the target “relatively new” startup profile.';
-  }
-  if (!hasVerifiedFunding) {
-    return 'Funding was not verified, so the company does not meet the funded-company target.';
+    return 'Company is above the target size range for outbound pitching.';
   }
   if (activeJobs.length === 0) {
     return 'No active development or engineering hiring signal was found.';

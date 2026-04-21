@@ -28,7 +28,7 @@ Target         : ≥15 companies
 
 Start with get_discovery_state to check current progress. If the goal is not met, scrape ${source} first.
 After each scrape_source, call save_companies with source="${source}" — do NOT pass company data back, just the source name.
-Focus on funded, relatively new, non-India companies that are hiring development or engineering roles.
+Focus on non-India companies that are hiring development or engineering roles.
 Avoid big MNCs, avoid companies above 1000 employees, and prefer companies likely to already employ Indian-origin engineers.
 `.trim();
 
