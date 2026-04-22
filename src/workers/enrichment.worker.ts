@@ -1,5 +1,5 @@
 import dotenvFlow from 'dotenv-flow';
-dotenvFlow.config({ override: true });
+dotenvFlow.config();
 import { Job } from 'bullmq';
 import { EnrichmentJobData } from '../types/index.js';
 import { createWorker, QUEUE_NAMES } from '../core/queue.manager.js';
@@ -8,8 +8,23 @@ import { settingsRepository } from '../storage/repositories/settings.repository.
 import { runEnrichmentAgent } from '../agents/enrichment.agent.js';
 import { logger } from '../utils/logger.js';
 
+function resolveProvider(): string {
+  const requestedProvider = (process.env['AGENT_LLM_PROVIDER'] ?? 'google').toLowerCase();
+  const hostedEnabled = (process.env['ENABLE_HOSTED_LLM'] ?? 'false').toLowerCase() === 'true';
+  return !hostedEnabled && requestedProvider !== 'ollama' && requestedProvider !== 'google'
+    ? 'ollama'
+    : requestedProvider;
+}
+
 function cap(n: number): number {
-  return process.env['AGENT_LLM_PROVIDER'] === 'ollama' ? Math.min(n, 1) : n;
+  const provider = resolveProvider();
+
+  if (provider === 'anthropic') {
+    const limit = Math.max(1, parseInt(process.env['ANTHROPIC_MAX_WORKER_CONCURRENCY'] ?? '1', 10));
+    return Math.min(n, limit);
+  }
+
+  return provider === 'ollama' ? Math.min(n, 1) : n;
 }
 
 async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> {

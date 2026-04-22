@@ -1,5 +1,5 @@
 import dotenvFlow from 'dotenv-flow';
-dotenvFlow.config({ override: true });
+dotenvFlow.config();
 import { Job } from 'bullmq';
 import { DiscoveryJobData } from '../types/index.js';
 import { createWorker, QUEUE_NAMES } from '../core/queue.manager.js';
@@ -8,8 +8,26 @@ import { settingsRepository } from '../storage/repositories/settings.repository.
 import { runDiscoveryAgent } from '../agents/discovery.agent.js';
 import { logger } from '../utils/logger.js';
 
+function resolveProvider(): string {
+  const requestedProvider = (process.env['AGENT_LLM_PROVIDER'] ?? 'google').toLowerCase();
+  const hostedEnabled = (process.env['ENABLE_HOSTED_LLM'] ?? 'false').toLowerCase() === 'true';
+  return !hostedEnabled && requestedProvider !== 'ollama' && requestedProvider !== 'google'
+    ? 'ollama'
+    : requestedProvider;
+}
+
 function cap(n: number): number {
-  return process.env['AGENT_LLM_PROVIDER'] === 'ollama' ? Math.min(n, 1) : n;
+  const provider = resolveProvider();
+
+  if (provider === 'anthropic') {
+    // Anthropic agent runs can loop through multiple tool iterations, so even a
+    // small worker fan-out can overflow the input TPM budget. Keep a single lane
+    // by default unless we explicitly widen it later.
+    const limit = Math.max(1, parseInt(process.env['ANTHROPIC_MAX_WORKER_CONCURRENCY'] ?? '1', 10));
+    return Math.min(n, limit);
+  }
+
+  return provider === 'ollama' ? Math.min(n, 1) : n;
 }
 
 async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {

@@ -7,6 +7,25 @@ import {
 import type { EnrichmentJobData } from '@genlea/shared';
 import { runEnrichmentAgent } from './agents/enrichment.agent.js';
 
+function resolveProvider(): string {
+  const requestedProvider = (process.env['AGENT_LLM_PROVIDER'] ?? 'google').toLowerCase();
+  const hostedEnabled = (process.env['ENABLE_HOSTED_LLM'] ?? 'false').toLowerCase() === 'true';
+  return !hostedEnabled && requestedProvider !== 'ollama' && requestedProvider !== 'google'
+    ? 'ollama'
+    : requestedProvider;
+}
+
+function cap(n: number): number {
+  const provider = resolveProvider();
+
+  if (provider === 'anthropic') {
+    const limit = Math.max(1, parseInt(process.env['ANTHROPIC_MAX_WORKER_CONCURRENCY'] ?? '1', 10));
+    return Math.min(n, limit);
+  }
+
+  return provider === 'ollama' ? Math.min(n, 1) : n;
+}
+
 async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> {
   logger.info({ runId: job.data.runId, domain: job.data.domain }, '[enrichment.worker] Delegating to agent');
   await runEnrichmentAgent(job.data);
@@ -19,14 +38,14 @@ async function bootstrap(): Promise<void> {
   const worker = createWorker<EnrichmentJobData>(
     QUEUE_NAMES.ENRICHMENT,
     processEnrichmentJob,
-    initialSettings.workerConcurrencyEnrichment,
+    cap(initialSettings.workerConcurrencyEnrichment),
   );
-  logger.info({ concurrency: initialSettings.workerConcurrencyEnrichment }, '[enrichment] Worker started');
+  logger.info({ concurrency: worker.concurrency }, '[enrichment] Worker started');
 
   const settingsInterval = setInterval(async () => {
     try {
       const s = await settingsRepository.get();
-      const target = s.workerConcurrencyEnrichment;
+      const target = cap(s.workerConcurrencyEnrichment);
       if (worker.concurrency !== target) {
         worker.concurrency = target;
         logger.info({ concurrency: target }, '[enrichment] Concurrency updated');
