@@ -17,6 +17,20 @@ type LeadQuery = LeadFilter & {
   maxScore?: string;
 };
 
+function shouldPushDisqualifiedToEnd(q: LeadQuery): boolean {
+  const sortBy = q.sortBy ?? 'score';
+  const sortDir = q.sortDir ?? 'desc';
+
+  return !q.status
+    && q.qualified !== 'false'
+    && sortBy === 'score'
+    && sortDir === 'desc';
+}
+
+function toApiCompany<T extends { _id?: { toString(): string } }>(doc: T): T & { _id: string } {
+  return { ...doc, _id: doc._id?.toString() ?? '' };
+}
+
 function buildLeadsFilter(q: LeadQuery): Record<string, unknown> {
   const filter: Record<string, unknown> = {};
 
@@ -66,7 +80,25 @@ export async function leadsRoutes(app: FastifyInstance) {
     const skip      = (Number(page) - 1) * safeLimit;
 
     const [companies, total] = await Promise.all([
-      companyRepository.findMany(filter, { sort: { [sortField]: sortOrder }, limit: safeLimit, skip }),
+      shouldPushDisqualifiedToEnd(req.query)
+        ? getCollection(COLLECTIONS.COMPANIES)
+            .aggregate([
+              { $match: filter },
+              {
+                $addFields: {
+                  // Keep disqualified leads visible, but sink them below active leads
+                  // in the default score-sorted listing so the main page stays actionable.
+                  __disqualifiedRank: { $cond: [{ $eq: ['$status', 'disqualified'] }, 1, 0] },
+                },
+              },
+              { $sort: { __disqualifiedRank: 1, [sortField]: sortOrder, _id: 1 } },
+              { $skip: skip },
+              { $limit: safeLimit },
+              { $project: { __disqualifiedRank: 0 } },
+            ])
+            .toArray()
+            .then(docs => docs.map(toApiCompany))
+        : companyRepository.findMany(filter, { sort: { [sortField]: sortOrder }, limit: safeLimit, skip }),
       companyRepository.count(filter),
     ]);
 
