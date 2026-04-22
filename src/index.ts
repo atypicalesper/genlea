@@ -1,5 +1,6 @@
 #!/usr/bin/env tsx
-import 'dotenv-flow/config';
+import dotenvFlow from 'dotenv-flow';
+dotenvFlow.config({ override: true });
 import { Command } from 'commander';
 import { connectMongo } from './storage/mongo.client.js';
 import { queueManager } from './core/queue.manager.js';
