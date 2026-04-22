@@ -1,20 +1,12 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { logger } from '../utils/logger.js';
 
-const REQUESTED_PROVIDER = (process.env['AGENT_LLM_PROVIDER'] ?? 'google').toLowerCase();
-const HOSTED_MODELS_ENABLED = (process.env['ENABLE_HOSTED_LLM'] ?? 'false').toLowerCase() === 'true';
-const PROVIDER = !HOSTED_MODELS_ENABLED && REQUESTED_PROVIDER !== 'ollama' && REQUESTED_PROVIDER !== 'google'
-  ? 'ollama'
-  : REQUESTED_PROVIDER;
-
 const DEFAULT_MODELS: Record<string, string> = {
   ollama:    'qwen3.5',
   groq:      'llama-3.3-70b-versatile',
   anthropic: 'claude-haiku-4-5-20251001',
   google:    'gemini-2.0-flash',
 };
-
-export const MODEL = process.env['AGENT_LLM_MODEL'] ?? DEFAULT_MODELS[PROVIDER] ?? 'qwen3.5';
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -55,37 +47,43 @@ function withTransientRetry(model: BaseChatModel): BaseChatModel {
 }
 
 export async function buildLlm(): Promise<BaseChatModel> {
-  if (!HOSTED_MODELS_ENABLED && REQUESTED_PROVIDER !== 'ollama') {
-    // Keep hosted-provider wiring in the codebase for later, but default the MVP to the free local path.
-    logger.info({ requestedProvider: REQUESTED_PROVIDER }, '[llm] Hosted provider disabled — falling back to Ollama');
+  const requestedProvider = (process.env['AGENT_LLM_PROVIDER'] ?? 'google').toLowerCase();
+  const hostedEnabled = (process.env['ENABLE_HOSTED_LLM'] ?? 'false').toLowerCase() === 'true';
+  const provider = !hostedEnabled && requestedProvider !== 'ollama' && requestedProvider !== 'google'
+    ? 'ollama'
+    : requestedProvider;
+  const model = process.env['AGENT_LLM_MODEL'] ?? DEFAULT_MODELS[provider] ?? 'qwen3.5';
+
+  if (!hostedEnabled && requestedProvider !== 'ollama') {
+    logger.info({ requestedProvider }, '[llm] Hosted provider disabled — falling back to Ollama');
   }
 
-  logger.debug({ provider: PROVIDER, model: MODEL }, '[llm] Building LangChain model');
+  logger.debug({ provider, model }, '[llm] Building LangChain model');
 
-  if (PROVIDER === 'groq') {
+  if (provider === 'groq') {
     const { ChatGroq } = await import('@langchain/groq');
     return new ChatGroq({
-      model:       MODEL,
+      model,
       apiKey:      process.env['GROQ_API_KEY'],
       temperature: 0.2,
       maxTokens:   1024,
     }) as unknown as BaseChatModel;
   }
 
-  if (PROVIDER === 'anthropic') {
+  if (provider === 'anthropic') {
     const { ChatAnthropic } = await import('@langchain/anthropic');
     return new ChatAnthropic({
-      model:       MODEL,
+      model,
       apiKey:      process.env['ANTHROPIC_API_KEY'],
       temperature: 0.2,
       maxTokens:   1024,
     }) as unknown as BaseChatModel;
   }
 
-  if (PROVIDER === 'google') {
+  if (provider === 'google') {
     const { ChatGoogleGenerativeAI } = await import('@langchain/google-genai');
     return new ChatGoogleGenerativeAI({
-      model:       MODEL,
+      model,
       apiKey:      process.env['GOOGLE_API_KEY'],
       temperature: 0.2,
       maxOutputTokens: 1024,
@@ -94,7 +92,7 @@ export async function buildLlm(): Promise<BaseChatModel> {
 
   const { ChatOllama } = await import('@langchain/ollama');
   const ollama = new ChatOllama({
-    model:       MODEL,
+    model,
     baseUrl:     process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
     temperature: 0.2,
     numPredict:  parseInt(process.env['OLLAMA_NUM_PREDICT'] ?? '1024', 10),

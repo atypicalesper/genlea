@@ -1,20 +1,12 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { logger } from './logger.js';
 
-const REQUESTED_PROVIDER = (process.env['AGENT_LLM_PROVIDER'] ?? 'google').toLowerCase();
-const HOSTED_MODELS_ENABLED = (process.env['ENABLE_HOSTED_LLM'] ?? 'false').toLowerCase() === 'true';
-const PROVIDER = !HOSTED_MODELS_ENABLED && REQUESTED_PROVIDER !== 'ollama' && REQUESTED_PROVIDER !== 'google'
-  ? 'ollama'
-  : REQUESTED_PROVIDER;
-
 const DEFAULT_MODELS: Record<string, string> = {
   ollama:    'qwen3.5',
   groq:      'llama-3.3-70b-versatile',
-  anthropic: 'claude-3-5-haiku-20241022',
+  anthropic: 'claude-haiku-4-5-20251001',
   google:    'gemini-2.0-flash',
 };
-
-export const MODEL = process.env['AGENT_LLM_MODEL'] ?? DEFAULT_MODELS[PROVIDER] ?? 'qwen3.5';
 
 function is429(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
@@ -79,20 +71,26 @@ function withOllamaFallback(primary: BaseChatModel, fallback: BaseChatModel): Ba
 }
 
 export async function buildLlm(): Promise<BaseChatModel> {
-  if (!HOSTED_MODELS_ENABLED && REQUESTED_PROVIDER !== 'ollama') {
-    // Hosted providers remain wired for later, but the MVP defaults to the free local model path.
-    logger.info({ requestedProvider: REQUESTED_PROVIDER }, '[llm] Hosted provider disabled — falling back to Ollama');
+  const requestedProvider = (process.env['AGENT_LLM_PROVIDER'] ?? 'google').toLowerCase();
+  const hostedEnabled = (process.env['ENABLE_HOSTED_LLM'] ?? 'false').toLowerCase() === 'true';
+  const provider = !hostedEnabled && requestedProvider !== 'ollama' && requestedProvider !== 'google'
+    ? 'ollama'
+    : requestedProvider;
+  const model = process.env['AGENT_LLM_MODEL'] ?? DEFAULT_MODELS[provider] ?? 'qwen3.5';
+
+  if (!hostedEnabled && requestedProvider !== 'ollama') {
+    logger.info({ requestedProvider }, '[llm] Hosted provider disabled — falling back to Ollama');
   }
 
-  logger.debug({ provider: PROVIDER, model: MODEL }, '[llm] Building LangChain model');
+  logger.debug({ provider, model }, '[llm] Building LangChain model');
 
-  if (PROVIDER === 'groq') {
+  if (provider === 'groq') {
     const [{ ChatGroq }, { ChatOllama }] = await Promise.all([
       import('@langchain/groq'),
       import('@langchain/ollama'),
     ]);
     const groqLlm = new ChatGroq({
-      model:       MODEL,
+      model,
       apiKey:      process.env['GROQ_API_KEY'],
       temperature: 0.2,
       maxTokens:   8192,
@@ -110,20 +108,20 @@ export async function buildLlm(): Promise<BaseChatModel> {
     return withTransientRetry(withOllamaFallback(groqLlm, ollamaLlm));
   }
 
-  if (PROVIDER === 'anthropic') {
+  if (provider === 'anthropic') {
     const { ChatAnthropic } = await import('@langchain/anthropic');
     return new ChatAnthropic({
-      model:       MODEL,
+      model,
       apiKey:      process.env['ANTHROPIC_API_KEY'],
       temperature: 0.2,
       maxTokens:   8192,
     }) as unknown as BaseChatModel;
   }
 
-  if (PROVIDER === 'google') {
+  if (provider === 'google') {
     const { ChatGoogleGenerativeAI } = await import('@langchain/google-genai');
     return new ChatGoogleGenerativeAI({
-      model:       MODEL,
+      model,
       apiKey:      process.env['GOOGLE_API_KEY'],
       temperature: 0.2,
       maxOutputTokens: 8192,
@@ -131,17 +129,15 @@ export async function buildLlm(): Promise<BaseChatModel> {
   }
 
   const { ChatOllama } = await import('@langchain/ollama');
-  // numCtx: Ollama default is 2048 — qwen3.5 supports 32768 (fits fine on 18GB M3 Pro).
-  // Override via OLLAMA_NUM_CTX if you need to reduce for a larger model.
   const numCtx     = parseInt(process.env['OLLAMA_NUM_CTX']     ?? '32768', 10);
   const numPredict = parseInt(process.env['OLLAMA_NUM_PREDICT'] ?? '8192',  10);
   const ollama = new ChatOllama({
-    model:      MODEL,
+    model,
     baseUrl:    process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
     temperature: 0.2,
     numCtx,
     numPredict,
-    keepAlive:  '30m',  // keep model loaded between agent runs — avoids ~3s cold-start per job
+    keepAlive:  '30m',
   }) as unknown as BaseChatModel;
   return withTransientRetry(ollama);
 }
