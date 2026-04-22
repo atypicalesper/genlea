@@ -11,6 +11,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   ollama:    'qwen3.5',
   groq:      'llama-3.3-70b-versatile',
   anthropic: 'claude-haiku-4-5-20251001',
+  google:    'gemini-2.0-flash',
 };
 
 export const MODEL = process.env['AGENT_LLM_MODEL'] ?? DEFAULT_MODELS[PROVIDER] ?? 'qwen3.5';
@@ -78,6 +79,16 @@ export async function buildLlm(): Promise<BaseChatModel> {
       apiKey:      process.env['ANTHROPIC_API_KEY'],
       temperature: 0.2,
       maxTokens:   1024,
+    }) as unknown as BaseChatModel;
+  }
+
+  if (PROVIDER === 'google') {
+    const { ChatGoogleGenerativeAI } = await import('@langchain/google-genai');
+    return new ChatGoogleGenerativeAI({
+      model:       MODEL,
+      apiKey:      process.env['GOOGLE_API_KEY'],
+      temperature: 0.2,
+      maxOutputTokens: 1024,
     }) as unknown as BaseChatModel;
   }
 
