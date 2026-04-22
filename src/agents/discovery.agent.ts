@@ -16,7 +16,7 @@ import { buildLlm }              from './llm.client.js';
 import { alertAgentFailure }     from '../utils/alert.js';
 import { scrapeLogRepository }   from '../storage/repositories/scrape-log.repository.js';
 import { recordResult }          from '../discovery/source-health.js';
-import { logger }                from '../utils/logger.js';
+import { createLogger, getLlmTag } from '../utils/logger.js';
 import { makeTools, buildSystemPrompt } from './discovery-tools.js';
 import type { DiscoveryJobData, ScrapeDiagnosticsSummary }  from '../types/index.js';
 
@@ -48,11 +48,12 @@ Avoid big MNCs, avoid companies above 1000 employees, and prefer companies likel
   const agentName    = `discovery:${source}:${runId.slice(0, 8)}`;
   const agentTools   = makeTools(job);
   const maxIterations = 12;
+  const log = createLogger({ phase: 'discovery', source, llm: getLlmTag() });
 
   try {
     const llm   = await buildLlm();
     const agent = createAgent({ model: llm, tools: agentTools, systemPrompt: buildSystemPrompt() });
-    logger.info({ agent: agentName, tools: agentTools.map(t => t.name) }, '[agent] Starting');
+    log.info({ agent: agentName, tools: agentTools.map(t => t.name) }, '[agent] Starting');
 
     const agentResult = await agent.invoke(
       { messages: [new HumanMessage(userMessage)] },
@@ -65,7 +66,7 @@ Avoid big MNCs, avoid companies above 1000 employees, and prefer companies likel
       if (msg instanceof AIMessage && msg.tool_calls?.length) {
         iterations++;
         for (const call of msg.tool_calls) {
-          logger.debug({ agent: agentName, iter: iterations, tool: call.name, args: call.args }, '[agent] Tool call');
+          log.debug({ agent: agentName, iter: iterations, tool: call.name, args: call.args }, '[agent] Tool call');
         }
       }
       if (msg instanceof ToolMessage && msg.name) {
@@ -74,13 +75,13 @@ Avoid big MNCs, avoid companies above 1000 employees, and prefer companies likel
         try { parsed = JSON.parse(msg.content as string); } catch { /* leave as string */ }
         toolResults.set(msg.name, parsed);
         const p = parsed as Record<string, unknown>;
-        if (p?.['error']) logger.warn({ agent: agentName, tool: msg.name, error: p['error'] }, '[agent] Tool returned error');
-        else if (p?.['available'] === false) logger.info({ agent: agentName, tool: msg.name, reason: p['reason'] }, '[agent] Tool unavailable');
-        else logger.debug({ agent: agentName, tool: msg.name, resultPreview: JSON.stringify(parsed).slice(0, 120) }, '[agent] Tool result');
+        if (p?.['error']) log.warn({ agent: agentName, tool: msg.name, error: p['error'] }, '[agent] Tool returned error');
+        else if (p?.['available'] === false) log.info({ agent: agentName, tool: msg.name, reason: p['reason'] }, '[agent] Tool unavailable');
+        else log.debug({ agent: agentName, tool: msg.name, resultPreview: JSON.stringify(parsed).slice(0, 120) }, '[agent] Tool result');
       }
     }
-    if (iterations >= maxIterations) logger.warn({ agent: agentName, iterations, maxIterations }, '[agent] Hit max iterations');
-    logger.info({ agent: agentName, iterations }, '[agent] Complete');
+    if (iterations >= maxIterations) log.warn({ agent: agentName, iterations, maxIterations }, '[agent] Hit max iterations');
+    log.info({ agent: agentName, iterations }, '[agent] Complete');
 
     const saveResult = toolResults.get('save_companies') as { saved?: number } | undefined;
     const scrapeResult = toolResults.get('scrape_source') as { diagnostics?: ScrapeDiagnosticsSummary } | undefined;
@@ -104,7 +105,7 @@ Avoid big MNCs, avoid companies above 1000 employees, and prefer companies likel
     });
     recordResult(source, saved);
 
-    logger.info({ runId, source, saved, iterations }, '[discovery.agent] Complete');
+    log.info({ runId, source, saved, iterations }, '[discovery.agent] Complete');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await scrapeLogRepository.complete(logId, {
@@ -112,7 +113,7 @@ Avoid big MNCs, avoid companies above 1000 employees, and prefer companies likel
       errors: [msg], durationMs: Date.now() - startedAt,
     }).catch(() => {});
     recordResult(source, 0);
-    logger.error({ err, runId, source }, '[discovery.agent] Failed');
+    log.error({ err, runId, source }, '[discovery.agent] Failed');
     await alertAgentFailure({ agent: `discovery:${source}`, runId, error: err });
     throw err;
   }

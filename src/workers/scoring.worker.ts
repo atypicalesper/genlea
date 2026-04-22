@@ -9,13 +9,16 @@ import { contactRepository } from '../storage/repositories/contact.repository.js
 import { jobRepository } from '../storage/repositories/job.repository.js';
 import { settingsRepository } from '../storage/repositories/settings.repository.js';
 import { scoreCompany } from '../scoring/scorer.js';
-import { logger } from '../utils/logger.js';
+import { createLogger } from '../utils/logger.js';
+
+const workerLog = createLogger({ phase: 'scoring', llm: 'none' });
 
 async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
   const { runId, companyId } = job.data;
   const startedAt = Date.now();
+  const log = createLogger({ phase: 'scoring', llm: 'none' });
 
-  logger.info({ runId, companyId }, '[scoring.worker] Job started');
+  log.info({ runId, companyId }, '[scoring.worker] Job started');
 
   try {
     // ── Fetch all data needed to score ───────────────────────────────────────
@@ -27,11 +30,11 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     ]);
 
     if (!company) {
-      logger.warn({ companyId }, '[scoring.worker] Company not found — skipping');
+      log.warn({ companyId }, '[scoring.worker] Company not found — skipping');
       return;
     }
 
-    logger.debug(
+    log.debug(
       { companyId, domain: company.domain, contacts: contacts.length, jobs: jobs.length },
       '[scoring.worker] Scoring inputs loaded'
     );
@@ -66,7 +69,7 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     await companyRepository.updateScore(companyId, score, status, breakdown, disqualificationReason);
 
     const durationMs = Date.now() - startedAt;
-    logger.info(
+    log.info(
       {
         runId,
         companyId,
@@ -87,14 +90,14 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
 
     // Alert on hot leads
     if (status === 'hot' || status === 'hot_verified') {
-      logger.info(
+      log.info(
         { domain: company.domain, score, status },
         '🔥 [scoring.worker] HOT LEAD FOUND'
       );
     }
 
   } catch (err) {
-    logger.error({ err, runId, companyId }, '[scoring.worker] Job failed');
+    log.error({ err, runId, companyId }, '[scoring.worker] Job failed');
     throw err;
   }
 }
@@ -107,7 +110,7 @@ export async function startScoringWorker(): Promise<void> {
     processScoringJob,
     initialSettings.workerConcurrencyScoring,
   );
-  logger.info({ concurrency: initialSettings.workerConcurrencyScoring }, '[scoring.worker] Worker started');
+  workerLog.info({ concurrency: initialSettings.workerConcurrencyScoring }, '[scoring.worker] Worker started');
 
   const settingsInterval = setInterval(async () => {
     try {
@@ -115,13 +118,13 @@ export async function startScoringWorker(): Promise<void> {
       const target = s.workerConcurrencyScoring;
       if (worker.concurrency !== target) {
         worker.concurrency = target;
-        logger.info({ concurrency: target }, '[scoring.worker] Concurrency updated');
+        workerLog.info({ concurrency: target }, '[scoring.worker] Concurrency updated');
       }
     } catch { /* ignore */ }
   }, 10_000);
 
   process.on('SIGTERM', async () => {
-    logger.info('[scoring.worker] SIGTERM received — shutting down');
+    workerLog.info('[scoring.worker] SIGTERM received — shutting down');
     clearInterval(settingsInterval);
     await worker.close();
     process.exit(0);

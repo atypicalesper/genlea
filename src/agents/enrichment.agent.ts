@@ -18,7 +18,7 @@ import { buildLlm }              from './llm.client.js';
 import { alertAgentFailure }     from '../utils/alert.js';
 import { companyRepository }     from '../storage/repositories/company.repository.js';
 import { queueManager }          from '../core/queue.manager.js';
-import { logger }                from '../utils/logger.js';
+import { createLogger, getLlmTag } from '../utils/logger.js';
 import { makeTools }             from './enrichment-tools.js';
 import type { EnrichmentJobData } from '../types/index.js';
 
@@ -63,8 +63,10 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
   const startedAt = Date.now();
 
   const company = await companyRepository.findById(companyId);
+  const log = createLogger({ phase: 'enrichment', source: domain, llm: getLlmTag() });
+
   if (!company) {
-    logger.warn({ companyId, domain }, '[enrichment.agent] Company not found — skipping');
+    log.warn({ companyId, domain }, '[enrichment.agent] Company not found — skipping');
     return;
   }
 
@@ -78,7 +80,7 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
   if (!force && company.lastEnrichedAt) {
     const ageMs = Date.now() - new Date(company.lastEnrichedAt).getTime();
     if (ageMs < COOLDOWN_MS) {
-      logger.info({ domain, ageHours: (ageMs / 3_600_000).toFixed(1) }, '[enrichment.agent] Cooldown — queuing scoring only');
+      log.info({ domain, ageHours: (ageMs / 3_600_000).toFixed(1) }, '[enrichment.agent] Cooldown — queuing scoring only');
       await queueManager.addScoringJob({ runId, companyId });
       return;
     }
@@ -110,7 +112,7 @@ Steps:
   try {
     const llm   = await buildLlm();
     const agent = createAgent({ model: llm, tools: agentTools, systemPrompt: SYSTEM_PROMPT });
-    logger.info({ agent: agentName, tools: agentTools.map(t => t.name) }, '[agent] Starting');
+    log.info({ agent: agentName, tools: agentTools.map(t => t.name) }, '[agent] Starting');
 
     const agentResult = await agent.invoke(
       { messages: [new HumanMessage(userMessage)] },
@@ -122,23 +124,23 @@ Steps:
       if (msg instanceof AIMessage && msg.tool_calls?.length) {
         iterations++;
         for (const call of msg.tool_calls) {
-          logger.debug({ agent: agentName, iter: iterations, tool: call.name, args: call.args }, '[agent] Tool call');
+          log.debug({ agent: agentName, iter: iterations, tool: call.name, args: call.args }, '[agent] Tool call');
         }
       }
       if (msg instanceof ToolMessage && msg.name) {
         let parsed: unknown = msg.content;
         try { parsed = JSON.parse(msg.content as string); } catch { /* leave as string */ }
         const p = parsed as Record<string, unknown>;
-        if (p?.['error']) logger.warn({ agent: agentName, tool: msg.name, error: p['error'] }, '[agent] Tool returned error');
-        else if (p?.['available'] === false) logger.info({ agent: agentName, tool: msg.name, reason: p['reason'] }, '[agent] Tool unavailable');
-        else logger.debug({ agent: agentName, tool: msg.name, resultPreview: JSON.stringify(parsed).slice(0, 120) }, '[agent] Tool result');
+        if (p?.['error']) log.warn({ agent: agentName, tool: msg.name, error: p['error'] }, '[agent] Tool returned error');
+        else if (p?.['available'] === false) log.info({ agent: agentName, tool: msg.name, reason: p['reason'] }, '[agent] Tool unavailable');
+        else log.debug({ agent: agentName, tool: msg.name, resultPreview: JSON.stringify(parsed).slice(0, 120) }, '[agent] Tool result');
       }
     }
-    if (iterations >= maxIterations) logger.warn({ agent: agentName, iterations, maxIterations }, '[agent] Hit max iterations');
+    if (iterations >= maxIterations) log.warn({ agent: agentName, iterations, maxIterations }, '[agent] Hit max iterations');
 
-    logger.info({ domain, iterations, durationMs: Date.now() - startedAt }, '[enrichment.agent] Complete');
+    log.info({ domain, iterations, durationMs: Date.now() - startedAt }, '[enrichment.agent] Complete');
   } catch (err) {
-    logger.error({ err, domain }, '[enrichment.agent] Failed');
+    log.error({ err, domain }, '[enrichment.agent] Failed');
     await alertAgentFailure({ agent: `enrichment:${domain}`, runId, error: err });
     throw err;
   }

@@ -34,6 +34,19 @@ const sessionTransport = pino.transport({
   },
 });
 
+// Dedicated error log — hardcoded to 'error' level so errors are never suppressed
+// regardless of LOG_LEVEL setting.
+const errorTransport = pino.transport({
+  target: 'pino-roll',
+  options: {
+    file:      path.join(logsDir, 'errors.log'),
+    frequency: 'daily',
+    size:      '100m',
+    limit:     { count: 30 },
+    mkdir:     true,
+  },
+});
+
 const streams: pino.StreamEntry[] = [
   {
     level,
@@ -48,8 +61,9 @@ const streams: pino.StreamEntry[] = [
         }) as NodeJS.WritableStream)
       : process.stdout,
   },
-  { level, stream: rollingTransport },
-  { level, stream: sessionTransport },
+  { level,     stream: rollingTransport },
+  { level,     stream: sessionTransport },
+  { level: 'error', stream: errorTransport },
 ];
 
 export const logger = pino(
@@ -58,3 +72,13 @@ export const logger = pino(
 );
 
 export const SESSION_LOG_FILE = sessionFile;
+
+export function getLlmTag(): string {
+  const provider = process.env['AGENT_LLM_PROVIDER'] ?? 'unknown';
+  const model    = process.env['AGENT_LLM_MODEL']    ?? 'unknown';
+  return `${provider}/${model}`;
+}
+
+export function createLogger(ctx: { phase: 'discovery' | 'enrichment' | 'scoring'; source?: string; llm?: string }) {
+  return logger.child(ctx);
+}
