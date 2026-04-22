@@ -41,7 +41,7 @@ After enqueuing all 2,400 jobs, the script closes the queue connection and exits
 
 ## Step 2 — Discovery Worker (`src/workers/discovery.worker.ts`)
 
-Runs **N concurrent jobs** (configurable via the Worker Concurrency slider in the Control Panel, default 10). For each job:
+Runs **N concurrent jobs** (configurable via the Worker Concurrency slider in the Control Panel, default 10). When `AGENT_LLM_PROVIDER=ollama`, concurrency is capped to 1 regardless of the setting — Ollama serializes inference internally anyway, and parallel workers just stall the laptop holding idle BullMQ slots. For each job:
 
 ### 2a. Availability check
 Calls `scraper.isAvailable()` — checks if the required credentials/cookies exist. If not, the job is marked `skipped` in `scrape_logs` and dropped (no retry).
@@ -85,7 +85,7 @@ A `scrape_logs` document is written with `status: 'success'|'partial'|'failed'`,
 
 ## Step 3 — Enrichment Worker (`src/workers/enrichment.worker.ts`)
 
-Runs **N concurrent jobs** (configurable via slider, default 15). For each company:
+Runs **N concurrent jobs** (configurable via slider, default 15). Like the discovery worker, capped to 1 when using Ollama. For each company:
 
 ### Guard: size check
 If `employeeCount > 1000` → immediately `disqualify()` the company and stop.
@@ -182,9 +182,9 @@ Available at `localhost:4000/dashboard` and `/api/leads`, `/api/companies`, `/ap
 |---|---|
 | Jobs pushed to Redis | 2,400 |
 | Max results per scraper query | 25 |
-| Discovery concurrency | 10 (default, slider-controlled) |
-| Enrichment concurrency | 15 (default, slider-controlled) |
-| Scoring concurrency | 30 (default, slider-controlled) |
+| Discovery concurrency | 10 (default) — capped to 1 when AGENT_LLM_PROVIDER=ollama |
+| Enrichment concurrency | 15 (default) — capped to 1 when AGENT_LLM_PROVIDER=ollama |
+| Scoring concurrency | 30 (default, no cap — scoring uses no LLM) |
 | Enrichment cooldown (auto re-runs) | 7 days |
 | Enrichment cooldown bypass | Manual trigger only (`force=true`) |
 | BullMQ retries on failure | 3 (exponential backoff, 5s base) |

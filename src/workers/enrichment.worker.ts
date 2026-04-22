@@ -7,6 +7,10 @@ import { settingsRepository } from '../storage/repositories/settings.repository.
 import { runEnrichmentAgent } from '../agents/enrichment.agent.js';
 import { logger } from '../utils/logger.js';
 
+function cap(n: number): number {
+  return process.env['AGENT_LLM_PROVIDER'] === 'ollama' ? Math.min(n, 1) : n;
+}
+
 async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> {
   // The enrichment agent owns source selection and stopping conditions for each company.
   logger.info({ runId: job.data.runId, domain: job.data.domain }, '[enrichment.worker] Delegating to enrichment agent');
@@ -20,15 +24,15 @@ export async function startEnrichmentWorker(): Promise<void> {
   const worker = createWorker<EnrichmentJobData>(
     QUEUE_NAMES.ENRICHMENT,
     processEnrichmentJob,
-    initialSettings.workerConcurrencyEnrichment,
+    cap(initialSettings.workerConcurrencyEnrichment),
   );
-  logger.info({ concurrency: initialSettings.workerConcurrencyEnrichment }, '[enrichment.worker] Worker started (agent mode)');
+  logger.info({ concurrency: worker.concurrency }, '[enrichment.worker] Worker started (agent mode)');
 
   // Keep worker concurrency aligned with DB-backed settings during long-running sessions.
   const settingsInterval = setInterval(async () => {
     try {
       const s = await settingsRepository.get();
-      const target = s.workerConcurrencyEnrichment;
+      const target = cap(s.workerConcurrencyEnrichment);
       if (worker.concurrency !== target) {
         worker.concurrency = target;
         logger.info({ concurrency: target }, '[enrichment.worker] Concurrency updated');

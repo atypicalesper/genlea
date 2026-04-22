@@ -436,14 +436,15 @@ Hosted providers stay disabled unless `ENABLE_HOSTED_LLM=true`.
 
 Override the model: `AGENT_LLM_MODEL=qwen3:32b`
 
-**Ollama context tuning:**
+**Ollama context tuning (already set in `.env`):**
 
-| Env var | Default | What it controls |
-|---|---|---|
-| `OLLAMA_NUM_CTX` | `32768` | Total context window (input + output combined) |
-| `OLLAMA_NUM_PREDICT` | `8192` | Max output tokens per generation |
+| Env var | `.env` value | Default | What it controls |
+|---|---|---|---|
+| `OLLAMA_NUM_CTX` | `8192` | `32768` | Context window — 8192 uses ~4× less VRAM |
+| `OLLAMA_NUM_PREDICT` | `1024` | `8192` | Max output tokens per generation |
+| `OLLAMA_KEEP_ALIVE` | `5m` | `30m` | How long model stays loaded after last use |
 
-Reduce these if running a larger model with less VRAM.
+Discovery and enrichment workers are **automatically capped to concurrency 1** when `AGENT_LLM_PROVIDER=ollama`, preventing parallel LLM calls from stalling the machine.
 
 ---
 

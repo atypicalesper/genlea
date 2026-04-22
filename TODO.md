@@ -262,37 +262,37 @@ This makes runs searchable by `discovery:linkedin:abc12345` in LangSmith instead
 
 ---
 
-## Track 3 — M3 Pro 18GB memory optimization
+## Track 3 — M3 Pro 18GB memory optimization [DONE]
 
 The crash risk comes from running everything at once: Ollama (5GB) + 3 Playwright browsers
 (~1.2GB) + Docker mongo+redis (~800MB) + 4 Node services (~800MB) = ~8-10GB used, but
 spikes when multiple enrichment jobs run in parallel and each spawns a browser.
 
-### Settings to set in `.env`
+### Done ✓
 
+**`.env` now sets:**
 ```env
-# Playwright — biggest memory hog. 1 concurrent browser = ~400MB peak.
-# Default is 3 — on 18GB drop to 1 for dev, 2 max for production runs.
-MAX_CONCURRENT_BROWSERS=1
-
-# Ollama context window — this is the #1 VRAM cost, not the model weights.
-# 32768 tokens × ~2 bytes = ~64MB per active inference. For scraping tasks
-# you don't need long context. 8192 is plenty and cuts memory 4x.
-OLLAMA_NUM_CTX=8192
-OLLAMA_NUM_PREDICT=2048
+OLLAMA_NUM_CTX=8192      # 4× less VRAM than the 32768 default
+OLLAMA_NUM_PREDICT=1024
+OLLAMA_KEEP_ALIVE=5m     # unloads model when idle — frees 5GB back to OS
 ```
 
-### Settings to set via API (no restart needed)
+**Worker concurrency is auto-capped to 1 when `AGENT_LLM_PROVIDER=ollama`** (in both
+`discovery.worker.ts` and `enrichment.worker.ts`). No manual API call needed — it's enforced
+in code at startup and on every settings-poll tick.
+
+### Still useful (set manually if needed)
 
 ```bash
-# Reduce worker concurrency — default may be 2-3, drop to 1 each in dev
-curl -X PATCH http://localhost:4000/api/settings \
+# If you want even lower memory — single browser at a time
+# Add to .env:
+MAX_CONCURRENT_BROWSERS=1
+
+# If the queue already has high concurrency saved in MongoDB:
+curl -X PATCH http://localhost:4001/api/settings \
   -H 'Content-Type: application/json' \
-  -d '{
-    "workerConcurrencyDiscovery": 1,
-    "workerConcurrencyEnrichment": 1,
-    "workerConcurrencyScoring": 2
-  }'
+  -d '{"workerConcurrencyDiscovery": 1, "workerConcurrencyEnrichment": 1}'
+# (Worker cap in code makes this redundant when using Ollama, but useful for Groq)
 ```
 
 ### Development workflow (don't run everything at once)

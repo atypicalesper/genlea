@@ -7,6 +7,10 @@ import { settingsRepository } from '../storage/repositories/settings.repository.
 import { runDiscoveryAgent } from '../agents/discovery.agent.js';
 import { logger } from '../utils/logger.js';
 
+function cap(n: number): number {
+  return process.env['AGENT_LLM_PROVIDER'] === 'ollama' ? Math.min(n, 1) : n;
+}
+
 async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
   // Keep worker logic thin so retries/restarts always execute the same agent entrypoint.
   logger.info({ runId: job.data.runId, source: job.data.source }, '[discovery.worker] Delegating to discovery agent');
@@ -20,15 +24,15 @@ export async function startDiscoveryWorker(): Promise<void> {
   const worker = createWorker<DiscoveryJobData>(
     QUEUE_NAMES.DISCOVERY,
     processDiscoveryJob,
-    initialSettings.workerConcurrencyDiscovery,
+    cap(initialSettings.workerConcurrencyDiscovery),
   );
-  logger.info({ concurrency: initialSettings.workerConcurrencyDiscovery }, '[discovery.worker] Worker started (agent mode)');
+  logger.info({ concurrency: worker.concurrency }, '[discovery.worker] Worker started (agent mode)');
 
   // Poll settings so concurrency can be tuned without restarting the worker process.
   const settingsInterval = setInterval(async () => {
     try {
       const s = await settingsRepository.get();
-      const target = s.workerConcurrencyDiscovery;
+      const target = cap(s.workerConcurrencyDiscovery);
       if (worker.concurrency !== target) {
         worker.concurrency = target;
         logger.info({ concurrency: target }, '[discovery.worker] Concurrency updated');

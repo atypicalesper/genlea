@@ -1,259 +1,198 @@
-# 🚀 GenLea — Getting Started Guide
-
-> Complete step-by-step guide to run the full lead generation engine locally.
+# GenLea — Getting Started
 
 ---
 
 ## Prerequisites
 
-| Tool | Version | Install |
-|---|---|---|
-| Node.js | ≥ 20 LTS | [nodejs.org](https://nodejs.org) |
-| Docker Desktop | Latest | [docker.com](https://docker.com) |
-| Git | Any | Pre-installed on macOS |
-| Python | ≥ 3.10 | Only for the name-origin service |
+| Tool | Version |
+|---|---|
+| Node.js | ≥ 20 LTS |
+| Docker Desktop | Latest |
+| Python | ≥ 3.10 (name-origin service only) |
+| Ollama | Latest |
 
 ---
 
-## Step 1 — Clone & Install
+## Step 1 — Install dependencies
 
 ```bash
-cd /Users/rac/Desktop/pp/genlea
-
-# Install Node.js dependencies
-npm install --legacy-peer-deps
+cd genlea-backend
+npm install
 ```
 
 ---
 
-## Step 2 — Configure Environment
+## Step 2 — Configure environment
 
-The `.env` file is already created with sample values.
-Fill in any credentials you have before running scrapers.
+The `.env` file is already created. Open it and fill in your credentials.
 
-```bash
-# Open and fill in your credentials
-open .env       # or: code .env
-```
-
-**Minimum required to run (with no paid APIs):**
+**Minimum to run (no paid APIs):**
 ```env
-MONGO_URI=mongodb://localhost:27017    ← already set
-REDIS_URL=redis://localhost:6379       ← already set
-# Everything else is optional — scrapers fall back to web mode
+MONGO_URI=mongodb://localhost:27017   # already set
+REDIS_URL=redis://localhost:6379      # already set
 ```
 
-**To unlock full pipeline, add:**
+**Recommended to unlock full pipeline:**
 ```env
-LI_USERNAME=your@email.com            # LinkedIn account (for session login)
-LI_PASSWORD=yourpassword
-GITHUB_TOKEN=ghp_xxxxx                # Free — github.com/settings/tokens
+EXPLORIUM_API_KEY=...   # best discovery + enrichment source
+HUNTER_API_KEY=...      # email discovery (25 free/month)
+GITHUB_TOKEN=...        # tech stack extraction (5000 req/hr vs 60 without)
+```
+
+**Ollama performance (already set in .env):**
+```env
+OLLAMA_NUM_CTX=8192      # reduces RAM from ~6GB to ~1.5GB per inference
+OLLAMA_NUM_PREDICT=1024
+OLLAMA_KEEP_ALIVE=5m     # unloads model after 5 min idle
 ```
 
 ---
 
-## Step 3 — Start Infrastructure (MongoDB + Redis)
+## Step 3 — Start MongoDB + Redis
 
 ```bash
-# Start MongoDB 7, Redis 7, Mongo Express UI, Bull Board
-docker-compose up -d
+docker-compose up -d mongo redis
+```
 
-# Verify everything is running
+Verify:
+```bash
 docker-compose ps
 ```
 
-**Dashboards available after this step:**
-| UI | URL | Purpose |
-|---|---|---|
-| Mongo Express | http://localhost:8081 | Browse MongoDB collections |
-| Bull Board | http://localhost:3001 | Monitor job queues |
-| GenLea API | http://localhost:4000 | REST API (after Step 6) |
+**Useful UIs after this step:**
+| URL | Purpose |
+|---|---|
+| http://localhost:8081 | Mongo Express — browse collections |
+| http://localhost:4001/queues | Bull Board — monitor job queues |
 
 ---
 
-## Step 4 — Initialize Database
-
-Creates all MongoDB indexes (run once):
+## Step 4 — Init the database (run once)
 
 ```bash
 npm run db:init
 ```
 
-Expected output:
+---
+
+## Step 5 — Pull + serve the Ollama model
+
+```bash
+ollama pull qwen3.5      # one-time download (~5GB)
+ollama serve             # keep this running
 ```
-✅ companies indexes created
-✅ contacts indexes created
-✅ jobs indexes created
-✅ scrape_logs indexes created
-✅ All indexes created — database ready
-```
+
+Skip this step if using `AGENT_LLM_PROVIDER=groq` or `anthropic`.
 
 ---
 
-## Step 5 — (Optional) Start the Name-Origin Service
+## Step 6 — (Optional) Start the name-origin microservice
 
-The talent origin classifier runs as a separate Python service.
-Start it if you want more accurate South Asian origin detection.
+More accurate South-Asian origin detection than the rule-based fallback.
 
 ```bash
 cd services/name-origin
-
-# Create virtual environment
 python -m venv .venv
 source .venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Start the service
 python main.py
-# → Running at http://localhost:5050
+# → http://localhost:5050
 ```
 
-**Health check:**
-```bash
-curl http://localhost:5050/health
-```
-
-Leave this terminal open, then return to the main `genlea/` directory.
-
----
-
-## Step 6 — Start the Workers
-
-In a new terminal:
-
-```bash
-cd /Users/rac/Desktop/pp/genlea
-npm run workers
-```
-
-You should see:
-```
-[workers] Starting all GenLea workers...
-[discovery.worker] Worker started
-[enrichment.worker] Worker started
-[scoring.worker] Worker started
-[workers] All workers running — waiting for jobs
+Set in `.env`:
+```env
+NAME_ORIGIN_PROVIDER=ethnicolr
+ETHNICOLR_URL=http://localhost:5050
 ```
 
 ---
 
-## Step 7 — Start the API Server
-
-In another new terminal:
+## Step 7 — Start the engine
 
 ```bash
-npm run api
-# → API started at http://localhost:4000
-```
-
----
-
-## Step 8 — Seed & Run First Scrape
-
-### Option A — Seed all queues at once (recommended first run)
-
-```bash
-npm run seed
-```
-
-This enqueues 10 discovery jobs across Wellfound, LinkedIn, Crunchbase, and Apollo.
-Watch the workers terminal — jobs will start processing immediately.
-
-### Option B — Trigger a single manual scrape
-
-```bash
-# Via CLI
-npm run scrape -- --source wellfound --query "nodejs backend startup US"
-
-# Or via API
-curl -X POST http://localhost:4000/api/scrape \
-  -H 'Content-Type: application/json' \
-  -d '{"source":"wellfound","query":{"keywords":"nodejs startup US"},"limit":20}'
-```
-
----
-
-## Step 9 — Monitor Progress
-
-### Queue status
-```bash
-curl http://localhost:4000/api/jobs/status | jq
-```
-
-Or open **Bull Board** at http://localhost:3001
-
-### Scrape logs
-```bash
-curl http://localhost:4000/api/jobs/logs | jq
-```
-
-### Database counts
-```bash
-curl http://localhost:4000/api/stats | jq
-```
-
----
-
-## Step 10 — View Leads & Export
-
-### See hot leads (score ≥ 65)
-```bash
-curl "http://localhost:4000/api/leads?status=hot&limit=20" | jq
-```
-
-### Filter by tech stack
-```bash
-curl "http://localhost:4000/api/leads?status=hot&techStack=nodejs&techStack=react" | jq
-```
-
-### Export to CSV
-```bash
-curl "http://localhost:4000/api/export/csv?status=hot" -o leads.csv
-# File also saved automatically to: exports/leads-hot-{timestamp}.csv
-```
-
----
-
-## LinkedIn Session Setup (for LinkedIn scraper)
-
-LinkedIn requires warm cookie sessions — do this before running the LinkedIn scraper:
-
-```bash
-# Log in and save session cookies
-npm run scrape -- --source linkedin --login
-```
-
-This opens a browser, logs in with `LI_USERNAME`/`LI_PASSWORD` from `.env`, and saves cookies to `sessions/linkedin/`.
-
-**After setup:**
-- Sessions are auto-rotated
-- Max 80 profiles/session/day (controlled by `LI_MAX_PROFILES_PER_SESSION`)
-- Cooldown: 8h after daily limit (controlled by `LI_SESSION_COOLDOWN_HOURS`)
-
----
-
-## Running Everything at Once (Dev Mode)
-
-```bash
-# Starts workers + API in watch mode (auto-restarts on file change)
+# Workers + API together (recommended)
 npm run dev
+
+# Or separately:
+npm run workers   # discovery + enrichment + scoring workers
+npm run api       # Fastify REST API on :4001
+```
+
+Log output:
+```
+[discovery.worker] Worker started (agent mode) { concurrency: 1 }
+[enrichment.worker] Worker started (agent mode) { concurrency: 1 }
+[scoring.worker] Worker started { concurrency: 30 }
+[api] Listening at http://0.0.0.0:4001
+```
+
+Discovery and enrichment concurrency is capped to 1 when `AGENT_LLM_PROVIDER=ollama` — prevents Ollama from being overwhelmed with parallel inference requests.
+
+---
+
+## Step 8 — Start the frontend
+
+```bash
+cd ../genlea-frontend
+npm install
+npm run dev
+# → http://localhost:3000
 ```
 
 ---
 
-## Scraper Mode Reference
+## Step 9 — Seed the pipeline
 
-| Scraper | Without API Key | With API Key |
-|---|---|---|
-| LinkedIn | ✅ Playwright stealth (cookies required) | N/A |
-| Wellfound | ✅ Playwright (no auth needed) | N/A |
-| Crunchbase | ✅ Playwright web scraping | ✅ REST API |
-| Apollo | ✅ Playwright web scraping (limited) | ✅ REST API |
-| Hunter.io | ⚠️ Only `findEmail` fallback | ✅ REST API |
-| GitHub | ✅ Unauthenticated (60 req/hr) | ✅ Auth (5000 req/hr) |
-| ZoomInfo | ✅ Playwright stealth (login required) | N/A |
+```bash
+npm run seed          # 1 round (~48 discovery jobs)
+npm run seed:10       # 10 rounds
+npm run seed:100      # 100 rounds — full bulk run
+```
+
+Watch progress in the genlea-frontend dashboard or Bull Board.
+
+---
+
+## Development tips
+
+### Don't run everything at once
+
+Stagger memory peaks by running services one at a time:
+
+```bash
+docker-compose up -d mongo redis             # always on
+npm run api                                   # always on (need dashboard)
+
+npm run workers                               # run, let discovery seed the queue
+# once queue builds up — can Ctrl+C workers and re-run to process enrichment
+```
+
+The queues persist in Redis — jobs survive worker restarts.
+
+### Slow laptop during a run
+
+If Ollama is stalling your machine:
+1. Drop browser concurrency: `MAX_CONCURRENT_BROWSERS=1` in `.env`
+2. Use Groq instead: set `AGENT_LLM_PROVIDER=groq` (needs `GROQ_API_KEY`)
+3. Try a lighter model: `AGENT_LLM_MODEL=qwen3:4b` in `.env`
+
+---
+
+## Common npm scripts
+
+| Command | What |
+|---|---|
+| `npm run dev` | Start workers + API in watch mode |
+| `npm run workers` | Workers only |
+| `npm run api` | API only |
+| `npm run seed:100` | Push 100 rounds of discovery jobs |
+| `npm run login` | Log in to LinkedIn and save session cookies |
+| `npm run stats` | Print lead counts by status |
+| `npm run export` | Export hot leads to `exports/leads-export.csv` |
+| `npm run rescore-all` | Re-score all companies (use after threshold changes) |
+| `npm run verify-emails` | SMTP-verify up to 500 unverified emails |
+| `npm run db:init` | Create MongoDB indexes (run once) |
+| `npm run build` | TypeScript type-check |
 
 ---
 
@@ -261,60 +200,21 @@ npm run dev
 
 ### MongoDB not connecting
 ```bash
-docker-compose ps                    # check if mongo is running
-docker-compose logs mongo            # view logs
-docker-compose restart mongo         # restart if stuck
+docker-compose ps
+docker-compose logs mongo
+docker-compose restart mongo
 ```
 
-### Redis not connecting
+### Workers not picking up jobs
 ```bash
-docker-compose ps
-docker-compose logs redis
-redis-cli ping                       # should return PONG
+redis-cli ping          # should return PONG
+npm run workers         # restart
 ```
 
 ### LinkedIn CAPTCHA / session blocked
 ```bash
-# Check session status
-curl http://localhost:4000/api/jobs/logs?scraper=linkedin | jq
-
-# Re-login a session
-npm run scrape -- --source linkedin --login
+npm run login           # re-authenticate and save fresh cookies
 ```
 
-### Bull Board showing failed jobs
-1. Open http://localhost:3001
-2. Click the failed queue
-3. Check the error trace — it includes `[worker] Job failed` + full error
-4. Fix and re-run: click "Retry" on individual jobs
-
-### Workers not processing
-```bash
-# Check Redis is reachable
-redis-cli ping
-
-# Restart workers
-npm run workers
-```
-
----
-
-## File Map
-
-```
-genlea/
-├── .env                    ← Your credentials (edit this)
-├── docker-compose.yml      ← Infrastructure (start this first)
-├── src/
-│   ├── scrapers/           ← LinkedIn, Crunchbase, Apollo, Hunter, GitHub, Wellfound
-│   ├── core/               ← Browser pool, proxy, session, queue
-│   ├── enrichment/         ← Normalizer, origin analyzer
-│   ├── scoring/            ← 0–100 lead scorer
-│   ├── workers/            ← BullMQ workers (start with npm run workers)
-│   ├── storage/            ← MongoDB repositories
-│   └── api/                ← Fastify REST API (start with npm run api)
-├── services/name-origin/   ← Python classifier (optional, start separately)
-├── sessions/               ← LinkedIn cookies (auto-managed)
-├── exports/                ← CSV exports land here
-└── ARCHITECTURE.md         ← Full system design
-```
+### Failed jobs in Bull Board
+Open http://localhost:4001/queues, click the failed queue, check the error trace, then click Retry.

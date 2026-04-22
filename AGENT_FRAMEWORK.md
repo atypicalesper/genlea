@@ -338,8 +338,11 @@ const myTracedFn = wrapTraceable('my-scraper', async (domain: string) => {
 | `AGENT_LLM_PROVIDER` | No | `ollama` | `ollama` / `groq` / `anthropic` |
 | `AGENT_LLM_MODEL` | No | `qwen3.5` | Model override |
 | `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_NUM_CTX` | No | `32768` | Context window — reduce to `8192` for M3 Pro |
-| `OLLAMA_NUM_PREDICT` | No | `8192` | Max output tokens |
+| `OLLAMA_NUM_CTX` | No | `32768` | Context window — `.env` sets this to `8192` (4× less RAM) |
+| `OLLAMA_NUM_PREDICT` | No | `8192` | Max output tokens — `.env` sets this to `1024` |
+| `OLLAMA_KEEP_ALIVE` | No | `30m` | How long Ollama holds the model in memory after last use — `.env` sets `5m` |
+| `OLLAMA_RETRY_ATTEMPTS` | No | `3` | Retry count for transient Ollama errors (headers timeout, fetch failed) |
+| `OLLAMA_RETRY_DELAY_MS` | No | `1500` | Base backoff delay in ms (multiplied by attempt number) |
 | `GROQ_API_KEY` | If Groq | — | Groq cloud API key |
 | `ANTHROPIC_API_KEY` | If Anthropic | — | Anthropic cloud API key |
 | `LANGCHAIN_TRACING_V2` | No | — | Set `true` to enable LangSmith |

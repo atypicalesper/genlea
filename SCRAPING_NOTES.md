@@ -4,6 +4,38 @@
 
 ---
 
+## Explorium (primary enrichment source)
+
+### What We Get
+- Company match by domain → `business_id`
+- Company metadata: employee count, funding stage, industry, HQ country
+- Verified contacts: CEO, CTO, HR with email + phone
+- Technographics: actual tools in use
+
+### API Flow
+```
+POST /api/v1/businesses/match     → business_id by domain
+GET  /api/v1/businesses/{id}      → company metadata
+GET  /api/v1/businesses/{id}/contacts → decision-maker contacts
+```
+
+Auth header: `api_key: <key>` (NOT Bearer).
+
+### Availability tracking
+The scraper tracks its own unavailability. After a 401/403/429 response it marks itself
+unavailable (`unavailableReason` field) and all subsequent calls short-circuit until the worker
+restarts. The enrichment tool checks `exploriumScraper.getUnavailableReason()` before and after
+each call to propagate the reason to the LLM.
+
+### Error mapping
+| HTTP status | Reason set |
+|---|---|
+| 401 / 403 (credits message) | `Explorium credits exhausted` |
+| 401 / 403 (other) | `Explorium access forbidden or API key invalid` |
+| 429 | `Explorium rate limited` |
+
+---
+
 ## LinkedIn
 
 ### What We Get
