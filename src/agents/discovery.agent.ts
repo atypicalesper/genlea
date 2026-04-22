@@ -8,11 +8,11 @@
  *   - When enough companies have been found
  *
  * Workers call runDiscoveryAgent() — no manual intervention needed.
- */
+  */
 
 import { createAgent }           from 'langchain';
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
-import { buildLlm, buildLlmInvokeOptions } from './llm.client.js';
+import { getLlm, buildLlmInvokeOptions } from './llm.client.js';
 import { alertAgentFailure }     from '../utils/alert.js';
 import { scrapeLogRepository }   from '../storage/repositories/scrape-log.repository.js';
 import { recordResult }          from '../discovery/source-health.js';
@@ -21,7 +21,7 @@ import { makeTools, buildSystemPrompt } from './discovery-tools.js';
 import type { DiscoveryJobData, ScrapeDiagnosticsSummary }  from '../types/index.js';
 
 // Keep the variable tail compact so Anthropic prompt caching can reuse the large
-// shared prefix from the system prompt and tool definitions.
+  // shared prefix from the system prompt and tool definitions.
 const USER_PROMPT_TEMPLATE = [
   'Run discovery for this source.',
   'Use get_discovery_state first.',
@@ -56,7 +56,7 @@ export async function runDiscoveryAgent(job: DiscoveryJobData): Promise<void> {
   const log = createLogger({ phase: 'discovery', source, llm: getLlmTag() });
 
   try {
-    const llm   = await buildLlm();
+    const llm   = await getLlm();
 
     const agent = createAgent({ model: llm, tools: agentTools, systemPrompt: buildSystemPrompt() });
     log.info({ agent: agentName, tools: agentTools.map(t => t.name) }, '[agent] Starting');

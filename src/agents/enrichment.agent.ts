@@ -4,17 +4,17 @@
  * Given a company, the agent autonomously decides:
  *   - What data is already available (get_company_state)
  *   - Which enrichment sources to try and in what order
- *   - When to use Playwright stealth as a fallback (API fails / rate-limited)
+ *   - When to use Playwright stealth as a fallback after Hunter / free sources
  *   - Whether the company should be disqualified (defunct, too large, wrong country)
  *   - When enough data has been gathered to proceed to scoring
- *   - If data is insufficient, it tries ALL available sources before giving up
+ *   - If data is insufficient, it tries the Hunter-first toolset before giving up
  *
  * Workers call runEnrichmentAgent() — no manual intervention needed.
  */
 
 import { createAgent }           from 'langchain';
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
-import { buildLlm, buildLlmInvokeOptions } from './llm.client.js';
+import { getLlm, buildLlmInvokeOptions } from './llm.client.js';
 import { alertAgentFailure }     from '../utils/alert.js';
 import { companyRepository }     from '../storage/repositories/company.repository.js';
 import { queueManager }          from '../core/queue.manager.js';
@@ -48,20 +48,19 @@ RULES:
 Best source order:
 1. enrich_github
 2. scrape_website_team
-3. enrich_explorium
-4. enrich_clay
-5. playwright_scrape_url
-6. enrich_clearbit
-7. enrich_hunter
-8. verify_contacts
-9. compute_origin_ratio
-10. queue_for_scoring`;
+3. enrich_hunter
+4. playwright_scrape_url
+5. verify_contacts
+6. compute_origin_ratio
+7. queue_for_scoring`;
 
 // Keep the user prompt small and structured so Anthropic can reuse the shared prefix.
 const USER_PROMPT_TEMPLATE = [
   'Enrich this company against the outreach ICP.',
   'Start with get_company_state.',
   'Verify non-India HQ, company size, and engineering hiring.',
+  'Use Hunter as the only API enrichment source for contacts and email discovery.',
+  'Use GitHub, website scraping, and Playwright only as non-API support for tech stack, hiring, and names.',
   'Gather decision-maker contacts and names for Indian-origin engineer analysis.',
   'Disqualify if big MNC, India-based, defunct, above 1000 employees, or not hiring engineers.',
   'When enough data is available, call compute_origin_ratio and queue_for_scoring.',
@@ -113,7 +112,7 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
   const maxIterations = 18;
 
   try {
-    const llm   = await buildLlm();
+    const llm   = await getLlm();
 
     const agent = createAgent({ model: llm, tools: agentTools, systemPrompt: SYSTEM_PROMPT });
     log.info({ agent: agentName, tools: agentTools.map(t => t.name) }, '[agent] Starting');

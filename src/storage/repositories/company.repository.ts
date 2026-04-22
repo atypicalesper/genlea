@@ -206,6 +206,14 @@ export const companyRepository = {
     logger.info({ id }, '[company.repository] Company disqualified');
   },
 
+  async setLastEnrichedAt(id: string): Promise<void> {
+    const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
+    await col.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { lastEnrichedAt: new Date(), updatedAt: new Date() } },
+    );
+  },
+
   /** Update pipeline stage — called at each phase transition */
   async setPipelineStatus(id: string, pipelineStatus: PipelineStatus): Promise<void> {
     const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);

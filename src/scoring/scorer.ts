@@ -82,6 +82,9 @@ function deriveDisqualificationReason(
   if ((company.employeeCount ?? 0) > 1000) {
     return 'Company is above the target size range for outbound pitching.';
   }
+  if ((company.totalDevCount ?? 0) > 100) {
+    return 'Development team exceeds 100 engineers — too large for outbound pitching.';
+  }
 
   return `Lead score ${breakdown.total} fell below the qualification threshold of ${coldThreshold}.`;
 }
@@ -96,6 +99,9 @@ function getHardDisqualificationReason(input: ScoringInput): string | undefined 
   }
   if ((company.employeeCount ?? 0) > 1000) {
     return 'Company is above the target size range for outbound pitching.';
+  }
+  if ((company.totalDevCount ?? 0) > 100) {
+    return 'Development team exceeds 100 engineers — too large for outbound pitching.';
   }
   if (activeJobs.length === 0) {
     return 'No active development or engineering hiring signal was found.';

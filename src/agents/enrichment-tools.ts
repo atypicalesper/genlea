@@ -14,19 +14,23 @@ import { normalizer, normalizeRole }   from '../enrichment/normalizer.js';
 import { deduplicateContacts }         from '../enrichment/deduplicator.js';
 import { extractPeopleFromPage }       from '../enrichment/page-content-extractor.js';
 import { isDefunct }                   from '../enrichment/defunct-detector.js';
-import { githubScraper, hunterScraper, clearbitScraper, exploriumScraper, clayScraper } from '../scrapers/enrichment/index.js';
+import { githubScraper, hunterScraper } from '../scrapers/enrichment/index.js';
+import { capOutput }                    from './tool-utils.js';
 import { logger }                      from '../utils/logger.js';
 import type { EnrichmentJobData, ContactRole } from '../types/index.js';
 
 export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
   const { runId, companyId, domain } = job;
 
-  return [
+  const tools = [
     tool(
       async () => {
-        const company   = await companyRepository.findById(companyId);
-        const contacts  = await contactRepository.findByCompanyId(companyId);
-        const nameCount = (await contactRepository.findAllNamesForOriginRatio(companyId)).length;
+        const [company, contacts, allNames] = await Promise.all([
+          companyRepository.findById(companyId),
+          contactRepository.findByCompanyId(companyId),
+          contactRepository.findAllNamesForOriginRatio(companyId),
+        ]);
+        const nameCount = allNames.length;
         if (!company) return JSON.stringify({ error: 'Company not found' });
         return JSON.stringify({
           name:          company.name,
@@ -89,146 +93,6 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
     ),
 
     tool(
-      async ({ name: companyName }) => {
-        const unavailableReason = exploriumScraper.getUnavailableReason();
-        if (unavailableReason) {
-          return JSON.stringify({ available: false, reason: unavailableReason });
-        }
-        const result = await exploriumScraper.enrichDomain(domain, companyName).catch(() => null);
-        if (!result) {
-          const reason = exploriumScraper.getUnavailableReason();
-          if (reason) return JSON.stringify({ available: false, reason });
-          return JSON.stringify({ found: false });
-        }
-
-        const company = await companyRepository.findById(companyId);
-        if (result.company) {
-          await companyRepository.upsert({ ...result.company, domain, name: company?.name ?? '' });
-        }
-
-        let contactsSaved = 0;
-        if (result.contacts?.length) {
-          const validContacts = result.contacts.filter(c => c.fullName && c.role && c.role !== 'Unknown');
-          await Promise.allSettled(
-            validContacts.map(c =>
-              contactRepository.upsert({
-                companyId,
-                fullName:        c.fullName!,
-                firstName:       c.firstName,
-                lastName:        c.lastName,
-                role:            c.role!,
-                email:           c.email,
-                emailConfidence: c.emailConfidence ?? 0,
-                phone:           c.phone,
-                linkedinUrl:     c.linkedinUrl,
-                sources:         ['explorium'],
-                forOriginRatio:  false,
-              }).catch(err => logger.debug({ err, domain }, '[enrichment-tools] Explorium contact save failed')),
-            ),
-          );
-          contactsSaved = validContacts.length;
-        }
-
-        return JSON.stringify({
-          found:         true,
-          employeeCount: result.company?.employeeCount,
-          fundingStage:  result.company?.fundingStage,
-          hqCountry:     result.company?.hqCountry,
-          techStack:     result.company?.techStack ?? [],
-          contactsSaved,
-          contacts: result.contacts?.map(c => ({ name: c.fullName, role: c.role, email: c.email, phone: c.phone, linkedin: c.linkedinUrl })),
-        });
-      },
-      {
-        name:        'enrich_explorium',
-        description: 'Fetch company metadata and decision-maker contacts from Explorium.',
-        schema: z.object({
-          name:   z.string().optional().describe('Company name (improves match accuracy)'),
-        }),
-      },
-    ),
-
-    tool(
-      async ({ name: companyName }) => {
-        if (!process.env['CLAY_API_KEY']) {
-          return JSON.stringify({ available: false, reason: 'CLAY_API_KEY not configured' });
-        }
-        const result = await clayScraper.enrichDomain(domain, companyName).catch(() => null);
-        if (!result) return JSON.stringify({ found: false });
-
-        const company = await companyRepository.findById(companyId);
-        if (result.company) {
-          await companyRepository.upsert({ ...result.company, domain, name: company?.name ?? '' });
-        }
-
-        let contactsSaved = 0;
-        if (result.contacts?.length) {
-          const valid = result.contacts.filter(c => c.fullName && c.role && c.role !== 'Unknown');
-          await Promise.allSettled(
-            valid.map(c =>
-              contactRepository.upsert({
-                companyId,
-                fullName:        c.fullName!,
-                firstName:       c.firstName,
-                lastName:        c.lastName,
-                role:            c.role!,
-                email:           c.email,
-                emailConfidence: c.emailConfidence ?? 0,
-                phone:           c.phone,
-                linkedinUrl:     c.linkedinUrl,
-                sources:         ['clay'],
-                forOriginRatio:  false,
-              }).catch(err => logger.debug({ err, domain }, '[enrichment-tools] Clay contact save failed')),
-            ),
-          );
-          contactsSaved = valid.length;
-        }
-
-        return JSON.stringify({
-          found:         true,
-          employeeCount: result.company?.employeeCount,
-          fundingStage:  result.company?.fundingStage,
-          techStack:     result.company?.techStack ?? [],
-          contactsSaved,
-          contacts: result.contacts?.map(c => ({ name: c.fullName, role: c.role, email: c.email, linkedin: c.linkedinUrl })),
-        });
-      },
-      {
-        name:        'enrich_clay',
-        description: 'Fetch company metadata and decision-maker contacts from Clay.',
-        schema: z.object({
-          name:   z.string().optional().describe('Company name (improves match accuracy)'),
-        }),
-      },
-    ),
-
-    tool(
-      async () => {
-        if (!process.env['CLEARBIT_API_KEY']) {
-          return JSON.stringify({ available: false, reason: 'CLEARBIT_API_KEY not configured — use playwright_scrape_url on the company homepage instead' });
-        }
-        const result = await clearbitScraper.enrichDomain(domain).catch(() => null);
-        if (!result?.company) return JSON.stringify({ found: false });
-
-        const company = await companyRepository.findById(companyId);
-        await companyRepository.upsert({ ...result.company, domain, name: company?.name ?? '' });
-
-        return JSON.stringify({
-          found:         true,
-          employeeCount: result.company.employeeCount,
-          fundingStage:  result.company.fundingStage,
-          hqCountry:     result.company.hqCountry,
-          industry:      result.company.industry,
-        });
-      },
-      {
-        name:        'enrich_clearbit',
-        description: 'Fetch company metadata from Clearbit.',
-        schema: z.object({}),
-      },
-    ),
-
-    tool(
       async ({ websiteUrl: url }) => {
         const targetUrl = url || `https://${domain}`;
         const members = await websiteTeamScraper.scrapeTeam(targetUrl, domain).catch(() => []);
@@ -273,7 +137,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
         }
         const result = await hunterScraper.enrichDomain(domain);
         if (!result?.contacts?.length) return JSON.stringify({ found: false });
-
+        console.info('This is the result of the hunter scraper: ', result) //do not remove this console.info
         const { contacts: raw } = normalizer.processResults([result]);
         const deduped = deduplicateContacts(raw);
         const validDeduped = deduped.filter(c => c.role && c.role !== 'Unknown');
@@ -496,7 +360,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     tool(
       async () => {
-        await companyRepository.upsert({ domain, name: '', lastEnrichedAt: new Date(), pipelineStatus: 'enriched' } as any);
+        await companyRepository.setLastEnrichedAt(companyId);
         await companyRepository.setPipelineStatus(companyId, 'scoring');
         await queueManager.addScoringJob({ runId, companyId });
         return JSON.stringify({ queued: true });
@@ -508,4 +372,12 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
     ),
   ];
+
+  // Cap the three tools whose outputs grow with team/contact size.
+  const CAPS: Record<string, number> = {
+    scrape_website_team:  600,
+    verify_contacts:      600,
+    playwright_scrape_url: 800,
+  };
+  return tools.map(t => t.name in CAPS ? capOutput(t, CAPS[t.name]!) : t);
 }

@@ -13,6 +13,7 @@ import { getAvailableSources }         from '../core/scheduler.js';
 import { SCRAPERS, BLOCKED_DOMAINS, BLOCKED_NAME_PATTERNS, isJunkDomain } from '../discovery/blocklists.js';
 import { resolvesRealDomain }          from '../discovery/domain-validator.js';
 import { resolveDomainFromHintUrls, resolveNameToDomain } from '../discovery/domain-resolver.js';
+import { capOutput }                       from './tool-utils.js';
 import type { DiscoveryJobData, RawResult } from '../types/index.js';
 
 const slugifyName = (s: string): string =>
@@ -71,7 +72,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
   const pendingBySource = new Map<string, PendingDiscoveryCompany[]>();
   let totalSaved = 0;
 
-  return [
+  const tools = [
 
     // ── 0. Discovery state ──────────────────────────────────────────────────────
     tool(
@@ -191,81 +192,94 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
         }
         pendingBySource.delete(source);
 
-        let saved = 0, watchlisted = 0, skipped = 0, resolvedCount = 0, urlResolved = 0;
+        const isJobBoard    = ['wellfound', 'linkedin', 'indeed', 'glassdoor', 'surelyremote', 'greenhouse', 'lever', 'ashby', 'workable'].includes(source);
+        const hiringInStack = isJobBoard || defaultHiring;
 
-        for (const co of companies) {
-          const name = co['name'] as string | undefined;
-          if (!name) { skipped++; continue; }
+        type CoOutcome = { outcome: 'saved' | 'watchlisted' | 'skipped'; nameResolved: boolean; urlResolved: boolean };
 
-          const resolved = await resolveDiscoveryDomain(name, co);
-          let domain = resolved.domain;
-          let domainResolved = true;
-          if (!domain) {
-            // Preserve unresolved companies so discovery can still surface them for manual review.
-            domain = `${slugifyName(name)}.unresolved`;
-            domainResolved = false;
-          } else if (!(await resolvesRealDomain(domain))) {
-            logger.debug({ domain }, '[discovery-tools] DNS unresolved — keeping anyway');
-            // Keep the real hostname for visibility, but avoid auto-enrichment until it resolves cleanly.
-            domainResolved = false;
-          } else {
-            resolvedCount++;
-            if (resolved.method === 'hint_url') urlResolved++;
-          }
+        const settled = await Promise.allSettled(
+          companies.map(async (co): Promise<CoOutcome> => {
+            const name = co['name'] as string | undefined;
+            if (!name) return { outcome: 'skipped', nameResolved: false, urlResolved: false };
 
-          // Auto-enrichment only makes sense once we have a trustworthy domain to hand downstream.
-          const isJobBoard    = ['wellfound', 'linkedin', 'indeed', 'glassdoor', 'surelyremote', 'greenhouse', 'lever', 'ashby', 'workable'].includes(source);
-          const hiringInStack = isJobBoard || defaultHiring;
-          const pipelineStatus = hiringInStack && domainResolved ? 'discovered' : 'watchlist';
+            const resolved = await resolveDiscoveryDomain(name, co);
+            let domain = resolved.domain;
+            let domainResolved = true;
+            let nameResolved = false;
+            let urlResolved = false;
 
-          try {
-            const company = await companyRepository.upsert({
-              name,
-              domain,
-              linkedinUrl:   co['linkedinUrl']   as string   | undefined,
-              employeeCount: co['employeeCount'] as number   | undefined,
-              fundingStage:  co['fundingStage']  as any,
-              techStack:     co['techStack']     as string[] | undefined,
-              hqCountry:     (co['hqCountry'] as string | undefined) ?? 'US',
-              sources:       [source ?? job.source] as any,
-              pipelineStatus,
-            } as any);
-
-            if (hiringInStack && domainResolved) {
-              if (process.env['HUNTER_API_KEY']) {
-                hunterScraper.enrichDomain(domain).then(async result => {
-                  if (!result?.contacts?.length) return;
-                  const valid = result.contacts.filter(c => c.fullName && c.role && normalizeRole(c.role as string) !== 'Unknown');
-                  await Promise.allSettled(
-                    valid.map(c =>
-                      contactRepository.upsert({
-                        companyId:       company._id!,
-                        fullName:        c.fullName!,
-                        firstName:       c.firstName,
-                        lastName:        c.lastName,
-                        role:            normalizeRole(c.role as string),
-                        email:           c.email,
-                        emailConfidence: c.emailConfidence ?? 0,
-                        linkedinUrl:     c.linkedinUrl,
-                        sources:         ['hunter'],
-                        forOriginRatio:  false,
-                      }).catch(err => logger.debug({ err, domain }, '[discovery-tools] Hunter pre-pop failed')),
-                    ),
-                  );
-                }).catch(err => logger.debug({ err, domain }, '[discovery-tools] Hunter pre-pop error'));
-              }
-
-              await queueManager.addEnrichmentJob({
-                runId:     job.runId,
-                companyId: company._id!,
-                domain:    company.domain,
-                sources:   ['github', 'hunter', 'clearbit'],
-              });
-              saved++;
+            if (!domain) {
+              domain = `${slugifyName(name)}.unresolved`;
+              domainResolved = false;
+            } else if (!(await resolvesRealDomain(domain))) {
+              logger.debug({ domain }, '[discovery-tools] DNS unresolved — keeping anyway');
+              domainResolved = false;
             } else {
-              watchlisted++;
+              nameResolved = true;
+              urlResolved = resolved.method === 'hint_url';
             }
-          } catch { skipped++; }
+
+            const pipelineStatus = hiringInStack && domainResolved ? 'discovered' : 'watchlist';
+
+            try {
+              const company = await companyRepository.upsert({
+                name,
+                domain,
+                linkedinUrl:   co['linkedinUrl']   as string   | undefined,
+                employeeCount: co['employeeCount'] as number   | undefined,
+                fundingStage:  co['fundingStage']  as any,
+                techStack:     co['techStack']     as string[] | undefined,
+                hqCountry:     (co['hqCountry'] as string | undefined) ?? 'US',
+                sources:       [source ?? job.source] as any,
+                pipelineStatus,
+              } as any);
+
+              if (hiringInStack && domainResolved) {
+                if (process.env['HUNTER_API_KEY']) {
+                  hunterScraper.enrichDomain(domain).then(async result => {
+                    if (!result?.contacts?.length) return;
+                    const valid = result.contacts.filter(c => c.fullName && c.role && normalizeRole(c.role as string) !== 'Unknown');
+                    await Promise.allSettled(
+                      valid.map(c =>
+                        contactRepository.upsert({
+                          companyId:       company._id!,
+                          fullName:        c.fullName!,
+                          firstName:       c.firstName,
+                          lastName:        c.lastName,
+                          role:            normalizeRole(c.role as string),
+                          email:           c.email,
+                          emailConfidence: c.emailConfidence ?? 0,
+                          linkedinUrl:     c.linkedinUrl,
+                          sources:         ['hunter'],
+                          forOriginRatio:  false,
+                        }).catch(err => logger.debug({ err, domain }, '[discovery-tools] Hunter pre-pop failed')),
+                      ),
+                    );
+                  }).catch(err => logger.debug({ err, domain }, '[discovery-tools] Hunter pre-pop error'));
+                }
+
+                await queueManager.addEnrichmentJob({
+                  runId:     job.runId,
+                  companyId: company._id!,
+                  domain:    company.domain,
+                  sources:   ['github', 'hunter', 'clearbit'],
+                });
+                return { outcome: 'saved', nameResolved, urlResolved };
+              }
+              return { outcome: 'watchlisted', nameResolved: false, urlResolved: false };
+            } catch {
+              return { outcome: 'skipped', nameResolved: false, urlResolved: false };
+            }
+          }),
+        );
+
+        let saved = 0, watchlisted = 0, skipped = 0, resolvedCount = 0, urlResolved = 0;
+        for (const r of settled) {
+          if (r.status === 'rejected') { skipped++; continue; }
+          const { outcome, nameResolved, urlResolved: ur } = r.value;
+          if (outcome === 'saved')        { saved++;       if (nameResolved) resolvedCount++; if (ur) urlResolved++; }
+          else if (outcome === 'watchlisted') watchlisted++;
+          else                               skipped++;
         }
 
         totalSaved += saved;
@@ -282,6 +296,9 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
       },
     ),
   ];
+
+  // scrape_source can return a diagnostics blob; cap it so it doesn't re-inflate context on every iteration.
+  return tools.map((t, i) => i === 1 ? capOutput(t, 600) : t);
 }
 
 async function resolveDiscoveryDomain(

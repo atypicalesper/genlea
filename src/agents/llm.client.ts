@@ -72,7 +72,7 @@ function is429(err: unknown): boolean {
   return e.status === 429 || e.statusCode === 429 || e.message.includes('429') || e.message.toLowerCase().includes('rate limit');
 }
 
-function resolveProvider(): string {
+export function resolveProvider(): string {
   const requestedProvider = (process.env['AGENT_LLM_PROVIDER'] ?? 'google').toLowerCase();
   const hostedEnabled = (process.env['ENABLE_HOSTED_LLM'] ?? 'false').toLowerCase() === 'true';
   return !hostedEnabled && requestedProvider !== 'ollama' && requestedProvider !== 'google'
@@ -171,6 +171,13 @@ function withTransientRetry(model: BaseChatModel): BaseChatModel {
   }) as unknown as BaseChatModel;
 }
 
+
+let _llm: BaseChatModel | null = null;
+
+export async function getLlm(): Promise<BaseChatModel> {
+  if (!_llm) _llm = await buildLlm();
+  return _llm;
+}
 
 export async function buildLlm(): Promise<BaseChatModel> {
   const requestedProvider = (process.env['AGENT_LLM_PROVIDER'] ?? 'google').toLowerCase();

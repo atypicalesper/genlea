@@ -6,15 +6,8 @@ import { createWorker, QUEUE_NAMES } from '../core/queue.manager.js';
 import { connectMongo } from '../storage/mongo.client.js';
 import { settingsRepository } from '../storage/repositories/settings.repository.js';
 import { runDiscoveryAgent } from '../agents/discovery.agent.js';
+import { resolveProvider } from '../agents/llm.client.js';
 import { logger } from '../utils/logger.js';
-
-function resolveProvider(): string {
-  const requestedProvider = (process.env['AGENT_LLM_PROVIDER'] ?? 'google').toLowerCase();
-  const hostedEnabled = (process.env['ENABLE_HOSTED_LLM'] ?? 'false').toLowerCase() === 'true';
-  return !hostedEnabled && requestedProvider !== 'ollama' && requestedProvider !== 'google'
-    ? 'ollama'
-    : requestedProvider;
-}
 
 function cap(n: number): number {
   const provider = resolveProvider();
