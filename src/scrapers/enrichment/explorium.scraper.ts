@@ -129,24 +129,7 @@ export class ExploriumScraper implements Scraper {
     const limit     = Math.min(query.limit ?? 25, 500);
 
     try {
-      // Search companies by tech stack + company size + US
-      const searchRes = await this.client.post<{
-        data: Array<{
-          business_id: string;
-          name?: string;
-          website?: string;
-          domain?: string;
-          linkedin_profile?: string;
-          number_of_employees_range?: string;
-          country_name?: string;
-        }>;
-        total_results?: number;
-      }>('/v1/businesses', {
-        country_code:            'US',
-        company_size:            ['11-50', '51-200'],
-        ...(techTerms.length && { company_tech_stack_tech: techTerms }),
-        page_size: Math.min(limit * 2, 100),                   // over-fetch — some will be deduped
-      });
+      const searchRes = await this.searchBusinesses(techTerms, limit);
 
       const businesses = searchRes.data.data ?? [];
       if (!businesses.length) return [];
@@ -326,6 +309,43 @@ export class ExploriumScraper implements Scraper {
       { business_id: businessId },
     );
     return res.data.data ?? null;
+  }
+
+  private async searchBusinesses(techTerms: string[], limit: number) {
+    type BusinessSearchResponse = {
+      data: Array<{
+        business_id: string;
+        name?: string;
+        website?: string;
+        domain?: string;
+        linkedin_profile?: string;
+        number_of_employees_range?: string;
+        country_name?: string;
+      }>;
+      total_results?: number;
+    };
+
+    const baseBody = {
+      country_code: 'US',
+      company_size: ['11-50', '51-200'],
+      page_size:    Math.min(limit * 2, 100),
+    };
+
+    try {
+      return await this.client.post<BusinessSearchResponse>('/v1/businesses', {
+        ...baseBody,
+        ...(techTerms.length && { company_tech_stack_tech: techTerms }),
+      });
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 422 && techTerms.length) {
+        logger.warn(
+          { techTerms, body: err.response?.data },
+          '[explorium:discovery] 422 with tech filter — retrying without tech filter',
+        );
+        return await this.client.post<BusinessSearchResponse>('/v1/businesses', baseBody);
+      }
+      throw err;
+    }
   }
 
   private async findContacts(businessId: string, domain: string): Promise<Partial<RawContact>[]> {
