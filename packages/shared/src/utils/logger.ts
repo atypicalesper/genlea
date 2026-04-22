@@ -3,18 +3,33 @@ import path from 'path';
 import fs from 'fs';
 
 const logsDir = path.resolve('logs');
-if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+const sessionsDir = path.join(logsDir, 'sessions');
+fs.mkdirSync(sessionsDir, { recursive: true });
 
 const level = (process.env['LOG_LEVEL'] ?? 'info') as pino.Level;
 const pretty = process.env['LOG_PRETTY'] === 'true';
 
-const fileTransport = pino.transport({
+const sessionTs = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+const sessionFile = path.join(sessionsDir, `session-${sessionTs}.log`);
+
+const rollingTransport = pino.transport({
   target: 'pino-roll',
   options: {
     file:      path.join(logsDir, 'genlea.log'),
     frequency: 'daily',
     size:      '50m',
     limit:     { count: 14 },
+    mkdir:     true,
+  },
+});
+
+const sessionTransport = pino.transport({
+  target: 'pino-roll',
+  options: {
+    file:      sessionFile,
+    frequency: 'daily',
+    size:      '200m',
+    limit:     { count: 30 },
     mkdir:     true,
   },
 });
@@ -33,13 +48,13 @@ const streams: pino.StreamEntry[] = [
         }) as NodeJS.WritableStream)
       : process.stdout,
   },
-  {
-    level,
-    stream: fileTransport,
-  },
+  { level, stream: rollingTransport },
+  { level, stream: sessionTransport },
 ];
 
 export const logger = pino(
   { level, base: { service: 'genlea' } },
   pino.multistream(streams),
 );
+
+export const SESSION_LOG_FILE = sessionFile;
