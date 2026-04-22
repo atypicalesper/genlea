@@ -2,11 +2,13 @@ import { createAgent }                          from 'langchain';
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
 import {
   buildLlm, alertAgentFailure, resilientAgentInvoke,
+  buildLlmInvokeOptions,
   companyRepository, scrapeLogRepository, queueManager, logger,
 } from '@genlea/shared';
 import type { EnrichmentJobData, AgentStep } from '@genlea/shared';
 import { makeTools } from './enrichment-tools.js';
 
+// The stable system prompt carries most of the expensive repeated context.
 const SYSTEM_PROMPT = `You are a B2B lead enrichment agent for a software agency pitching software development services.
 
 GOAL: qualify companies only if they match this ICP:
@@ -43,6 +45,16 @@ SOURCE ORDER:
 7. enrich_hunter
 8. verify_contacts`;
 
+// Keep the user prompt small and structured so Anthropic can reuse the shared prefix.
+const USER_PROMPT_TEMPLATE = [
+  'Enrich this company against the outreach ICP.',
+  'Start with get_company_state, then follow the goal loop.',
+  'Verify non-India HQ, company size, and engineering hiring.',
+  'Gather decision-maker contacts and names for Indian-origin engineer analysis.',
+  'Disqualify if big MNC, India-based, defunct, above 1000 employees, or not hiring engineers.',
+  'Compute origin ratio and queue for scoring when ready.',
+].join('\n');
+
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> {
@@ -77,18 +89,15 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
     errors: [], durationMs: 0, startedAt: new Date(),
   }))._id!;
 
-  const userMessage = `
-Enrich this company against the outreach ICP:
-
-Company ID : ${companyId}
-Domain     : ${domain}
-Name       : ${company.name}
-Known data : employees=${company.employeeCount ?? 'unknown'}, tech=${JSON.stringify(company.techStack ?? [])}, status=${company.status}
-
-Start with get_company_state, then follow the goal loop.
-Verify company size, non-India HQ, engineering hiring, and Indian-origin engineer signal.
-Disqualify if it is a big MNC, India-based, or not hiring engineers.
-`.trim();
+  const userMessage = [
+    USER_PROMPT_TEMPLATE,
+    `companyId=${companyId}`,
+    `domain=${domain}`,
+    `name=${company.name}`,
+    `employeeCount=${company.employeeCount ?? 'unknown'}`,
+    `techStack=${JSON.stringify(company.techStack ?? [])}`,
+    `status=${company.status}`,
+  ].join('\n');
 
   const agentName     = `enrichment:${domain}`;
   const agentTools    = makeTools(job);
@@ -96,13 +105,14 @@ Disqualify if it is a big MNC, India-based, or not hiring engineers.
 
   try {
     const llm   = await buildLlm();
+
     const agent = createAgent({ model: llm, tools: agentTools, systemPrompt: SYSTEM_PROMPT });
     logger.info({ agent: agentName, tools: agentTools.map(t => t.name) }, '[agent] Starting');
 
     const agentResult = await resilientAgentInvoke(
       agent.invoke.bind(agent),
       { messages: [new HumanMessage(userMessage)] },
-      { recursionLimit: maxIterations * 2 + 4 },
+      { recursionLimit: maxIterations * 2 + 4, ...buildLlmInvokeOptions() },
       { agentName, timeoutMs: 12 * 60 * 1000 },  // enrichment gets 12 min — more tools, more steps
     ) as Awaited<ReturnType<typeof agent.invoke>>;
 
@@ -117,15 +127,18 @@ Disqualify if it is a big MNC, India-based, or not hiring engineers.
       if (msg instanceof AIMessage && msg.tool_calls?.length) {
         iterations++;
         const ts = new Date().toISOString();
+
         for (const call of msg.tool_calls) {
           if (call.id) toolCallTimes.set(call.id, ts);
           logger.debug({ agent: agentName, iter: iterations, tool: call.name, args: call.args }, '[agent] Tool call');
         }
       }
+
       if (msg instanceof ToolMessage && msg.name) {
         const ts = (msg.tool_call_id && toolCallTimes.get(msg.tool_call_id)) ?? new Date().toISOString();
         let parsed: unknown = msg.content;
         try { parsed = JSON.parse(msg.content as string); } catch { /* leave as string */ }
+
         const p = parsed as Record<string, unknown>;
 
         if (msg.name === 'check_enrichment_progress') {

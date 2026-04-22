@@ -1,5 +1,5 @@
 import dotenvFlow from 'dotenv-flow';
-dotenvFlow.config({ override: true });
+dotenvFlow.config();
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { createBullBoard } from '@bull-board/api';

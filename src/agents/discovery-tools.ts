@@ -31,36 +31,37 @@ export function buildSystemPrompt(): string {
     ? `\nUnavailable sources (no credentials — do NOT call these): ${skipList.join(', ')}`
     : '';
 
-  return `You are a B2B lead discovery agent for a software agency pitching software development services.
+  return `You are a B2B lead discovery agent for a software agency.
 
-GOAL: Find and save at least 15 companies that match this ICP:
-- not a big MNC or enterprise; avoid companies above 1000 employees
-- not India-based; prefer US/UK/CA/AU/EU companies
-- actively hiring software engineering or development roles
-- likely to already employ Indian-origin engineers, or at minimum look promising enough for enrichment to verify that signal
+Goal:
+- save at least 15 companies
+- exclude India-headquartered companies
+- exclude big enterprises and companies above 1000 employees
+- prefer companies hiring engineering roles
+- prefer companies likely to already employ Indian-origin engineers
 
-WORKFLOW:
-1. Call get_discovery_state first.
+Workflow:
+1. Call get_discovery_state.
 2. Scrape the primary source.
-3. Immediately call save_companies with the same source.
-4. Check get_discovery_state again.
-5. If results are thin, try 1-2 fallback sources.
+3. Immediately call save_companies for that source.
+4. Re-check get_discovery_state.
+5. If needed, try 1-2 fallback sources.
 6. Never try the same source twice.
 
 Available sources: ${activeList}${skipNote}
 
-Interpret hiring like this:
-- job board / ATS sources mean the company is actively hiring engineers
-- database sources mean hiring is unknown until later enrichment
+Hiring signal:
+- job boards / ATS sources imply active hiring
+- database sources need later enrichment
 
 Source preference:
 greenhouse → lever → ashby → workable → explorium → wellfound → indeed → glassdoor → crunchbase → apollo → surelyremote
 
-Do NOT save:
+Never save:
 - big enterprises, FAANG, banks, consulting giants, or companies above 1000 employees
 - India-headquartered companies
 - staffing agencies, outsourcing vendors, and job boards
-- companies with no engineering hiring signal at all`;
+- companies with no engineering hiring signal`;
 }
 
 export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
@@ -92,29 +93,12 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
       },
       {
         name:        'get_discovery_state',
-        description: 'Check progress: companies saved so far, sources tried, sources remaining, and whether the 15-company goal is met. Call FIRST before scraping anything, and AGAIN after every save_companies call. If `goalMet: true`, stop immediately — do not scrape more sources.',
+        description: 'Check progress and whether the 15-company goal is met. Call first and after each save.',
         schema: z.object({}),
       },
     ),
 
-    // ── 1. Source availability ──────────────────────────────────────────────────
-    tool(
-      async ({ source }) => {
-        const scraper = SCRAPERS[source];
-        if (!scraper) return JSON.stringify({ available: false, reason: 'Unknown source' });
-        const available = await scraper.isAvailable();
-        return JSON.stringify({ available, source });
-      },
-      {
-        name:        'check_source_availability',
-        description: 'Verify a source has credentials and can accept requests. Optional — scrape_source already checks availability internally and returns an error if unavailable. Use this only to pre-screen sources before deciding scrape order.',
-        schema: z.object({
-          source: z.string().describe(`Source to check. Available: ${availableSources}`),
-        }),
-      },
-    ),
-
-    // ── 2. Scrape source ────────────────────────────────────────────────────────
+    // ── 1. Scrape source ────────────────────────────────────────────────────────
     tool(
       async ({ source, keywords, location = 'United States', limit = 25 }) => {
         if (triedSources.has(source)) {
@@ -180,7 +164,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
       },
       {
         name:        'scrape_source',
-        description: 'Scrape one source for companies matching the query. Each source can only be called ONCE per run — subsequent calls return an error. Returns a short summary with `filteredCount`; company data is held in memory. You MUST call save_companies immediately after — data will be lost otherwise. If `filteredCount` < 5 consider increasing `limit` to 50 on the next source.',
+        description: 'Scrape one source. Each source can only be used once per run. Call save_companies right after.',
         schema: z.object({
           source:   z.string().describe(`Source to scrape. Must be one of: ${availableSources}`),
           keywords: z.string().min(1).max(300).describe('Search keywords — plain text only, max 300 chars'),
@@ -190,7 +174,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
       },
     ),
 
-    // ── 3. Save companies ───────────────────────────────────────────────────────
+    // ── 2. Save companies ───────────────────────────────────────────────────────
     tool(
       async ({ source, hiringInStack: defaultHiring = true }) => {
         if (!pendingBySource.has(source)) {
@@ -290,7 +274,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
       },
       {
         name:        'save_companies',
-        description: 'Flush companies held from the previous scrape_source call into the database. Pass ONLY the source name — do NOT pass company data. Job-board sources (wellfound, linkedin, indeed, glassdoor, surelyremote) auto-set hiringInStack: true; database sources (explorium, crunchbase, apollo) default to false. Returns `saved` (queued for enrichment), `watchlisted`, and `runningTotal`. Check `runningTotal` — if ≥ 15, call get_discovery_state to confirm goalMet and stop.',
+        description: 'Persist the pending results for a source and queue enrichable companies.',
         schema: z.object({
           source:        z.string().describe('The source name you just scraped (e.g. "wellfound", "indeed")'),
           hiringInStack: z.boolean().optional().describe('Whether these companies are actively hiring (default: true for job-board sources)'),

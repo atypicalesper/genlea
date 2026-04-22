@@ -29,36 +29,37 @@ export function buildSystemPrompt(): string {
     ? `\nUnavailable sources (no credentials — do NOT call these): ${skipList.join(', ')}`
     : '';
 
-  return `You are a B2B lead discovery agent for a software agency pitching software development services.
+  return `You are a B2B lead discovery agent for a software agency.
 
-GOAL: Find and save at least 15 companies that match this ICP:
-- not a big MNC or enterprise; avoid companies above 1000 employees
-- not India-based; prefer US/UK/CA/AU/EU companies
-- actively hiring software engineering or development roles
-- likely to already employ Indian-origin engineers, or at minimum look promising enough for enrichment to verify that signal
+Goal:
+- save at least 15 companies
+- exclude India-headquartered companies
+- exclude big enterprises and companies above 1000 employees
+- prefer companies hiring engineering roles
+- prefer companies likely to already employ Indian-origin engineers
 
-WORKFLOW:
-1. Call get_discovery_state first.
+Workflow:
+1. Call get_discovery_state.
 2. Scrape the primary source.
-3. Immediately call save_companies with the same source.
-4. Check get_discovery_state again.
-5. If results are thin, try 1-2 fallback sources.
+3. Immediately call save_companies for that source.
+4. Re-check get_discovery_state.
+5. If needed, try 1-2 fallback sources.
 6. Never try the same source twice.
 
 Available sources: ${activeList}${skipNote}
 
-Interpret hiring like this:
-- job board sources mean the company is actively hiring engineers
-- database sources mean hiring is unknown until later enrichment
+Hiring signal:
+- job board sources imply active hiring
+- database sources need later enrichment
 
 Fallback order:
 explorium → wellfound → indeed → glassdoor → crunchbase → apollo → surelyremote
 
-Do NOT save:
+Never save:
 - big enterprises, FAANG, banks, consulting giants, or companies above 1000 employees
 - India-headquartered companies
 - staffing agencies, outsourcing vendors, and job boards
-- companies with no engineering hiring signal at all`;
+- companies with no engineering hiring signal`;
 }
 
 export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
@@ -100,24 +101,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
       },
     ),
 
-    // ── 1. Source availability check ──────────────────────────────────────────
-    tool(
-      withTiming('check_source_availability', async ({ source }) => {
-        const scraper = SCRAPERS[source];
-        if (!scraper) return JSON.stringify({ available: false, reason: 'Unknown source' });
-        const available = await scraper.isAvailable();
-        return JSON.stringify({ available, source });
-      }),
-      {
-        name:        'check_source_availability',
-        description: 'Check if a scraper source has valid credentials and is ready to use.',
-        schema: z.object({
-          source: z.string().describe(`Source to check. Available: ${availableSources}`),
-        }),
-      },
-    ),
-
-    // ── 2. Scrape source ──────────────────────────────────────────────────────
+    // ── 1. Scrape source ──────────────────────────────────────────────────────
     tool(
       withTiming('scrape_source', async ({ source, keywords: rawKeywords, location, limit = 25 }) => {
         const keywords = sanitizeAgentInput(rawKeywords, 300);
@@ -191,7 +175,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
       },
     ),
 
-    // ── 3. Save companies ─────────────────────────────────────────────────────
+    // ── 2. Save companies ─────────────────────────────────────────────────────
     tool(
       withTiming('save_companies', async ({ source, hiringInStack: defaultHiring = true }) => {
         if (!pendingBySource.has(source)) {

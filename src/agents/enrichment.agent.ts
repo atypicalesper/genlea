@@ -14,7 +14,7 @@
 
 import { createAgent }           from 'langchain';
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
-import { buildLlm }              from './llm.client.js';
+import { buildLlm, buildLlmInvokeOptions } from './llm.client.js';
 import { alertAgentFailure }     from '../utils/alert.js';
 import { companyRepository }     from '../storage/repositories/company.repository.js';
 import { queueManager }          from '../core/queue.manager.js';
@@ -22,6 +22,7 @@ import { createLogger, getLlmTag } from '../utils/logger.js';
 import { makeTools }             from './enrichment-tools.js';
 import type { EnrichmentJobData } from '../types/index.js';
 
+// The stable system prompt carries most of the expensive repeated context.
 const SYSTEM_PROMPT = `You are a B2B lead enrichment agent for a software agency pitching software development services.
 
 GOAL: qualify companies only if they match this ICP:
@@ -56,6 +57,16 @@ Best source order:
 9. compute_origin_ratio
 10. queue_for_scoring`;
 
+// Keep the user prompt small and structured so Anthropic can reuse the shared prefix.
+const USER_PROMPT_TEMPLATE = [
+  'Enrich this company against the outreach ICP.',
+  'Start with get_company_state.',
+  'Verify non-India HQ, company size, and engineering hiring.',
+  'Gather decision-maker contacts and names for Indian-origin engineer analysis.',
+  'Disqualify if big MNC, India-based, defunct, above 1000 employees, or not hiring engineers.',
+  'When enough data is available, call compute_origin_ratio and queue_for_scoring.',
+].join('\n');
+
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> {
@@ -86,24 +97,16 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
     }
   }
 
-  const userMessage = `
-Enrich this company against the outreach ICP:
-
-Company ID : ${companyId}
-Domain     : ${domain}
-Name       : ${company.name}
-Website    : ${company.websiteUrl ?? 'unknown'}
-Known data : employee count=${company.employeeCount ?? 'unknown'}, tech stack=${JSON.stringify(company.techStack ?? [])}, status=${company.status}
-
-Steps:
-1. Call get_company_state first to see what's already available.
-2. Verify company size and basic company profile details when available.
-3. Verify it is not India-headquartered.
-4. Verify active development or engineering hiring.
-5. Gather decision-maker contacts and collect names for Indian-origin engineer analysis.
-6. Disqualify if it is a big MNC, India-based, or not hiring engineers.
-7. When enrichment is done, call compute_origin_ratio then queue_for_scoring.
-`.trim();
+  const userMessage = [
+    USER_PROMPT_TEMPLATE,
+    `companyId=${companyId}`,
+    `domain=${domain}`,
+    `name=${company.name}`,
+    `website=${company.websiteUrl ?? 'unknown'}`,
+    `employeeCount=${company.employeeCount ?? 'unknown'}`,
+    `techStack=${JSON.stringify(company.techStack ?? [])}`,
+    `status=${company.status}`,
+  ].join('\n');
 
   const agentName    = `enrichment:${domain}`;
   const agentTools   = makeTools(job);
@@ -111,26 +114,31 @@ Steps:
 
   try {
     const llm   = await buildLlm();
+
     const agent = createAgent({ model: llm, tools: agentTools, systemPrompt: SYSTEM_PROMPT });
     log.info({ agent: agentName, tools: agentTools.map(t => t.name) }, '[agent] Starting');
 
     const agentResult = await agent.invoke(
       { messages: [new HumanMessage(userMessage)] },
-      { recursionLimit: maxIterations * 2 + 4 },
+      { recursionLimit: maxIterations * 2 + 4, ...buildLlmInvokeOptions() },
     );
 
     let iterations = 0;
     for (const msg of agentResult.messages as (AIMessage | ToolMessage)[]) {
       if (msg instanceof AIMessage && msg.tool_calls?.length) {
         iterations++;
+
         for (const call of msg.tool_calls) {
           log.debug({ agent: agentName, iter: iterations, tool: call.name, args: call.args }, '[agent] Tool call');
         }
       }
+
       if (msg instanceof ToolMessage && msg.name) {
         let parsed: unknown = msg.content;
         try { parsed = JSON.parse(msg.content as string); } catch { /* leave as string */ }
+
         const p = parsed as Record<string, unknown>;
+
         if (p?.['error']) log.warn({ agent: agentName, tool: msg.name, error: p['error'] }, '[agent] Tool returned error');
         else if (p?.['available'] === false) log.info({ agent: agentName, tool: msg.name, reason: p['reason'] }, '[agent] Tool unavailable');
         else log.debug({ agent: agentName, tool: msg.name, resultPreview: JSON.stringify(parsed).slice(0, 120) }, '[agent] Tool result');

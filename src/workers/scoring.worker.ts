@@ -1,5 +1,5 @@
 import dotenvFlow from 'dotenv-flow';
-dotenvFlow.config({ override: true });
+dotenvFlow.config();
 import { Job } from 'bullmq';
 import { ScoringJobData } from '../types/index.js';
 import { createWorker, QUEUE_NAMES } from '../core/queue.manager.js';

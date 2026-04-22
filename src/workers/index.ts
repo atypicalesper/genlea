@@ -1,5 +1,5 @@
 import dotenvFlow from 'dotenv-flow';
-dotenvFlow.config({ override: true });
+dotenvFlow.config();
 import { startDiscoveryWorker } from './discovery.worker.js';
 import { startEnrichmentWorker } from './enrichment.worker.js';
 import { startScoringWorker } from './scoring.worker.js';

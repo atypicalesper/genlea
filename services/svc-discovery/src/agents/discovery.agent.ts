@@ -1,8 +1,19 @@
 import { createAgent }                          from 'langchain';
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
-import { buildLlm, alertAgentFailure, scrapeLogRepository, sanitizeAgentInput, resilientAgentInvoke, logger } from '@genlea/shared';
+import { buildLlm, buildLlmInvokeOptions, alertAgentFailure, scrapeLogRepository, sanitizeAgentInput, resilientAgentInvoke, logger } from '@genlea/shared';
 import type { DiscoveryJobData, AgentStep }     from '@genlea/shared';
 import { makeTools, buildSystemPrompt }         from './discovery-tools.js';
+
+// Keep the variable tail compact so Anthropic prompt caching can reuse the large
+// shared prefix from the system prompt and tool definitions.
+const USER_PROMPT_TEMPLATE = [
+  'Run discovery for this source.',
+  'Use get_discovery_state first.',
+  'Scrape the primary source before trying fallbacks.',
+  'After each scrape_source, immediately call save_companies with the same source.',
+  'Target ICP: non-India companies, engineering hiring, not big MNCs, prefer Indian-origin employee signal.',
+  'Stop once the goal is met.',
+].join('\n');
 
 export async function runDiscoveryAgent(job: DiscoveryJobData): Promise<void> {
   const { runId, source, query } = job;
@@ -18,19 +29,13 @@ export async function runDiscoveryAgent(job: DiscoveryJobData): Promise<void> {
   const safeKeywords = sanitizeAgentInput(query.keywords ?? '', 300);
   const safeLocation = query.location ? sanitizeAgentInput(query.location, 100) : undefined;
 
-  const userMessage = `
-Find companies that fit this outreach ICP.
-
-Primary source : ${source}
-Keywords       : ${safeKeywords}
-${safeLocation ? `Location       : ${safeLocation}` : ''}
-Target         : ≥15 companies
-
-Start with get_discovery_state to check current progress. If the goal is not met, scrape ${source} first.
-After each scrape_source, call save_companies with source="${source}" — do NOT pass company data back, just the source name.
-Focus on non-India companies that are hiring development or engineering roles.
-Avoid big MNCs, avoid companies above 1000 employees, and prefer companies likely to already employ Indian-origin engineers.
-`.trim();
+  const userMessage = [
+    USER_PROMPT_TEMPLATE,
+    `source=${source}`,
+    `keywords=${safeKeywords}`,
+    `location=${safeLocation ?? 'United States'}`,
+    'goal=15 companies',
+  ].join('\n');
 
   const agentName     = `discovery:${source}:${runId.slice(0, 8)}`;
   const agentTools    = makeTools(job);
@@ -38,13 +43,14 @@ Avoid big MNCs, avoid companies above 1000 employees, and prefer companies likel
 
   try {
     const llm   = await buildLlm();
+
     const agent = createAgent({ model: llm, tools: agentTools, systemPrompt: buildSystemPrompt() });
     logger.info({ agent: agentName, tools: agentTools.map(t => t.name) }, '[agent] Starting');
 
     const agentResult = await resilientAgentInvoke(
       agent.invoke.bind(agent),
       { messages: [new HumanMessage(userMessage)] },
-      { recursionLimit: maxIterations * 2 + 4 },
+      { recursionLimit: maxIterations * 2 + 4, ...buildLlmInvokeOptions() },
       { agentName },
     ) as Awaited<ReturnType<typeof agent.invoke>>;
 
@@ -60,16 +66,19 @@ Avoid big MNCs, avoid companies above 1000 employees, and prefer companies likel
       if (msg instanceof AIMessage && msg.tool_calls?.length) {
         iterations++;
         const ts = new Date().toISOString();
+
         for (const call of msg.tool_calls) {
           if (call.id) toolCallTimes.set(call.id, ts);
           logger.debug({ agent: agentName, iter: iterations, tool: call.name, args: call.args }, '[agent] Tool call');
         }
       }
+
       if (msg instanceof ToolMessage && msg.name) {
         const ts = (msg.tool_call_id && toolCallTimes.get(msg.tool_call_id)) ?? new Date().toISOString();
         // Tool payloads double as an execution trace for the dashboard and scrape logs.
         let parsed: unknown = msg.content;
         try { parsed = JSON.parse(msg.content as string); } catch { /* leave as string */ }
+
         const p = parsed as Record<string, unknown>;
 
         // Accumulate saved count from all save_companies calls
@@ -141,8 +150,6 @@ function buildStepSummary(tool: string, p: Record<string, unknown>): string {
   switch (tool) {
     case 'get_discovery_state':
       return `state: ${p['companiesFound'] ?? 0}/${p['goalTarget'] ?? 15} companies — goalMet: ${p['goalMet'] ?? false}`;
-    case 'check_source_availability':
-      return `${p['source']}: ${p['available'] ? 'available' : 'unavailable'}`;
     case 'scrape_source':
       return `scraped ${p['source'] ?? '?'}: ${p['rawCount'] ?? 0} raw → ${p['filteredCount'] ?? 0} after filter`;
     case 'save_companies': {

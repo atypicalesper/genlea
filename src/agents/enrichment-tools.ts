@@ -52,8 +52,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'get_company_state',
-        description: 'ALWAYS call first. Returns existing data (tech stack, employee count, contacts, origin ratio) and a `missing` map of gaps. Use the missing flags to decide which enrichment tools to call — skip any source whose data is already present.',
-        schema: z.object({ companyId: z.string() }),
+        description: 'Get the current company state. Call this first.',
+        schema: z.object({}),
       },
     ),
 
@@ -83,8 +83,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'enrich_github',
-        description: 'Search for the company GitHub org by domain, pull tech stack from public repos, and collect contributor names for origin ratio. Best free source of dev names — call before compute_origin_ratio. Returns `found: false` if no org matched. Results auto-saved.',
-        schema: z.object({ domain: z.string() }),
+        description: 'Find the GitHub org, extract tech stack, and collect contributor names.',
+        schema: z.object({}),
       },
     ),
 
@@ -141,9 +141,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'enrich_explorium',
-        description: 'Best single enrichment source — returns company metadata (tech stack, employee count, funding, HQ) AND decision-maker contacts (CEO/HR/CTO with email, phone, LinkedIn) in one call. Try this first after get_company_state. Returns `available: false` if EXPLORIUM_API_KEY is missing — skip it. Results auto-saved.',
+        description: 'Fetch company metadata and decision-maker contacts from Explorium.',
         schema: z.object({
-          domain: z.string(),
           name:   z.string().optional().describe('Company name (improves match accuracy)'),
         }),
       },
@@ -196,9 +195,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'enrich_clay',
-        description: 'Alternative to Explorium — returns company metadata and decision-maker contacts. Use if Explorium is unavailable or returned no contacts. Returns `available: false` if CLAY_API_KEY is missing — skip it. Results auto-saved.',
+        description: 'Fetch company metadata and decision-maker contacts from Clay.',
         schema: z.object({
-          domain: z.string(),
           name:   z.string().optional().describe('Company name (improves match accuracy)'),
         }),
       },
@@ -225,15 +223,15 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'enrich_clearbit',
-        description: 'Fetch firmographic data from Clearbit: employee count, funding stage, industry, HQ location. Does NOT return contacts — pair with enrich_hunter or scrape_website_team. Returns `available: false` if CLEARBIT_API_KEY is missing. Use only when Explorium/Clay are unavailable and employee count or funding stage is still missing.',
-        schema: z.object({ domain: z.string() }),
+        description: 'Fetch company metadata from Clearbit.',
+        schema: z.object({}),
       },
     ),
 
     tool(
-      async ({ websiteUrl: url, domain: d }) => {
-        const targetUrl = url || `https://${d ?? domain}`;
-        const members = await websiteTeamScraper.scrapeTeam(targetUrl, d ?? domain).catch(() => []);
+      async ({ websiteUrl: url }) => {
+        const targetUrl = url || `https://${domain}`;
+        const members = await websiteTeamScraper.scrapeTeam(targetUrl, domain).catch(() => []);
         if (!members.length) return JSON.stringify({ found: false, count: 0 });
 
         await Promise.allSettled(
@@ -261,10 +259,9 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'scrape_website_team',
-        description: 'Scrape the company /team, /about, or /people pages for employee names and roles. Use when APIs return no contacts OR you need more names for origin ratio. Pass `websiteUrl` from company state if known; falls back to https://domain. Good source of CEO/CTO names even without emails. Results auto-saved.',
+        description: 'Scrape team/about/people pages for names and roles.',
         schema: z.object({
           websiteUrl: z.string().optional().describe('Full URL e.g. https://acme.com'),
-          domain:     z.string(),
         }),
       },
     ),
@@ -293,8 +290,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'enrich_hunter',
-        description: 'Find professional email addresses for a domain via Hunter.io. Best used as a gap-filler after Explorium/Clay — adds emails to contacts that came back without them. Returns `available: false` if HUNTER_API_KEY is missing. Only saves contacts with identifiable roles (CEO, HR, etc.).',
-        schema: z.object({ domain: z.string() }),
+        description: 'Find emails and contacts for the company domain via Hunter.',
+        schema: z.object({}),
       },
     ),
 
@@ -315,11 +312,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'verify_contacts',
-        description: 'SMTP-verify email deliverability for all saved contacts and synthesise missing CEO/HR/CTO emails using common patterns (first@domain, first.last@domain). Call after all contact-gathering tools are done. Returns `available: false` if neither HUNTER_API_KEY nor SMTP_HOST is configured — skip it.',
-        schema: z.object({
-          companyId: z.string(),
-          domain:    z.string(),
-        }),
+        description: 'Verify saved contacts and fill obvious email gaps.',
+        schema: z.object({}),
       },
     ),
 
@@ -369,7 +363,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'playwright_scrape_url',
-        description: 'Last-resort scraper using a stealth Playwright browser. Use when: (a) all APIs returned no data, (b) you need to verify the company is still active, or (c) scraping /careers or /jobs for tech stack signals. Set `purpose` to guide extraction: "team_names" → people+roles, "tech_stack" → frameworks/tools, "contact_emails" → emails, "company_info" → general metadata. Returns `defunct: true` if the site shows shutdown signals — disqualify the company if so.',
+        description: 'Stealth Playwright scraper for team, jobs, contact, or company pages.',
         schema: z.object({
           url:     z.string().describe('Full URL to scrape'),
           purpose: z.string().describe('What you are looking for: "team_names", "tech_stack", "contact_emails", "company_info"'),
@@ -406,9 +400,9 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'save_contacts',
-        description: 'Persist contacts extracted manually from playwright_scrape_url results. Only call this when playwright returned people data that has NOT been auto-saved — Explorium, Clay, GitHub, Hunter, and scrape_website_team all auto-save their own contacts. Skips any entry with an unrecognised role.',
+        description: 'Persist manually extracted contacts that were not auto-saved.',
         schema: z.object({
-          companyId: z.string(),
+          companyId: z.string().optional(),
           contacts: z.array(z.object({
             fullName:    z.string(),
             role:        z.string().describe('CEO, CTO, VP of Engineering, Head of Engineering, Director of Engineering, HR, Recruiter, Founder, Co-Founder, COO, CPO, CFO, Head of Talent'),
@@ -452,8 +446,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'compute_origin_ratio',
-        description: 'Estimate the Indian-origin developer ratio from all collected names. Call only after enrich_github, scrape_website_team, and enrich_hunter have all been attempted. Requires at least originRatioMinSample names (check `totalNamesCollected` in get_company_state). Returns `computed: false` if too few names — do not retry, just proceed to queue_for_scoring.',
-        schema: z.object({ companyId: z.string() }),
+        description: 'Estimate the Indian-origin ratio from collected names.',
+        schema: z.object({}),
       },
     ),
 
@@ -469,10 +463,10 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'save_company_data',
-        description: 'Merge partial company data into the database. Use when playwright_scrape_url or manual parsing yields structured fields (tech stack, employee count, funding) that were not auto-saved by the enrichment tools. All fields are optional — only pass what was actually found.',
+        description: 'Merge partial company data into the database.',
         schema: z.object({
-          domain:        z.string(),
-          name:          z.string(),
+          domain:        z.string().optional(),
+          name:          z.string().optional(),
           techStack:     z.array(z.string()).optional(),
           employeeCount: z.number().optional(),
           fundingStage:  z.string().optional(),
@@ -493,9 +487,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'disqualify_company',
-        description: 'Permanently mark the company as disqualified and halt enrichment. Triggers: playwright returned `defunct: true`, employeeCount > 1000, hqCountry is India, or zero tech signals after all sources exhausted. After calling this do NOT call queue_for_scoring — the pipeline ends here.',
+        description: 'Mark the company as disqualified and stop enrichment.',
         schema: z.object({
-          companyId: z.string(),
           reason:    z.string(),
         }),
       },
@@ -510,11 +503,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
       {
         name:        'queue_for_scoring',
-        description: 'FINAL step — signals enrichment is complete and enqueues scoring. Call only after all relevant enrichment tools have run and any manual saves are flushed. Do NOT call if disqualify_company was called. Marks pipelineStatus as "scoring".',
-        schema: z.object({
-          companyId: z.string(),
-          runId:     z.string(),
-        }),
+        description: 'Final step: mark enrichment complete and enqueue scoring.',
+        schema: z.object({}),
       },
     ),
   ];

@@ -9,7 +9,7 @@ export { logger } from './utils/logger.js';
 export * from './utils/random.js';
 export * from './utils/array-utils.js';
 export * from './utils/alert.js';
-export { buildLlm, MODEL } from './utils/llm.client.js';
+export { buildLlm, buildLlmInvokeOptions, MODEL } from './utils/llm.client.js';
 export { sanitizeAgentInput, isInjectionAttempt } from './utils/prompt-sanitizer.js';
 export { resilientAgentInvoke }                   from './utils/resilient-invoke.js';
 export { withTiming }                             from './utils/timed-tool.js';
