@@ -1,9 +1,9 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { logger } from '../utils/logger.js';
 
-const REQUESTED_PROVIDER = (process.env['AGENT_LLM_PROVIDER'] ?? 'ollama').toLowerCase();
+const REQUESTED_PROVIDER = (process.env['AGENT_LLM_PROVIDER'] ?? 'google').toLowerCase();
 const HOSTED_MODELS_ENABLED = (process.env['ENABLE_HOSTED_LLM'] ?? 'false').toLowerCase() === 'true';
-const PROVIDER = !HOSTED_MODELS_ENABLED && REQUESTED_PROVIDER !== 'ollama'
+const PROVIDER = !HOSTED_MODELS_ENABLED && REQUESTED_PROVIDER !== 'ollama' && REQUESTED_PROVIDER !== 'google'
   ? 'ollama'
   : REQUESTED_PROVIDER;
 
