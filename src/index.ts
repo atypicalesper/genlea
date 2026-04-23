@@ -31,7 +31,7 @@ program
     const source = opts.source as ScraperSource;
     const query: ScrapeQuery = {
       keywords:  opts.query,
-      location:  'United States',
+      location:  'United Kingdom, Canada, Australia, Europe, Remote',
       limit:     parseInt(opts.limit),
       techStack: opts.tech ? opts.tech.split(',').map((t: string) => t.trim()) : undefined,
     };

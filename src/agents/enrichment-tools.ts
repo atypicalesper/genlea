@@ -3,10 +3,12 @@ import { tool }                        from '@langchain/core/tools';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import { companyRepository }           from '../storage/repositories/company.repository.js';
 import { contactRepository }           from '../storage/repositories/contact.repository.js';
+import { jobRepository }               from '../storage/repositories/job.repository.js';
 import { settingsRepository }          from '../storage/repositories/settings.repository.js';
 import { queueManager }                from '../core/queue.manager.js';
 import { browserManager }              from '../core/browser.manager.js';
 import { proxyManager }                from '../core/proxy.manager.js';
+import { normalizeDomain }             from '../utils/random.js';
 import { indianRatioAnalyzer }         from '../enrichment/dev-origin.analyzer.js';
 import { contactResolver }             from '../enrichment/contact.resolver.js';
 import { websiteTeamScraper }          from '../enrichment/website-team.enricher.js';
@@ -15,20 +17,36 @@ import { deduplicateContacts }         from '../enrichment/deduplicator.js';
 import { extractPeopleFromPage }       from '../enrichment/page-content-extractor.js';
 import { isDefunct }                   from '../enrichment/defunct-detector.js';
 import { githubScraper, hunterScraper } from '../scrapers/enrichment/index.js';
+import {
+  linkedInScraper,
+  wellfoundScraper,
+  indeedScraper,
+  glassdoorScraper,
+  surelyRemoteScraper,
+} from '../scrapers/discovery/index.js';
 import { capOutput }                    from './tool-utils.js';
 import { logger }                      from '../utils/logger.js';
 import type { EnrichmentJobData, ContactRole } from '../types/index.js';
 
 export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
   const { runId, companyId, domain } = job;
+  const hiringScrapers = {
+    linkedin: linkedInScraper,
+    wellfound: wellfoundScraper,
+    indeed: indeedScraper,
+    glassdoor: glassdoorScraper,
+    surelyremote: surelyRemoteScraper,
+  } as const;
+  const defaultHiringSources = Object.keys(hiringScrapers) as Array<keyof typeof hiringScrapers>;
 
   const tools = [
     tool(
       async () => {
-        const [company, contacts, allNames] = await Promise.all([
+        const [company, contacts, allNames, activeJobs] = await Promise.all([
           companyRepository.findById(companyId),
           contactRepository.findByCompanyId(companyId),
           contactRepository.findAllNamesForOriginRatio(companyId),
+          jobRepository.findByCompanyId(companyId, true),
         ]);
         const nameCount = allNames.length;
         if (!company) return JSON.stringify({ error: 'Company not found' });
@@ -40,6 +58,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           hqCountry:     company.hqCountry,
           fundingStage:  company.fundingStage,
           techStack:     company.techStack ?? [],
+          activeJobsCount: activeJobs.length,
+          openRoles: company.openRoles ?? [],
           originRatio:   company.originRatio,
           totalNamesCollected: nameCount,
           contacts: contacts.map(c => ({ role: c.role, fullName: c.fullName, hasEmail: !!c.email, emailVerified: c.emailVerified })),
@@ -49,6 +69,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
             techStack:    (company.techStack?.length ?? 0) === 0,
             employeeCount: !company.employeeCount,
             contacts:     contacts.length === 0,
+            hiring:       activeJobs.length === 0,
             originRatio:  !company.originRatio,
             names:        nameCount < 5,
           },
@@ -156,6 +177,78 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
         name:        'enrich_hunter',
         description: 'Find emails and contacts for the company domain via Hunter.',
         schema: z.object({}),
+      },
+    ),
+
+    tool(
+      async ({ sources }) => {
+        const company = await companyRepository.findById(companyId);
+        if (!company) return JSON.stringify({ error: 'Company not found' });
+
+        const selectedSources = (sources?.length ? sources : defaultHiringSources)
+          .filter(source => source in hiringScrapers) as Array<keyof typeof hiringScrapers>;
+
+        const checkedSources: string[] = [];
+        const matchedSources: Array<{ source: string; jobsFound: number }> = [];
+        let persistedJobs = 0;
+
+        for (const source of selectedSources) {
+          const scraper = hiringScrapers[source];
+          if (!(await scraper.isAvailable().catch(() => false))) continue;
+          checkedSources.push(source);
+
+          try {
+            const hiringLocation = company.hqCountry && company.hqCountry !== 'Unknown' && company.hqCountry.toLowerCase() !== 'india'
+              ? company.hqCountry
+              : 'Remote';
+            const rawResults = await scraper.scrape({
+              keywords: `${company.name} software engineer`,
+              location: hiringLocation,
+              limit: 10,
+            });
+
+            const matchedJobs = rawResults
+              .filter(result => matchesCompany(result.company?.name, result.company?.domain, company.name, domain))
+              .flatMap(result => result.jobs ?? [])
+              .filter(job => job.title);
+
+            if (!matchedJobs.length) continue;
+
+            matchedSources.push({ source, jobsFound: matchedJobs.length });
+
+            const settled = await Promise.allSettled(
+              matchedJobs.map(job =>
+                jobRepository.upsert({
+                  companyId,
+                  title: job.title!.trim(),
+                  techTags: job.techTags ?? [],
+                  source: job.source ?? source,
+                  sourceUrl: job.sourceUrl,
+                  postedAt: job.postedAt,
+                  isActive: true,
+                }),
+              ),
+            );
+            persistedJobs += settled.filter(r => r.status === 'fulfilled').length;
+          } catch (err) {
+            logger.debug({ err, source, domain }, '[enrichment-tools] Hiring check failed');
+          }
+        }
+
+        return JSON.stringify({
+          checkedSources,
+          matchedSources,
+          jobsFound: matchedSources.reduce((sum, item) => sum + item.jobsFound, 0),
+          persistedJobs,
+          hiringDetected: persistedJobs > 0,
+        });
+      },
+      {
+        name:        'check_company_hiring',
+        description: 'Check LinkedIn and other hiring sources for active engineering jobs for this company and persist any jobs found.',
+        schema: z.object({
+          sources: z.array(z.enum(['linkedin', 'wellfound', 'indeed', 'glassdoor', 'surelyremote'])).optional(),
+        }),
       },
     ),
 
@@ -376,8 +469,25 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
   // Cap the three tools whose outputs grow with team/contact size.
   const CAPS: Record<string, number> = {
     scrape_website_team:  600,
+    check_company_hiring: 600,
     verify_contacts:      600,
     playwright_scrape_url: 800,
   };
   return tools.map(t => t.name in CAPS ? capOutput(t, CAPS[t.name]!) : t);
+}
+
+function normalizeCompanyMatchValue(value?: string): string {
+  return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function matchesCompany(foundName: string | undefined, foundDomain: string | undefined, targetName: string, targetDomain: string): boolean {
+  const normalizedTargetDomain = normalizeDomain(targetDomain);
+  const normalizedFoundDomain = normalizeDomain(foundDomain ?? '');
+  if (normalizedTargetDomain && normalizedFoundDomain && normalizedTargetDomain === normalizedFoundDomain) {
+    return true;
+  }
+
+  const found = normalizeCompanyMatchValue(foundName);
+  const target = normalizeCompanyMatchValue(targetName);
+  return !!found && !!target && (found === target || found.includes(target) || target.includes(found));
 }

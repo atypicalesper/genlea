@@ -185,7 +185,7 @@ export class ExploriumScraper implements Scraper {
           domain,
           description:   firm.business_description,
           employeeCount: empRangeToNumber(firm.number_of_employees_range ?? b.number_of_employees_range),
-          hqCountry:     firm.country_name ?? b.country_name ?? 'US',
+          hqCountry:     firm.country_name ?? b.country_name ?? 'Unknown',
           hqState:       firm.region_name,
           hqCity:        firm.city_name,
           linkedinUrl:   firm.linkedin_profile ?? b.linkedin_profile,

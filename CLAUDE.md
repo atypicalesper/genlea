@@ -1,6 +1,6 @@
 # genlea — Claude Code Instructions
 
-B2B lead-gen engine. Scrapes US tech companies, extracts CEO/HR contacts, scores leads 0–100.
+B2B lead-gen engine for software-services outreach. Finds non-India companies in higher-paying markets that are hiring engineers, show Indian-origin team signals, and have decision-maker contacts.
 Stack: Node.js 20, TypeScript strict, Playwright, BullMQ, MongoDB, Fastify.
 
 ---
@@ -10,7 +10,7 @@ Stack: Node.js 20, TypeScript strict, Playwright, BullMQ, MongoDB, Fastify.
 ```
 Scheduler (cron every 2h)
   → discovery queue    → discovery.worker   → normalize → dedup → filter → upsert → enrichment queue
-  → enrichment queue   → enrichment.worker  → GitHub + Clearbit + website-team + Hunter + contact resolver → scoring queue
+  → enrichment queue   → enrichment.worker  → GitHub + Hunter + website-team + hiring checks + contact resolver → scoring queue
   → scoring queue      → scoring.worker     → score 0–100 → updateScore
 ```
 
@@ -41,13 +41,13 @@ Workers live in `src/workers/`. Each has a single responsibility.
 
 | Signal | Max pts | Notes |
 |---|---|---|
-| originRatio | 30 | unknown → 10 (neutral, not 0) |
-| jobFreshness | 20 | active jobs with postedAt |
+| originRatio | 30 | unknown → 0; India-team signal is required |
+| jobFreshness | 20 | active engineering jobs with postedAt |
 | techStack | 20 | TARGET_TAGS env var |
 | contactScore | 15 | CEO/HR email + verification |
 | companyFit | 15 | size 30–200 ideal, funding stage |
 
-Thresholds (defaults): hot ≥ 55, warm ≥ 38, minSample = 5.
+Thresholds (defaults): hot_verified ≥ 80, hot ≥ 65, warm ≥ 50, cold ≥ 35, minSample = 8.
 
 ---
 
@@ -55,7 +55,7 @@ Thresholds (defaults): hot ≥ 55, warm ≥ 38, minSample = 5.
 
 - **Repositories only touch MongoDB** — nothing outside `src/storage/repositories/` calls mongo directly
 - **manuallyReviewed flag** — scoring never overwrites statuses set by user
-- **24h enrichment cooldown** — skip if `lastEnrichedAt` < 24h ago (force=true bypasses)
+- **7d enrichment cooldown** — skip if `lastEnrichedAt` < 7 days ago (force=true bypasses)
 - **Enterprise blocklist** — ~32 domains blocked at discovery (google.com, amazon.com, etc.)
 - **Size guard** — companies with >1000 employees skip enrichment, auto-disqualify
 - **Tech filter** — skip companies with 0 tech tags from both company + jobs sources
@@ -156,4 +156,3 @@ logger.error({ err, domain }, 'Failed to scrape');
 - GitHub contributor count is NOT stored as employeeCount
 - CSV export uses a single `$in` batch query — don't revert to parallel queries
 - `disqualify()` is a dedicated method — don't use upsert for disqualification (status gets ignored)
-

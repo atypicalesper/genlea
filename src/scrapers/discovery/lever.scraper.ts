@@ -65,7 +65,7 @@ export class LeverScraper implements Scraper {
     const company: Partial<RawCompany> = {
       name:      companyName,
       domain:    domain ?? undefined,
-      hqCountry: 'US',
+      hqCountry: 'Unknown',
     };
 
     return { source: 'lever', company, jobs, scrapedAt: new Date() };

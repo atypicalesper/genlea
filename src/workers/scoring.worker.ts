@@ -54,19 +54,17 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     );
 
     // ── Sync openRoles from active job titles ─────────────────────────────────
-    // Deduplicate by normalized key but preserve original casing of first occurrence
+    // Deduplicate by normalized key but preserve original casing of first occurrence.
+    // Passing the array through updateScore keeps roles and score in one consistent write.
     const seen = new Set<string>();
     const openRoles: string[] = [];
     for (const j of jobs.filter(j => j.isActive)) {
       const key = j.title.trim().toLowerCase();
       if (!seen.has(key)) { seen.add(key); openRoles.push(j.title.trim()); }
     }
-    if (openRoles.length > 0) {
-      await companyRepository.setOpenRoles(companyId, openRoles);
-    }
 
     // ── Persist score ─────────────────────────────────────────────────────────
-    await companyRepository.updateScore(companyId, score, status, breakdown, disqualificationReason);
+    await companyRepository.updateScore(companyId, score, status, breakdown, disqualificationReason, openRoles);
 
     const durationMs = Date.now() - startedAt;
     log.info(

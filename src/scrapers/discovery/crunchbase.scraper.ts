@@ -54,12 +54,13 @@ export class CrunchbaseScraper implements Scraper {
 
   private async scrapeViaApi(query: ScrapeQuery): Promise<RawResult[]> {
     const results: RawResult[] = [];
+    const markets = normalizePremiumMarkets(query.location);
 
     try {
       const payload = {
         field_ids: ['identifier', 'short_description', 'num_employees_enum', 'last_funding_type'],
         query: [
-          { type: 'predicate', field_id: 'location_identifiers', operator_id: 'includes', values: ['United States'] },
+          { type: 'predicate', field_id: 'location_identifiers', operator_id: 'includes', values: markets },
           { type: 'predicate', field_id: 'num_employees_enum', operator_id: 'includes', values: ['c_00011_00050', 'c_00051_00100', 'c_00101_00250', 'c_00251_00500'] },
           { type: 'predicate', field_id: 'facet_ids', operator_id: 'includes', values: ['company'] },
         ],
@@ -75,7 +76,7 @@ export class CrunchbaseScraper implements Scraper {
 
       for (const permalink of permalinks) {
         try {
-          const result = await this.getOrganizationViaApi(permalink);
+          const result = await this.getOrganizationViaApi(permalink, markets);
           if (result) results.push(result);
           await new Promise(r => setTimeout(r, 400));
         } catch (err) {
@@ -89,7 +90,7 @@ export class CrunchbaseScraper implements Scraper {
     return results;
   }
 
-  private async getOrganizationViaApi(permalink: string): Promise<RawResult | null> {
+  private async getOrganizationViaApi(permalink: string, markets: string[]): Promise<RawResult | null> {
     const fields = [
       'identifier', 'short_description', 'website_url', 'linkedin', 'num_employees_enum',
       'last_funding_type', 'funding_total', 'founded_on', 'location_identifiers', 'categories',
@@ -103,7 +104,7 @@ export class CrunchbaseScraper implements Scraper {
     const p = res.data.properties as any;
     const locs = (p.location_identifiers ?? []) as Array<{ location_type: string; value: string }>;
     const country = locs.find(l => l.location_type === 'country')?.value ?? '';
-    if (!country.toLowerCase().includes('united states')) return null;
+    if (!matchesPremiumMarket(country, markets)) return null;
 
     const domain = p.website_url
       ? new URL(p.website_url).hostname.replace(/^www\./, '')
@@ -117,7 +118,7 @@ export class CrunchbaseScraper implements Scraper {
       description:     p.short_description,
       hqCity:          locs.find(l => l.location_type === 'city')?.value,
       hqState:         locs.find(l => l.location_type === 'region')?.value,
-      hqCountry:       'US',
+      hqCountry:       country || 'Unknown',
       employeeCount:   parseEmployeeEnum(p.num_employees_enum),
       fundingStage:    FUNDING_STAGE_MAP[p.last_funding_type ?? ''] ?? 'Unknown',
       fundingTotalUsd: (p.funding_total as any)?.value_usd,
@@ -254,7 +255,7 @@ export class CrunchbaseScraper implements Scraper {
       description:   description?.trim(),
       hqCity:        locParts[0],
       hqState:       locParts[1],
-      hqCountry:     'US',
+      hqCountry:     locParts[2] ?? 'Unknown',
       employeeCount: parseEmployeeText(employeeText ?? ''),
       fundingStage:  mapStageText(stageText ?? ''),
     };
@@ -309,6 +310,28 @@ function mapStageText(text: string): FundingStage {
   if (t.includes('seed')) return 'Seed';
   if (t.includes('pre-seed') || t.includes('pre seed')) return 'Pre-seed';
   return 'Unknown';
+}
+
+function normalizePremiumMarkets(location?: string): string[] {
+  const parsed = (location ?? 'United Kingdom, Canada, Australia, Europe')
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean);
+  return parsed.length ? parsed : ['United Kingdom', 'Canada', 'Australia', 'Europe'];
+}
+
+function matchesPremiumMarket(country: string, markets: string[]): boolean {
+  const normalizedCountry = country.toLowerCase();
+  return markets.some(market => {
+    const normalizedMarket = market.toLowerCase();
+    if (normalizedMarket === 'remote') return true;
+    if (normalizedMarket === 'europe') {
+      return !normalizedCountry.includes('india')
+        && !normalizedCountry.includes('pakistan')
+        && !normalizedCountry.includes('bangladesh');
+    }
+    return normalizedCountry.includes(normalizedMarket);
+  });
 }
 
 export const crunchbaseScraper = new CrunchbaseScraper();

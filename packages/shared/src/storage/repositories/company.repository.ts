@@ -61,7 +61,7 @@ export const companyRepository = {
         crunchbaseUrl: data.crunchbaseUrl,
         websiteUrl: data.websiteUrl,
         githubOrg: data.githubOrg,
-        hqCountry: data.hqCountry ?? 'US',
+        hqCountry: data.hqCountry ?? 'Unknown',
         hqState: data.hqState,
         hqCity: data.hqCity,
         employeeCount: data.employeeCount,

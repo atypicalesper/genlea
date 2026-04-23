@@ -26,10 +26,11 @@ export class IndeedScraper implements Scraper {
   }
 
   async scrape(query: ScrapeQuery): Promise<RawResult[]> {
+    const location = normalizeJobBoardLocation(query.location);
     const runId     = generateRunId();
     const browserId = `indeed-${runId}`;
     const results: RawResult[] = [];
-    const searchUrl = `https://www.indeed.com/jobs?q=${encodeURIComponent(query.keywords)}&l=United+States&sort=date&radius=0&fromage=14`;
+    const searchUrl = `https://www.indeed.com/jobs?q=${encodeURIComponent(query.keywords)}&l=${encodeURIComponent(location)}&sort=date&radius=0&fromage=14`;
     const diag = new ScrapeDiagnostics('indeed', runId, searchUrl);
     let page: Page | undefined;
 
@@ -45,7 +46,7 @@ export class IndeedScraper implements Scraper {
 
       for (const [companyName, jobs] of jobGroups) {
         // Do not invent a domain here; discovery/watchlist handles name-only companies downstream.
-        const rawCompany: Partial<RawCompany> = { name: companyName, hqCountry: 'US' };
+        const rawCompany: Partial<RawCompany> = { name: companyName, hqCountry: 'Unknown' };
         results.push({ source: 'indeed', company: rawCompany, jobs, scrapedAt: new Date() });
       }
 
@@ -72,7 +73,8 @@ export class IndeedScraper implements Scraper {
     diag: ScrapeDiagnostics,
   ): Promise<Map<string, RawJob[]>> {
     const q = encodeURIComponent(query.keywords);
-    const url = `https://www.indeed.com/jobs?q=${q}&l=United+States&sort=date&radius=0&fromage=14`;
+    const location = encodeURIComponent(normalizeJobBoardLocation(query.location));
+    const url = `https://www.indeed.com/jobs?q=${q}&l=${location}&sort=date&radius=0&fromage=14`;
 
     await diag.stage('navigate', async () => {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -153,6 +155,11 @@ export class IndeedScraper implements Scraper {
 
     return jobGroups;
   }
+}
+
+function normalizeJobBoardLocation(location?: string): string {
+  const preferred = location?.split(',').map(part => part.trim()).find(Boolean);
+  return preferred ?? 'Remote';
 }
 
 function extractTechFromTitle(title: string): string[] {

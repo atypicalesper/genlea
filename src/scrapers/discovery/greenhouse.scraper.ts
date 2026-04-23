@@ -71,7 +71,7 @@ export class GreenhouseScraper implements Scraper {
     const company: Partial<RawCompany> = {
       name:      companyName,
       domain:    domain ?? undefined,
-      hqCountry: 'US',
+      hqCountry: 'Unknown',
     };
 
     return { source: 'greenhouse', company, jobs, scrapedAt: new Date() };

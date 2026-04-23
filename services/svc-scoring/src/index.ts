@@ -62,7 +62,7 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     status,
     breakdown,
     disqualificationReason,
-    openRoles.length > 0 ? openRoles : undefined,
+    openRoles,
   );
 
   const durationMs = Date.now() - startedAt;

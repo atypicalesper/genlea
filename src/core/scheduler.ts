@@ -6,6 +6,8 @@ import { jobRepository } from '../storage/repositories/job.repository.js';
 import { hydrateSourceHealth, isMuted } from '../discovery/source-health.js';
 import { ScraperSource } from '../types/index.js';
 
+const PREMIUM_MARKET_LOCATION = 'United Kingdom, Canada, Australia, Europe, Remote';
+
 // ── Available sources — derived from env at startup ───────────────────────────
 // Sync checks only (no I/O) — scrapers do their own full check inside isAvailable().
 // This just prevents queueing jobs for sources we know won't work.
@@ -201,8 +203,8 @@ export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: st
         runId,
         source: q.source,
         query: {
-          keywords:  q.keywords,
-          location:  'United States',
+          keywords:  normalizeSeedKeywords(q.keywords),
+          location:  PREMIUM_MARKET_LOCATION,
           techStack: q.techStack,
           limit:     25,
         },
@@ -253,4 +255,12 @@ export async function startScheduler(): Promise<void> {
   // });
 
   logger.info('[scheduler] ✅ Scheduler started — cron disabled');
+}
+
+function normalizeSeedKeywords(keywords: string): string {
+  return keywords
+    .replace(/\bUS\b/g, '')
+    .replace(/\bUnited States\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }

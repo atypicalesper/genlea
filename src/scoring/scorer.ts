@@ -6,8 +6,23 @@ import {
   techStackScore,
   contactScore,
   companyFitScore,
+  getActiveEngineeringJobs,
 } from './rules.js';
 import { resolveStatus } from './status-resolver.js';
+
+const HIRING_SOURCE_SET = new Set([
+  'linkedin',
+  'wellfound',
+  'indeed',
+  'glassdoor',
+  'surelyremote',
+  'greenhouse',
+  'lever',
+  'ashby',
+  'workable',
+]);
+const MAX_TARGET_EMPLOYEES = 1000;
+const MAX_TARGET_DEVS = 250;
 
 export function scoreCompany(
   input: ScoringInput,
@@ -65,10 +80,14 @@ function deriveDisqualificationReason(
   coldThreshold = 20,
 ): string {
   const { company, contacts, jobs } = input;
-  const activeJobs = jobs.filter(job => job.isActive);
+  const activeEngineeringJobs = getActiveEngineeringJobs(jobs);
+  const hasHiringSignal = companyHasHiringSignal(company, jobs);
 
-  if (activeJobs.length === 0 || breakdown.jobFreshnessScore <= 0) {
-    return 'No recent active engineering hiring signal was found.';
+  if (!hasHiringSignal) {
+    return 'No engineering hiring signal was verified from jobs, hiring sources, or saved open roles.';
+  }
+  if (activeEngineeringJobs.length === 0 || breakdown.jobFreshnessScore <= 0) {
+    return 'Hiring source evidence exists, but recent active engineering roles still need verification.';
   }
   if ((company.originRatio ?? 0) <= 0 && breakdown.originRatioScore <= 0) {
     return 'No India-team signal was verified from collected employee data.';
@@ -79,11 +98,11 @@ function deriveDisqualificationReason(
   if (contacts.length === 0 && breakdown.contactScore <= 0) {
     return 'No relevant contacts were found for outreach.';
   }
-  if ((company.employeeCount ?? 0) > 1000) {
+  if ((company.employeeCount ?? 0) > MAX_TARGET_EMPLOYEES) {
     return 'Company is above the target size range for outbound pitching.';
   }
-  if ((company.totalDevCount ?? 0) > 100) {
-    return 'Development team exceeds 100 engineers — too large for outbound pitching.';
+  if ((company.totalDevCount ?? 0) > MAX_TARGET_DEVS) {
+    return 'Development team looks too large for the target outbound segment.';
   }
 
   return `Lead score ${breakdown.total} fell below the qualification threshold of ${coldThreshold}.`;
@@ -91,23 +110,29 @@ function deriveDisqualificationReason(
 
 function getHardDisqualificationReason(input: ScoringInput): string | undefined {
   const { company, jobs } = input;
-  const activeJobs = jobs.filter(job => job.isActive);
   const hqCountry = company.hqCountry?.toLowerCase() ?? '';
+  const hasHiringSignal = companyHasHiringSignal(company, jobs);
 
   if (hqCountry.includes('india')) {
     return 'Company is India-headquartered, which is outside the target market.';
   }
-  if ((company.employeeCount ?? 0) > 1000) {
+  if ((company.employeeCount ?? 0) > MAX_TARGET_EMPLOYEES) {
     return 'Company is above the target size range for outbound pitching.';
   }
-  if ((company.totalDevCount ?? 0) > 100) {
-    return 'Development team exceeds 100 engineers — too large for outbound pitching.';
+  if ((company.totalDevCount ?? 0) > MAX_TARGET_DEVS) {
+    return 'Development team looks too large for the target outbound segment.';
   }
-  if (activeJobs.length === 0) {
+  if (!hasHiringSignal) {
     return 'No active development or engineering hiring signal was found.';
   }
   if ((company.originDevCount ?? 0) <= 0 || (company.originRatio ?? 0) <= 0) {
     return 'No Indian-origin employee signal was verified for this company.';
   }
   return undefined;
+}
+
+function companyHasHiringSignal(company: ScoringInput['company'], jobs: ScoringInput['jobs']): boolean {
+  if (getActiveEngineeringJobs(jobs).length > 0) return true;
+  if ((company.openRoles ?? []).length > 0) return true;
+  return (company.sources ?? []).some(source => HIRING_SOURCE_SET.has(source));
 }

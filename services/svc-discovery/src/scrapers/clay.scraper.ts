@@ -59,7 +59,7 @@ export class ClayEnrichmentScraper implements Scraper {
           websiteUrl:    c.website ?? (c.domain ? `https://${c.domain}` : undefined),
           employeeCount: c.employee_count ?? c.headcount,
           fundingStage:  normalizeFunding(c.funding_stage) as import('@genlea/shared').FundingStage | undefined,
-          hqCountry:     c.country ?? 'US',
+          hqCountry:     c.country ?? 'Unknown',
           techStack:     (c.technologies ?? []).map((t: string) => t.toLowerCase()),
           linkedinUrl:   c.linkedin_url,
         },

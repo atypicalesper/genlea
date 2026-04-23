@@ -48,11 +48,12 @@ export class ApolloScraper implements Scraper {
 
   private async scrapeViaApi(query: ScrapeQuery): Promise<RawResult[]> {
     const results: RawResult[] = [];
+    const markets = normalizePremiumMarkets(query.location);
 
     try {
       const payload = {
         q_organization_keyword_tags: query.techStack ?? query.keywords.split(' '),
-        organization_locations: ['United States'],
+        organization_locations: markets,
         organization_num_employees_ranges: ['11,500'],
         page: 1,
         per_page: query.limit ?? 25,
@@ -72,7 +73,7 @@ export class ApolloScraper implements Scraper {
 
       for (const org of orgs) {
         try {
-          const contacts = await this.findContactsViaApi(org.name, org.primary_domain);
+          const contacts = await this.findContactsViaApi(org.name, org.primary_domain, markets);
           results.push({
             source: 'apollo',
             company: {
@@ -81,7 +82,7 @@ export class ApolloScraper implements Scraper {
               description: org.short_description,
               employeeCount: org.estimated_num_employees,
               industry: org.industry ? [org.industry] : [],
-              hqCity: org.city, hqState: org.state, hqCountry: 'US',
+              hqCity: org.city, hqState: org.state, hqCountry: org.country || 'Unknown',
             },
             contacts,
             scrapedAt: new Date(),
@@ -98,7 +99,7 @@ export class ApolloScraper implements Scraper {
     return results;
   }
 
-  private async findContactsViaApi(companyName: string, domain: string): Promise<Partial<RawContact>[]> {
+  private async findContactsViaApi(companyName: string, domain: string, markets: string[]): Promise<Partial<RawContact>[]> {
     const res = await this.apiClient.post<{
       people: Array<{
         first_name: string; last_name: string; name: string;
@@ -109,7 +110,7 @@ export class ApolloScraper implements Scraper {
       q_organization_name: companyName,
       person_titles: ['CEO', 'Chief Executive Officer', 'Founder', 'Co-Founder',
                       'HR', 'Head of Talent', 'Recruiter', 'People Operations'],
-      person_locations: ['United States'],
+      person_locations: markets,
       page: 1, per_page: 10,
     });
 
@@ -156,7 +157,7 @@ export class ApolloScraper implements Scraper {
         if (domain === 'unknown') continue;
         results.push({
           source: 'apollo',
-          company: { domain, hqCountry: 'US' } as Partial<RawCompany>,
+          company: { domain, hqCountry: 'Unknown' } as Partial<RawCompany>,
           contacts: domainContacts,
           scrapedAt: new Date(),
         });
@@ -176,10 +177,11 @@ export class ApolloScraper implements Scraper {
   private async webSearchPeople(page: Page, query: ScrapeQuery): Promise<Partial<RawContact>[]> {
     // Apollo's public people search (limited to first page without auth)
     const titles = ['HR', 'Recruiter', 'Talent', 'CEO', 'Founder'].join(' OR ');
+    const location = normalizePremiumMarkets(query.location)[0] ?? 'Remote';
     const encoded = encodeURIComponent(
-      `${query.keywords} (${titles}) United States`
+      `${query.keywords} (${titles}) ${location}`
     );
-    const url = `https://app.apollo.io/#/people?q=${encoded}&personTitles[]=CEO&personTitles[]=Recruiter&personLocations[]=United+States`;
+    const url = `https://app.apollo.io/#/people?q=${encoded}&personTitles[]=CEO&personTitles[]=Recruiter&personLocations[]=${encodeURIComponent(location)}`;
 
     logger.debug({ url }, '[apollo:web] Navigating to people search');
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -234,6 +236,14 @@ export class ApolloScraper implements Scraper {
 
     return contacts;
   }
+}
+
+function normalizePremiumMarkets(location?: string): string[] {
+  const parsed = (location ?? 'United Kingdom, Canada, Australia, Europe, Remote')
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean);
+  return parsed.length ? parsed : ['United Kingdom', 'Canada', 'Australia', 'Europe', 'Remote'];
 }
 
 function resolveRole(title: string): import('../../types/index.js').ContactRole {

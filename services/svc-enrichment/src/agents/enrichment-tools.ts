@@ -3,7 +3,7 @@ import { tool }                        from '@langchain/core/tools';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import {
   companyRepository, contactRepository, settingsRepository,
-  queueManager, browserManager, proxyManager,
+  queueManager, browserManager, proxyManager, jobRepository,
   normalizer, normalizeRole, deduplicateContacts,
   withTiming,
   logger,
@@ -15,11 +15,26 @@ import { websiteTeamScraper }          from '../enrichment/website-team.enricher
 import { extractPeopleFromPage }       from '../enrichment/page-content-extractor.js';
 import { isDefunct }                   from '../enrichment/defunct-detector.js';
 import {
-  githubScraper, hunterScraper, clearbitScraper, exploriumScraper, clayScraper,
+  githubScraper, hunterScraper,
 } from '../scrapers/index.js';
+import {
+  linkedInScraper,
+  wellfoundScraper,
+  indeedScraper,
+  glassdoorScraper,
+  surelyRemoteScraper,
+} from '../../../svc-discovery/src/scrapers/index.js';
 
 export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
   const { runId, companyId, domain } = job;
+  const hiringScrapers = {
+    linkedin: linkedInScraper,
+    wellfound: wellfoundScraper,
+    indeed: indeedScraper,
+    glassdoor: glassdoorScraper,
+    surelyremote: surelyRemoteScraper,
+  } as const;
+  const defaultHiringSources = Object.keys(hiringScrapers) as Array<keyof typeof hiringScrapers>;
 
   // ── Per-job dedup: prevent re-calling expensive API sources ─────────────────
   // Tools in this set can only be called once per enrichment job.
@@ -43,9 +58,13 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
     // ── 0. Get current state ──────────────────────────────────────────────────
     tool(
       withTiming('get_company_state', async () => {
-        const company   = await companyRepository.findById(companyId);
-        const contacts  = await contactRepository.findByCompanyId(companyId);
-        const nameCount = (await contactRepository.findAllNamesForOriginRatio(companyId)).length;
+        const [company, contacts, allNames, activeJobs] = await Promise.all([
+          companyRepository.findById(companyId),
+          contactRepository.findByCompanyId(companyId),
+          contactRepository.findAllNamesForOriginRatio(companyId),
+          jobRepository.findByCompanyId(companyId, true),
+        ]);
+        const nameCount = allNames.length;
         if (!company) return JSON.stringify({ error: 'Company not found' });
         return JSON.stringify({
           name:          company.name,
@@ -55,6 +74,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           hqCountry:     company.hqCountry,
           fundingStage:  company.fundingStage,
           techStack:     company.techStack ?? [],
+          activeJobsCount: activeJobs.length,
+          openRoles: company.openRoles ?? [],
           originRatio:   company.originRatio,
           totalNamesCollected: nameCount,
           contacts: contacts.map(c => ({ role: c.role, fullName: c.fullName, hasEmail: !!c.email, emailVerified: c.emailVerified })),
@@ -64,6 +85,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
             techStack:     (company.techStack?.length ?? 0) < 2,
             employeeCount: !company.employeeCount,
             contacts:      contacts.length === 0,
+            hiring:        activeJobs.length === 0,
             originRatio:   !company.originRatio,
             names:         nameCount < 5,
           },
@@ -80,9 +102,12 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
     tool(
       withTiming('check_enrichment_progress', async () => {
         const settings  = await settingsRepository.get();
-        const company   = await companyRepository.findById(companyId);
-        const contacts  = await contactRepository.findByCompanyId(companyId);
-        const names     = await contactRepository.findAllNamesForOriginRatio(companyId);
+        const [company, contacts, names, activeJobs] = await Promise.all([
+          companyRepository.findById(companyId),
+          contactRepository.findByCompanyId(companyId),
+          contactRepository.findAllNamesForOriginRatio(companyId),
+          jobRepository.findByCompanyId(companyId, true),
+        ]);
 
         const techFilled  = (company?.techStack?.length ?? 0) >= 2;
         const namesMet    = names.length >= settings.originRatioMinSample;
@@ -92,7 +117,8 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
         const hasEmail    = decisionMakers.some(c => c.email);
         const ratioComputed = company?.originRatio != null;
 
-        const goalMet = techFilled && namesMet && hasContact;
+        const hasHiringSignal = activeJobs.length > 0;
+        const goalMet = techFilled && namesMet && hasContact && hasHiringSignal;
 
         let nextBestAction: string;
         if (!techFilled) {
@@ -100,15 +126,13 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
         } else if (!namesMet) {
           nextBestAction = `scrape_website_team or playwright_scrape_url on https://${domain}/team — need ${settings.originRatioMinSample - names.length} more names`;
         } else if (!hasContact) {
-          const hasExplorium = !!process.env['EXPLORIUM_API_KEY'];
-          const hasHunter    = !!process.env['HUNTER_API_KEY'];
-          const hasClay      = !!process.env['CLAY_API_KEY'];
-          if (hasExplorium && !calledOnce.has('enrich_explorium'))      nextBestAction = 'enrich_explorium — returns verified contacts';
-          else if (hasClay && !calledOnce.has('enrich_clay'))           nextBestAction = 'enrich_clay — returns contacts with emails';
-          else if (hasHunter && !calledOnce.has('enrich_hunter'))       nextBestAction = 'enrich_hunter — email discovery';
+          const hasHunter = !!process.env['HUNTER_API_KEY'];
+          if (hasHunter && !calledOnce.has('enrich_hunter')) nextBestAction = 'enrich_hunter — primary API for contact discovery';
           else nextBestAction = `playwright_scrape_url on https://${domain}/team or /about`;
         } else if (!hasEmail) {
           nextBestAction = 'verify_contacts — SMTP verify + fill email gaps';
+        } else if (!hasHiringSignal) {
+          nextBestAction = 'check_company_hiring — verify active engineering jobs on LinkedIn and other hiring sources';
         } else if (!ratioComputed && namesMet) {
           nextBestAction = 'compute_origin_ratio — enough names collected';
         } else {
@@ -124,10 +148,12 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           decisionMakerCount:  decisionMakers.length,
           hasDecisionMaker:    hasContact,
           hasVerifiedEmail:    hasEmail,
+          activeJobsCount:     activeJobs.length,
+          hasHiringSignal,
           originRatioComputed: ratioComputed,
           goalMet,
           nextBestAction,
-          summary: `Tech:${techFilled ? '✓' : '✗'} | Names:${names.length}/${settings.originRatioMinSample} | DM:${decisionMakers.length} | Email:${hasEmail ? '✓' : '✗'}`,
+          summary: `Tech:${techFilled ? '✓' : '✗'} | Names:${names.length}/${settings.originRatioMinSample} | DM:${decisionMakers.length} | Hiring:${hasHiringSignal ? '✓' : '✗'} | Email:${hasEmail ? '✓' : '✗'}`,
         });
       }),
       {
@@ -172,154 +198,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
     ),
 
-    // ── 3. Explorium ──────────────────────────────────────────────────────────
-    tool(
-      withTiming('enrich_explorium', async ({ name: companyName }) => {
-        if (!process.env['EXPLORIUM_API_KEY']) {
-          return JSON.stringify({ available: false, reason: 'EXPLORIUM_API_KEY not configured' });
-        }
-        const guard = onceGuard('enrich_explorium');
-        if (guard) return guard;
-
-        const result = await exploriumScraper.enrichDomain(domain, companyName).catch(() => null);
-        if (!result) return JSON.stringify({ found: false });
-
-        const company = await companyRepository.findById(companyId);
-        if (result.company) {
-          await companyRepository.upsert({ ...result.company, domain, name: company?.name ?? '' });
-        }
-
-        let contactsSaved = 0;
-        if (result.contacts?.length) {
-          const validContacts = result.contacts.filter(c => c.fullName && c.role && c.role !== 'Unknown');
-          await Promise.allSettled(
-            validContacts.map(c =>
-              contactRepository.upsert({
-                companyId,
-                fullName:        c.fullName!,
-                firstName:       c.firstName,
-                lastName:        c.lastName,
-                role:            c.role!,
-                email:           c.email,
-                emailConfidence: c.emailConfidence ?? 0,
-                phone:           c.phone,
-                linkedinUrl:     c.linkedinUrl,
-                sources:         ['explorium'],
-                forOriginRatio:  false,
-              }).catch(err => logger.debug({ err, domain }, '[enrichment-tools] Explorium contact save failed')),
-            ),
-          );
-          contactsSaved = validContacts.length;
-        }
-
-        return JSON.stringify({
-          found:         true,
-          employeeCount: result.company?.employeeCount,
-          fundingStage:  result.company?.fundingStage,
-          hqCountry:     result.company?.hqCountry,
-          techStack:     result.company?.techStack ?? [],
-          contactsSaved,
-          contacts: result.contacts?.map(c => ({ name: c.fullName, role: c.role, email: c.email, phone: c.phone, linkedin: c.linkedinUrl })),
-        });
-      }),
-      {
-        name:        'enrich_explorium',
-        description: 'Fetch company metadata AND decision-maker contacts from Explorium (requires EXPLORIUM_API_KEY). Best single source — returns verified contacts with email/phone/LinkedIn.',
-        schema: z.object({
-          name: z.string().optional().describe('Company name (improves match accuracy)'),
-        }),
-      },
-    ),
-
-    // ── 4. Clay ───────────────────────────────────────────────────────────────
-    tool(
-      withTiming('enrich_clay', async ({ name: companyName }) => {
-        if (!process.env['CLAY_API_KEY']) {
-          return JSON.stringify({ available: false, reason: 'CLAY_API_KEY not configured' });
-        }
-        const guard = onceGuard('enrich_clay');
-        if (guard) return guard;
-
-        const result = await clayScraper.enrichDomain(domain, companyName).catch(() => null);
-        if (!result) return JSON.stringify({ found: false });
-
-        const company = await companyRepository.findById(companyId);
-        if (result.company) {
-          await companyRepository.upsert({ ...result.company, domain, name: company?.name ?? '' });
-        }
-
-        let contactsSaved = 0;
-        if (result.contacts?.length) {
-          const valid = result.contacts.filter(c => c.fullName && c.role && c.role !== 'Unknown');
-          await Promise.allSettled(
-            valid.map(c =>
-              contactRepository.upsert({
-                companyId,
-                fullName:        c.fullName!,
-                firstName:       c.firstName,
-                lastName:        c.lastName,
-                role:            c.role!,
-                email:           c.email,
-                emailConfidence: c.emailConfidence ?? 0,
-                phone:           c.phone,
-                linkedinUrl:     c.linkedinUrl,
-                sources:         ['clay'],
-                forOriginRatio:  false,
-              }).catch(err => logger.debug({ err, domain }, '[enrichment-tools] Clay contact save failed')),
-            ),
-          );
-          contactsSaved = valid.length;
-        }
-
-        return JSON.stringify({
-          found:         true,
-          employeeCount: result.company?.employeeCount,
-          fundingStage:  result.company?.fundingStage,
-          techStack:     result.company?.techStack ?? [],
-          contactsSaved,
-          contacts: result.contacts?.map(c => ({ name: c.fullName, role: c.role, email: c.email, linkedin: c.linkedinUrl })),
-        });
-      }),
-      {
-        name:        'enrich_clay',
-        description: 'Fetch company metadata and decision-maker contacts from Clay (requires CLAY_API_KEY). Use after Explorium or as standalone.',
-        schema: z.object({
-          name: z.string().optional().describe('Company name (improves match accuracy)'),
-        }),
-      },
-    ),
-
-    // ── 5. Clearbit ───────────────────────────────────────────────────────────
-    tool(
-      withTiming('enrich_clearbit', async () => {
-        if (!process.env['CLEARBIT_API_KEY']) {
-          return JSON.stringify({ available: false, reason: 'CLEARBIT_API_KEY not configured — use playwright_scrape_url on the company homepage instead' });
-        }
-        const guard = onceGuard('enrich_clearbit');
-        if (guard) return guard;
-
-        const result = await clearbitScraper.enrichDomain(domain).catch(() => null);
-        if (!result?.company) return JSON.stringify({ found: false });
-
-        const company = await companyRepository.findById(companyId);
-        await companyRepository.upsert({ ...result.company, domain, name: company?.name ?? '' });
-
-        return JSON.stringify({
-          found:         true,
-          employeeCount: result.company.employeeCount,
-          fundingStage:  result.company.fundingStage,
-          hqCountry:     result.company.hqCountry,
-          industry:      result.company.industry,
-        });
-      }),
-      {
-        name:        'enrich_clearbit',
-        description: 'Fetch company metadata from Clearbit — employee count, funding stage, industry, location. Skip if Explorium or Clay already provided metadata.',
-        schema: z.object({}),
-      },
-    ),
-
-    // ── 6. Website team scraper ───────────────────────────────────────────────
+    // ── 3. Website team scraper ───────────────────────────────────────────────
     tool(
       withTiming('scrape_website_team', async ({ websiteUrl }) => {
         const guard = onceGuard('scrape_website_team');
@@ -361,7 +240,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
     ),
 
-    // ── 7. Hunter ─────────────────────────────────────────────────────────────
+    // ── 4. Hunter ─────────────────────────────────────────────────────────────
     tool(
       withTiming('enrich_hunter', async () => {
         if (!process.env['HUNTER_API_KEY']) {
@@ -389,12 +268,84 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       }),
       {
         name:        'enrich_hunter',
-        description: 'Discover emails and contacts for the domain using Hunter.io (requires HUNTER_API_KEY). Use when contacts are missing and Explorium/Clay are unavailable.',
+        description: 'Discover emails and contacts for the domain using Hunter.io (requires HUNTER_API_KEY). This is the only API enrichment source for contact discovery.',
         schema: z.object({}),
       },
     ),
 
-    // ── 8. Verify contacts ────────────────────────────────────────────────────
+    tool(
+      withTiming('check_company_hiring', async ({ sources }) => {
+        const company = await companyRepository.findById(companyId);
+        if (!company) return JSON.stringify({ error: 'Company not found' });
+
+        const requestedSources = (sources?.length ? sources : defaultHiringSources) as string[];
+        const selectedSources = requestedSources
+          .filter((source: string): source is keyof typeof hiringScrapers => source in hiringScrapers);
+
+        const checkedSources: string[] = [];
+        const matchedSources: Array<{ source: string; jobsFound: number }> = [];
+        let persistedJobs = 0;
+
+        for (const source of selectedSources) {
+          const scraper = hiringScrapers[source];
+          if (!(await scraper.isAvailable().catch(() => false))) continue;
+          checkedSources.push(source);
+
+          try {
+            const hiringLocation = company.hqCountry && company.hqCountry !== 'Unknown' && company.hqCountry.toLowerCase() !== 'india'
+              ? company.hqCountry
+              : 'Remote';
+            const rawResults = await scraper.scrape({
+              keywords: `${company.name} software engineer`,
+              location: hiringLocation,
+              limit: 10,
+            });
+
+            const matchedJobs = rawResults
+              .filter(result => matchesCompany(result.company?.name, result.company?.domain, company.name, domain))
+              .flatMap(result => result.jobs ?? [])
+              .filter(job => job.title);
+
+            if (!matchedJobs.length) continue;
+            matchedSources.push({ source, jobsFound: matchedJobs.length });
+
+            const settled = await Promise.allSettled(
+              matchedJobs.map(job =>
+                jobRepository.upsert({
+                  companyId,
+                  title: job.title!.trim(),
+                  techTags: job.techTags ?? [],
+                  source: job.source ?? source,
+                  sourceUrl: job.sourceUrl,
+                  postedAt: job.postedAt,
+                  isActive: true,
+                }),
+              ),
+            );
+            persistedJobs += settled.filter(r => r.status === 'fulfilled').length;
+          } catch (err) {
+            logger.debug({ err, source, domain }, '[enrichment-tools] Hiring check failed');
+          }
+        }
+
+        return JSON.stringify({
+          checkedSources,
+          matchedSources,
+          jobsFound: matchedSources.reduce((sum, item) => sum + item.jobsFound, 0),
+          persistedJobs,
+          hiringDetected: persistedJobs > 0,
+        });
+      }),
+      {
+        name:        'check_company_hiring',
+        description: 'Check LinkedIn and other hiring sources for active engineering jobs for this company and persist any jobs found.',
+        schema: z.object({
+          sources: z.array(z.enum(['linkedin', 'wellfound', 'indeed', 'glassdoor', 'surelyremote'])).optional(),
+        }),
+      },
+    ),
+
+    // ── 5. Verify contacts ────────────────────────────────────────────────────
     tool(
       withTiming('verify_contacts', async () => {
         if (!process.env['HUNTER_API_KEY'] && !process.env['SMTP_HOST']) {
@@ -420,7 +371,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
     ),
 
-    // ── 9. Playwright stealth scrape — auto-saves people found ────────────────
+    // ── 6. Playwright stealth scrape — auto-saves people found ────────────────
     tool(
       withTiming('playwright_scrape_url', async ({ url, purpose }) => {
         if (scrapedUrls.has(url)) {
@@ -509,7 +460,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
     ),
 
-    // ── 10. Save contacts (explicit, for LLM-extracted data) ─────────────────
+    // ── 7. Save contacts (explicit, for LLM-extracted data) ─────────────────
     tool(
       withTiming('save_contacts', async ({ contacts }: {
         contacts: Array<{ fullName: string; role: string; email?: string; linkedinUrl?: string; phone?: string }>;
@@ -553,7 +504,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
     ),
 
-    // ── 11. Compute origin ratio ──────────────────────────────────────────────
+    // ── 8. Compute origin ratio ───────────────────────────────────────────────
     tool(
       withTiming('compute_origin_ratio', async () => {
         const guard = onceGuard('compute_origin_ratio');
@@ -594,7 +545,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
     ),
 
-    // ── 12. Save partial company data ─────────────────────────────────────────
+    // ── 9. Save partial company data ──────────────────────────────────────────
     tool(
       withTiming('save_company_data', async (data) => {
         const company = await companyRepository.findById(companyId);
@@ -622,7 +573,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
     ),
 
-    // ── 13. Disqualify ────────────────────────────────────────────────────────
+    // ── 10. Disqualify ────────────────────────────────────────────────────────
     tool(
       withTiming('disqualify_company', async ({ reason }) => {
         await companyRepository.disqualify(companyId, reason);
@@ -638,7 +589,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
     ),
 
-    // ── 14. Queue for scoring ─────────────────────────────────────────────────
+    // ── 11. Queue for scoring ─────────────────────────────────────────────────
     tool(
       withTiming('queue_for_scoring', async () => {
         await companyRepository.setPipelineStatus(companyId, 'scoring', new Date());
@@ -652,4 +603,20 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
       },
     ),
   ];
+}
+
+function normalizeCompanyMatchValue(value?: string): string {
+  return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function matchesCompany(foundName: string | undefined, foundDomain: string | undefined, targetName: string, targetDomain: string): boolean {
+  const normalizedTargetDomain = normalizeCompanyMatchValue(targetDomain);
+  const normalizedFoundDomain = normalizeCompanyMatchValue(foundDomain);
+  if (normalizedTargetDomain && normalizedFoundDomain && normalizedTargetDomain === normalizedFoundDomain) {
+    return true;
+  }
+
+  const found = normalizeCompanyMatchValue(foundName);
+  const target = normalizeCompanyMatchValue(targetName);
+  return !!found && !!target && (found === target || found.includes(target) || target.includes(found));
 }

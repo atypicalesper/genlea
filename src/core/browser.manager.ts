@@ -2,6 +2,7 @@ import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import { BrowserContextOptions, ProxyConfig } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { randomInt, randomBetween } from '../utils/random.js';
+import { settingsRepository } from '../storage/repositories/settings.repository.js';
 
 // ── User Agent Bank ───────────────────────────────────────────────────────────
 const USER_AGENTS = [
@@ -65,14 +66,35 @@ const STEALTH_INIT_SCRIPT = `
 export class BrowserManager {
   private browsers: Map<string, Browser> = new Map();
   private maxConcurrent: number;
+  private settingsRefreshedAt = 0;
 
   constructor(maxConcurrent: number = 3) {
     this.maxConcurrent = maxConcurrent;
   }
 
+  private async refreshConcurrencyLimit(): Promise<void> {
+    // Pull from DB-backed settings periodically so the Control Panel can tune
+    // browser capacity without needing a worker restart.
+    if (Date.now() - this.settingsRefreshedAt < 10_000) return;
+    this.settingsRefreshedAt = Date.now();
+
+    try {
+      const settings = await settingsRepository.get();
+      const nextLimit = Math.max(1, settings.maxConcurrentBrowsers ?? this.maxConcurrent);
+      if (nextLimit !== this.maxConcurrent) {
+        this.maxConcurrent = nextLimit;
+        logger.info({ maxConcurrentBrowsers: nextLimit }, '[browser.manager] Browser concurrency updated from settings');
+      }
+    } catch (err) {
+      logger.debug({ err }, '[browser.manager] Failed to refresh browser concurrency setting');
+    }
+  }
+
   /** Launch a stealth browser instance */
   async launchBrowser(id: string): Promise<Browser> {
     if (this.browsers.has(id)) return this.browsers.get(id)!;
+
+    await this.refreshConcurrencyLimit();
 
     if (this.browsers.size >= this.maxConcurrent) {
       throw new Error(`Max concurrent browsers (${this.maxConcurrent}) reached`);
@@ -246,6 +268,10 @@ export class BrowserManager {
 
   get activeBrowserCount(): number {
     return this.browsers.size;
+  }
+
+  get maxBrowserCount(): number {
+    return this.maxConcurrent;
   }
 }
 

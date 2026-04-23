@@ -4,7 +4,7 @@
 
 ---
 
-## Explorium (primary enrichment source)
+## Explorium (optional enrichment source)
 
 ### What We Get
 - Company match by domain → `business_id`
@@ -103,7 +103,7 @@ People Search:   /search/results/people/?keywords=HR+{company}&currentCompany=[I
 ```
 1. Login via session cookies (Sales Nav needs paid account)
 2. Navigate to Lead Filters:
-   - Geography: United States
+   - Geography: premium non-India markets such as UK, Canada, Australia, Europe, Singapore, Israel, and remote-first teams
    - Seniority: C-Suite, VP, Director (for CEO/HR)
    - Function: Engineering, Human Resources
    - Company Headcount: 11–500
@@ -215,6 +215,22 @@ GET /v2/email-finder?domain=acme.com&first_name=John&last_name=Doe&api_key=KEY
 - Best for confirming email format pattern (`{first}.{last}@domain.com`)
 - Once pattern known → generate emails without spending credits
 - Confidence score < 70% → skip
+
+## Current MVP Source Policy
+
+The active enrichment pipeline is intentionally cheap and stable:
+
+- Hunter is the only API contact-enrichment source used by the agent by default.
+- GitHub is used for tech stack and contributor-name evidence.
+- Website and Playwright scraping are used for team pages, careers pages, company info, and fallback names.
+- LinkedIn, Wellfound, Indeed, Glassdoor, and SurelyRemote are used by `check_company_hiring` to verify active engineering hiring when saved jobs are missing.
+- Explorium, Clay, Clearbit, Apollo, Crunchbase, and ZoomInfo can still exist as scrapers or future optional integrations, but they should not be required for the MVP funnel.
+
+Location behavior:
+
+- Discovery now targets premium non-India markets, not only the US.
+- Default seed location is `United Kingdom, Canada, Australia, Europe, Remote`.
+- Scrapers should not invent `hqCountry: 'US'`; if HQ is not proven, save `Unknown` and let enrichment verify it.
 
 ---
 

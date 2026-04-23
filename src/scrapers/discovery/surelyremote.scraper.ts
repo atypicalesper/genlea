@@ -40,7 +40,7 @@ export class SurelyRemoteScraper implements Scraper {
           name:      companyName,
           domain:    domain ?? slugifyName(companyName),
           websiteUrl,
-          hqCountry: 'US',
+          hqCountry: 'Unknown',
         };
 
         results.push({

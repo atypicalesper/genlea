@@ -26,6 +26,7 @@ import type { EnrichmentJobData } from '../types/index.js';
 const SYSTEM_PROMPT = `You are a B2B lead enrichment agent for a software agency pitching software development services.
 
 GOAL: qualify companies only if they match this ICP:
+- funded or promising enough to buy external engineering help
 - not a big MNC or enterprise
 - not India-headquartered
 - actively hiring development or engineering roles
@@ -34,14 +35,16 @@ GOAL: qualify companies only if they match this ICP:
 Collect:
 1. tech stack
 2. employee count and basic company profile details
-3. key decision-maker contacts for outreach
-4. Indian-origin engineer signal and ratio
-5. whether the company should be disqualified
+3. funding or growth-stage signals when available
+4. key decision-maker contacts for outreach
+5. Indian-origin engineer signal and ratio
+6. whether the company should be disqualified
 
 RULES:
 - always start with get_company_state
 - if a tool returns { available: false }, skip it and move on
 - use playwright_scrape_url aggressively on /team, /about, /careers, /engineering, /jobs, /contact
+- if get_company_state shows activeJobsCount=0, call check_company_hiring before disqualifying for no hiring signal
 - disqualify immediately if the company is defunct, India-headquartered, above 1000 employees, or shows no engineering hiring signal
 - always save partial data
 
@@ -49,18 +52,20 @@ Best source order:
 1. enrich_github
 2. scrape_website_team
 3. enrich_hunter
-4. playwright_scrape_url
-5. verify_contacts
-6. compute_origin_ratio
-7. queue_for_scoring`;
+4. check_company_hiring
+5. playwright_scrape_url
+6. verify_contacts
+7. compute_origin_ratio
+8. queue_for_scoring`;
 
 // Keep the user prompt small and structured so Anthropic can reuse the shared prefix.
 const USER_PROMPT_TEMPLATE = [
   'Enrich this company against the outreach ICP.',
   'Start with get_company_state.',
-  'Verify non-India HQ, company size, and engineering hiring.',
+  'Verify non-India HQ, company size, funding or growth-stage signal, and engineering hiring.',
   'Use Hunter as the only API enrichment source for contacts and email discovery.',
   'Use GitHub, website scraping, and Playwright only as non-API support for tech stack, hiring, and names.',
+  'If activeJobsCount is zero, call check_company_hiring before deciding there is no hiring signal.',
   'Gather decision-maker contacts and names for Indian-origin engineer analysis.',
   'Disqualify if big MNC, India-based, defunct, above 1000 employees, or not hiring engineers.',
   'When enough data is available, call compute_origin_ratio and queue_for_scoring.',
@@ -103,6 +108,7 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
     `name=${company.name}`,
     `website=${company.websiteUrl ?? 'unknown'}`,
     `employeeCount=${company.employeeCount ?? 'unknown'}`,
+    `fundingStage=${company.fundingStage ?? 'unknown'}`,
     `techStack=${JSON.stringify(company.techStack ?? [])}`,
     `status=${company.status}`,
   ].join('\n');

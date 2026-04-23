@@ -34,8 +34,7 @@ REDIS_URL=redis://localhost:6379      # already set
 
 **Recommended to unlock full pipeline:**
 ```env
-EXPLORIUM_API_KEY=...   # best discovery + enrichment source
-HUNTER_API_KEY=...      # email discovery (25 free/month)
+HUNTER_API_KEY=...      # primary API contact/email enrichment source
 GITHUB_TOKEN=...        # tech stack extraction (5000 req/hr vs 60 without)
 ```
 
@@ -128,6 +127,15 @@ Log output:
 
 Discovery and enrichment concurrency is capped to 1 when `AGENT_LLM_PROVIDER=ollama` — prevents Ollama from being overwhelmed with parallel inference requests.
 
+When using Anthropic, the workers apply conservative throttling so Sonnet does not exceed input-token-per-minute limits. Prompt caching can be enabled with:
+
+```env
+ENABLE_HOSTED_LLM=true
+AGENT_LLM_PROVIDER=anthropic
+AGENT_LLM_MODEL=claude-sonnet-4-6
+ANTHROPIC_PROMPT_CACHING=true
+```
+
 ---
 
 ## Step 8 — Start the frontend
@@ -150,6 +158,14 @@ npm run seed:100      # 100 rounds — full bulk run
 ```
 
 Watch progress in the genlea-frontend dashboard or Bull Board.
+
+Seed jobs default to premium non-India markets:
+
+```text
+United Kingdom, Canada, Australia, Europe, Remote
+```
+
+This is intentional. The goal is not US-only discovery; it is companies in higher-paying markets that are not India-headquartered.
 
 ---
 

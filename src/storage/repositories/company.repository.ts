@@ -71,7 +71,7 @@ export const companyRepository = {
         crunchbaseUrl: data.crunchbaseUrl,
         websiteUrl: data.websiteUrl,
         githubOrg: data.githubOrg,
-        hqCountry: data.hqCountry ?? 'US',
+        hqCountry: data.hqCountry ?? 'Unknown',
         hqState: data.hqState,
         hqCity: data.hqCity,
         employeeCount: data.employeeCount,
@@ -165,6 +165,7 @@ export const companyRepository = {
     status: LeadStatus,
     scoreBreakdown: Company['scoreBreakdown'],
     disqualificationReason?: string,
+    openRoles?: string[],
   ): Promise<void> {
     const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
     // Preserve manual decisions from the UI while still refreshing the numeric score/breakdown.
@@ -183,6 +184,7 @@ export const companyRepository = {
               else: status === 'disqualified' ? disqualificationReason : '$$REMOVE',
             },
           },
+          ...(openRoles !== undefined && { openRoles: [...new Set(openRoles)] }),
           status: {
             $cond: {
               if:   { $eq: ['$manuallyReviewed', true] },

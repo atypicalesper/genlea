@@ -1354,7 +1354,7 @@ async function triggerManualScrape() {
   const limit    = parseInt(document.getElementById('ms-limit').value) || 25;
   if (!keywords) { toast('Enter keywords first'); return; }
   try {
-    const json = await apiPost('/api/scrape', { source, query: { keywords, location: 'United States' }, limit });
+    const json = await apiPost('/api/scrape', { source, query: { keywords, location: 'United Kingdom, Canada, Australia, Europe, Remote' }, limit });
     const el = document.getElementById('scrape-result');
     el.classList.remove('hidden');
     el.textContent = '✓ Queued — Run ID: ' + json.data.runId;

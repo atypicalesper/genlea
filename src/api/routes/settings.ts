@@ -12,7 +12,7 @@ export async function settingsRoutes(app: FastifyInstance) {
 
   // PATCH /api/settings
   app.patch<{ Body: Record<string, unknown> }>('/settings', async (req, reply) => {
-    const numericFields = ['originRatioThreshold', 'originRatioMinSample', 'leadScoreHotVerifiedThreshold', 'leadScoreHotThreshold', 'leadScoreWarmThreshold', 'leadScoreColdThreshold', 'workerConcurrencyDiscovery', 'workerConcurrencyEnrichment', 'workerConcurrencyScoring'];
+    const numericFields = ['originRatioThreshold', 'originRatioMinSample', 'leadScoreHotVerifiedThreshold', 'leadScoreHotThreshold', 'leadScoreWarmThreshold', 'leadScoreColdThreshold', 'workerConcurrencyDiscovery', 'workerConcurrencyEnrichment', 'workerConcurrencyScoring', 'maxConcurrentBrowsers'];
     const arrayFields   = ['targetTechTags', 'highValueIndustries'];
     const updates: Record<string, unknown> = {};
 

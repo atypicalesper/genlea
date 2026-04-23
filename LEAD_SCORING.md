@@ -38,26 +38,30 @@ total_score =
 Rewards companies with a high % of Indian-origin developers.
 
 ```
-if ratio >= 0.90: 30 pts
-if ratio >= 0.75: 25 pts
-if ratio >= 0.60: 17 pts   ← tolerance floor
-if ratio <  0.50:  0 pts
-unknown (no sample):       10 pts  ← neutral, not zero
+if ratio >= 0.75: 30 pts
+if ratio >= 0.50: 24 pts
+if ratio >= 0.25: 16 pts
+if ratio >= 0.10:  8 pts
+if ratio >  0.00:  4 pts
+unknown / no sample:       0 pts
 ```
 
-`toleranceIncluded: true` is set on companies at 60–74% ratio.
+`toleranceIncluded: true` is set when the ratio is below the ideal range but still above the configured threshold.
 
-Minimum sample: `originRatioMinSample` (default 8 names). Below that, ratio is treated as unknown → 10 pts.
+Minimum sample: `originRatioMinSample` (default 8 names). Below that, ratio is treated as unknown.
 
 ---
 
 ## 2. Job freshness score (0–20 pts)
 
+Only active software/development/engineering roles count here. Generic open jobs do not score.
+
 ```
-per active job posting:
+per active engineering job posting:
   posted ≤ 7 days:  +5 pts
   posted ≤ 30 days: +3 pts
   posted ≤ 90 days: +1 pt
+  unknown posted date: +1 pt
 cap: 20 pts
 ```
 
@@ -93,23 +97,27 @@ Unverified email: half points. `emailConfidence < 0.60`: zero.
 **Size:**
 | Employee count | Points |
 |---|---|
-| 30–200 (sweet spot) | +7 |
-| 11–29 or 201–500 | +4 |
-| < 11 or > 500 | +0 |
+| 20–250 (sweet spot) | +6 |
+| 10–19 or 251–500 | +3 |
+| unknown, < 10, or > 500 | +0 |
 
 **Funding stage:**
 | Stage | Points |
 |---|---|
-| Series A or B | +5 |
-| Series C | +3 |
-| Bootstrapped | +2 |
-| Seed | +1 |
+| Pre-seed, Seed, Series A, Series B, Series C, Bootstrapped | +4 |
+| Series D+ | +2 |
 
-**Industry bonus (max +3, configurable via `highValueIndustries`):**
-| Industry | Points |
+**Funding amount:**
+| Total funding | Points |
 |---|---|
-| ai, saas, fintech, healthtech | +3 |
-| edtech | +2 |
+| $1M–$250M | +3 |
+| $250k–$1M | +1 |
+
+**Company age:**
+| Founded | Points |
+|---|---|
+| last 12 years | +2 |
+| 13–18 years | +1 |
 
 ---
 
@@ -118,10 +126,12 @@ Unverified email: half points. `emailConfidence < 0.60`: zero.
 Applied in the scoring worker regardless of numeric score:
 
 - India-headquartered company (`hqCountry === 'IN'`)
-- No verified funding (missing or unknown stage)
-- No active engineering hiring signal
-- No Indian-origin team signal (`indianDevRatio` undetectable after enrichment)
+- No engineering hiring signal from active jobs, hiring sources, or saved open roles
+- No Indian-origin team signal after enrichment
 - `employeeCount > 1000`
+- `totalDevCount > 250`
+
+Funding and founded year are fit signals, not hard gates. This avoids throwing away promising companies just because a free source did not return funding metadata.
 
 ---
 

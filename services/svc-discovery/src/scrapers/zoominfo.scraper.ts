@@ -226,7 +226,7 @@ export class ZoomInfoScraper implements Scraper {
       websiteUrl,
       hqCity:  locParts[0],
       hqState: locParts[1],
-      hqCountry: 'US',
+      hqCountry: 'Unknown',
       employeeCount: parseEmpText(employeeText ?? ''),
     };
 

@@ -46,7 +46,7 @@ export class GlassdoorScraper implements Scraper {
               domain,
               hqCity:        listing.city,
               hqState:       listing.state,
-              hqCountry:     'US',
+              hqCountry:     'Unknown',
               employeeCount: listing.employeeCount,
               industry:      listing.industry ? [listing.industry] : [],
             },

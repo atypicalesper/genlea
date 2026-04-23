@@ -3,6 +3,8 @@ import { generateRunId } from './utils/random.js';
 import { logger } from './utils/logger.js';
 import { ScraperSource } from './types/index.js';
 
+const PREMIUM_MARKET_LOCATION = 'United Kingdom, Canada, Australia, Europe, Remote';
+
 export const SEED_QUERIES: Array<{
   source: ScraperSource;
   keywords: string;
@@ -135,8 +137,8 @@ export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: st
         runId,
         source: q.source,
         query: {
-          keywords:  q.keywords,
-          location:  'United States',
+          keywords:  normalizeSeedKeywords(q.keywords),
+          location:  PREMIUM_MARKET_LOCATION,
           techStack: q.techStack,
           limit:     25,
         },
@@ -152,4 +154,12 @@ export async function enqueueSeedRound(label = 'scheduled'): Promise<{ runId: st
 
   logger.info({ runId, label, queued: activeQueries.length }, '[scheduler] Seed round enqueued');
   return { runId, queries: activeQueries.length };
+}
+
+function normalizeSeedKeywords(keywords: string): string {
+  return keywords
+    .replace(/\bUS\b/g, '')
+    .replace(/\bUnited States\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }

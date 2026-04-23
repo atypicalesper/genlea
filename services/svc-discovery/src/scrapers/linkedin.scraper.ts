@@ -176,7 +176,7 @@ export class LinkedInScraper implements Scraper {
       const parts = loc.split(',').map(p => p.trim());
       rawCompany.hqCity    = parts[0];
       rawCompany.hqState   = parts[1];
-      rawCompany.hqCountry = parts[2] ?? 'US';
+      rawCompany.hqCountry = parts[2] ?? 'Unknown';
     }
 
     // Employee count range

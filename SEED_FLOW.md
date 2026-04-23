@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-`seed:100` pushes **2,400 discovery jobs** into Redis. The workers pick them up, scrape 8 sources, normalize + filter results, upsert companies into MongoDB, then cascade each company through enrichment → scoring automatically.
+`seed:100` pushes discovery jobs into Redis. The workers pick them up, scrape configured sources, normalize + filter results, upsert companies into MongoDB, then cascade each company through enrichment → scoring automatically.
 
 ---
 
@@ -10,7 +10,7 @@
 
 `tsx scripts/seed-queries.ts 100` runs. The argument `100` is the **repeat count**.
 
-The script has a hardcoded list of **24 seed queries** spread across 8 sources:
+The scheduler has a curated seed-query list spread across configured sources:
 
 | Source       | Queries | Focus |
 |---|---|---|
@@ -23,13 +23,13 @@ The script has a hardcoded list of **24 seed queries** spread across 8 sources:
 | SurelyRemote | 4       | Remote startup roles, generative AI |
 | ZoomInfo     | 0       | (none in current seed list) |
 
-**Math:** `100 rounds × 24 queries = 2,400 total jobs`
+The exact job count depends on which sources are enabled by credentials and source-health muting.
 
 For each round, a fresh `runId` is generated (UUID). Each job is pushed to the `discovery` BullMQ queue with:
 - `runId` — groups all jobs from this seed run
 - `source` — which scraper to use
 - `query.keywords` — search string
-- `query.location` — always `"United States"`
+- `query.location` — defaults to premium non-India markets: `United Kingdom, Canada, Australia, Europe, Remote`
 - `query.techStack` — e.g. `['nodejs', 'typescript']`
 - `query.limit` — always `25` results per query
 
@@ -62,12 +62,12 @@ A company is silently skipped if any of these are true, checked in order:
 1. **Missing `domain` or `name`**
 2. **No tech signal** — no `techStack` and no jobs with tech tags
 3. **Blocked domain** — 80+ hardcoded enterprise domains (Google, Stripe, JPMorgan, Deloitte, Walmart, etc.)
-4. **Non-target country** — `hqCountry` is set AND is not in the allowed list (US, UK, CA, AU, EU countries, SG, IL, etc.). Companies without a country set pass through (majority — country defaults to 'US' on DB insert).
+4. **Non-target country** — India-headquartered companies are rejected. Unknown HQ stays `Unknown` and is verified during enrichment.
 5. **Name pattern match** — company name matches a blocked pattern (bank, chase, morgan, insurance, hospital, deloitte, cognizant, government, federal, etc.)
 6. **Too large** — `employeeCount > 1000`
 
 ### 2e. Upsert to MongoDB
-`companyRepository.upsert()` — upserts by `domain` (unique key). New companies default to `hqCountry: 'US'` if not provided by the scraper.
+`companyRepository.upsert()` — upserts by `domain` (unique key). New companies default to `hqCountry: 'Unknown'` if not provided by the scraper.
 
 ### 2f. Save contacts + jobs
 For each company, all contacts and jobs from the raw scraper output are saved in parallel via `Promise.allSettled`. Duplicates silently fail (unique index in MongoDB).
@@ -94,10 +94,9 @@ If `employeeCount > 1000` → immediately `disqualify()` the company and stop.
 If the company was enriched within the last **7 days** → skip enrichment, go straight to scoring.
 Override with `force=true` (set by the manual `/api/companies/:id/enrich` button in the dashboard).
 
-### Step 1+2: GitHub + Clearbit (parallel)
-Both run simultaneously:
+### Step 1+2: GitHub + website/team evidence
 - **GitHub** — finds the org by domain, extracts tech stack from repo languages + topics, pulls contributor names
-- **Clearbit** — enriches company metadata (employee count, funding stage, industry)
+- **Website/team scraping** — checks team/about/careers/contact pages for names, roles, hiring clues, and company info
 
 Results are merged into the company document. GitHub contributor names are saved as contacts.
 
@@ -114,8 +113,9 @@ After the website scrape, the worker fetches the company's root URL and checks f
 
 If any signal fires → `disqualify()` immediately and stop enrichment.
 
-### Step 4: Hunter.io email discovery
-Hunter's Domain Search API finds email addresses. Results normalized, deduped, saved with `emailConfidence` scores.
+### Step 4: Hiring verification + Hunter.io email discovery
+- `check_company_hiring` searches LinkedIn, Wellfound, Indeed, Glassdoor, and SurelyRemote for active engineering roles when saved jobs are missing.
+- Hunter's Domain Search API finds email addresses. Results normalized, deduped, saved with `emailConfidence` scores.
 
 ### Step 5: Contact Resolver
 SMTP email verification + CEO/HR gap-fill using Hunter pattern + name guessing.
@@ -196,7 +196,7 @@ Available at `localhost:4000/dashboard` and `/api/leads`, `/api/companies`, `/ap
 | Missing domain/name | Discovery | Can't dedup or identify |
 | No tech signal | Discovery | Not a tech company |
 | Blocked domain | Discovery | Known large enterprise |
-| Non-target country | Discovery | HQ outside US/UK/CA/EU/AU/SG |
+| India HQ | Discovery + Scoring | Outside target market |
 | Name pattern match | Discovery | Large bank/consulting/govt by name |
 | Employee count > 1000 | Discovery + Enrichment | Too large, not a target |
 | Recently enriched (< 7 days) | Enrichment | Skip re-enrichment, go to scoring |

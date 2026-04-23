@@ -12,6 +12,7 @@ export interface AppSettings {
   workerConcurrencyDiscovery: number;   // concurrent discovery jobs — default 10
   workerConcurrencyEnrichment: number;  // concurrent enrichment jobs — default 15
   workerConcurrencyScoring: number;     // concurrent scoring jobs — default 30
+  maxConcurrentBrowsers: number;        // shared Playwright browser cap across scrapers — default 3
   updatedAt: Date;
 }
 
@@ -29,6 +30,7 @@ const DEFAULTS: AppSettings = {
   workerConcurrencyDiscovery:   10,
   workerConcurrencyEnrichment:  15,
   workerConcurrencyScoring:     30,
+  maxConcurrentBrowsers:        3,
   updatedAt: new Date(),
 };
 
@@ -43,7 +45,12 @@ export const settingsRepository = {
     }
     const col = getCollection<SettingsDoc>('settings');
     const doc = await col.findOne({ _id: 'global' } as any);
-    const result: AppSettings = doc ? (() => { const { _id: _ignore, ...rest } = doc; return rest; })() : { ...DEFAULTS };
+    const result: AppSettings = doc
+      ? (() => {
+          const { _id: _ignore, ...rest } = doc;
+          return { ...DEFAULTS, ...rest };
+        })()
+      : { ...DEFAULTS };
     _settingsCache = result;
     _settingsCacheAt = Date.now();
     return result;

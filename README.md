@@ -1,6 +1,6 @@
 # GenLea
 
-> Automated B2B lead generation engine. Discovers US tech companies with high Indian-origin developer ratios that are actively hiring, extracts CEO/CTO/HR contacts, and scores each lead 0–100.
+> Automated B2B lead generation engine for software-services outreach. Discovers funded or promising non-India companies in higher-paying markets that are hiring engineers, already show Indian-origin team signals, and have usable decision-maker contacts.
 
 ---
 
@@ -18,8 +18,10 @@
 
 GenLea is tuned for one specific outbound goal:
 
+- funded or promising enough to buy external engineering help
 - not big MNCs or legacy enterprises
 - not India-headquartered
+- focused on higher-paying markets such as the UK, Canada, Australia, Europe, Singapore, Israel, remote-first global teams, and similar markets
 - actively hiring software engineering or development roles
 - already showing Indian-origin employees on the team, so India hiring is plausible
 
@@ -55,7 +57,7 @@ svc-discovery (cron every 2h)
       └─ LLM agent: scrape → normalise → dedup → save → enqueue enrichment
 
   → genlea-enrichment queue → svc-enrichment worker
-      └─ LLM agent: GitHub / Explorium / Clearbit / Hunter / Playwright
+      └─ LLM agent: GitHub / Hunter / website + Playwright / hiring checks
          → origin ratio (via name-origin service on :5050) → enqueue scoring
 
   → genlea-scoring queue → svc-scoring worker
@@ -76,6 +78,8 @@ svc-discovery (cron every 2h)
    - numeric scoring across origin ratio, jobs, tech, contacts, and company fit
    - hard disqualification gates for India HQ, enterprise size, missing engineering hiring, or missing India-team signal
 4. **Export** should be used only for leads that survived those ICP checks
+
+For the deeper lead-by-lead lifecycle, including state transitions, data writes, and disqualification branches, see [ARCHITECTURE.md](ARCHITECTURE.md#journey-of-a-lead).
 
 ---
 
@@ -132,13 +136,14 @@ ENABLE_HOSTED_LLM=false
 # ENABLE_HOSTED_LLM=true
 # AGENT_LLM_PROVIDER=anthropic
 # ANTHROPIC_API_KEY=sk-ant-...
+# AGENT_LLM_MODEL=claude-sonnet-4-6
+# ANTHROPIC_PROMPT_CACHING=true
 ```
 
 Strongly recommended:
 
 ```env
-EXPLORIUM_API_KEY=...     # Best discovery source — funding/company metadata + verified contacts
-HUNTER_API_KEY=...        # Email discovery (25 free/month)
+HUNTER_API_KEY=...        # Primary API enrichment source for contact/email discovery
 GITHUB_TOKEN=...          # Tech stack extraction (5000 req/hr vs 60 without)
 ```
 
@@ -234,7 +239,13 @@ npm run seed:10       # 10 rounds
 npm run seed:100      # 100 rounds — full bulk run
 ```
 
-The scheduler in `svc-discovery` also auto-seeds every 2 hours.
+Seed queries target premium non-India markets by default:
+
+```text
+United Kingdom, Canada, Australia, Europe, Remote
+```
+
+Older seed strings containing `US` / `United States` are normalized before queueing so the scheduler does not silently bias discovery back to US-only results. The scheduler in `svc-discovery` can also auto-seed when enabled.
 
 ---
 
@@ -252,10 +263,11 @@ The current defaults are intentionally stricter than a generic lead-gen setup:
 Important behavior:
 
 - A company can be disqualified even with a decent raw score if it fails the ICP directly.
-- Missing verified funding is treated as a disqualifier.
+- Funding and company age improve fit, but missing funding alone is not a hard disqualifier.
 - Missing India-team signal is treated as a disqualifier.
-- Active engineering hiring is required.
+- Engineering hiring is required, and can be proven by active engineering jobs, hiring-source evidence, or saved open roles.
 - India-headquartered companies are disqualified.
+- Unknown HQ stays `Unknown`; the system no longer assumes unknown companies are US-based.
 
 ---
 

@@ -5,6 +5,7 @@ import { normalizer, normalizeRole }   from '../enrichment/normalizer.js';
 import { deduplicateCompanies }        from '../enrichment/deduplicator.js';
 import { companyRepository }           from '../storage/repositories/company.repository.js';
 import { contactRepository }           from '../storage/repositories/contact.repository.js';
+import { jobRepository }               from '../storage/repositories/job.repository.js';
 import { queueManager }                from '../core/queue.manager.js';
 import { normalizeDomain }             from '../utils/random.js';
 import { hunterScraper }               from '../scrapers/enrichment/index.js';
@@ -21,6 +22,15 @@ const slugifyName = (s: string): string =>
 
 type PendingDiscoveryCompany = Record<string, unknown> & {
   _candidateUrls?: string[];
+  _pendingJobs?: PendingDiscoveryJob[];
+};
+
+type PendingDiscoveryJob = {
+  title: string;
+  techTags?: string[];
+  source?: DiscoveryJobData['source'];
+  sourceUrl?: string;
+  postedAt?: Date;
 };
 
 export function buildSystemPrompt(): string {
@@ -36,6 +46,7 @@ export function buildSystemPrompt(): string {
 
 Goal:
 - save at least 15 companies
+- prefer funded or clearly growth-stage software companies that can buy external engineering help
 - exclude India-headquartered companies
 - exclude big enterprises and companies above 1000 employees
 - prefer companies hiring engineering roles
@@ -101,7 +112,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
 
     // ── 1. Scrape source ────────────────────────────────────────────────────────
     tool(
-      async ({ source, keywords, location = 'United States', limit = 25 }) => {
+      async ({ source, keywords, location = 'United Kingdom, Canada, Australia, Europe, Remote', limit = 25 }) => {
         if (triedSources.has(source)) {
           return JSON.stringify({
             error: `${source} already tried this run — use get_discovery_state to see remaining sources`,
@@ -123,6 +134,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
           const { companies } = normalizer.processResults(rawResults);
           const deduped = deduplicateCompanies(companies);
           const identityHints = collectIdentityHints(rawResults);
+          const jobsByName = collectJobsByCompany(rawResults);
 
           const filtered = deduped.filter(c => {
             if (!c.name) return false;
@@ -137,10 +149,12 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
             source,
             filtered.map(c => {
               const urls = identityHints.get(normalizeNameKey(c.name));
+              const pendingJobs = jobsByName.get(normalizeNameKey(c.name));
               return {
                 ...c,
                 source,
                 _candidateUrls: urls,
+                _pendingJobs: pendingJobs,
               };
             }),
           );
@@ -229,12 +243,14 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
                 employeeCount: co['employeeCount'] as number   | undefined,
                 fundingStage:  co['fundingStage']  as any,
                 techStack:     co['techStack']     as string[] | undefined,
-                hqCountry:     (co['hqCountry'] as string | undefined) ?? 'US',
+                hqCountry:     (co['hqCountry'] as string | undefined) ?? 'Unknown',
                 sources:       [source ?? job.source] as any,
                 pipelineStatus,
               } as any);
 
               if (hiringInStack && domainResolved) {
+                await persistDiscoveryJobs(company._id!, co._pendingJobs ?? [], source as DiscoveryJobData['source']);
+
                 if (process.env['HUNTER_API_KEY']) {
                   hunterScraper.enrichDomain(domain).then(async result => {
                     if (!result?.contacts?.length) return;
@@ -349,6 +365,54 @@ function collectIdentityHints(rawResults: RawResult[]): Map<string, string[]> {
     }
   }
   return new Map([...hints.entries()].map(([key, urls]) => [key, [...urls]]));
+}
+
+function collectJobsByCompany(rawResults: RawResult[]): Map<string, PendingDiscoveryJob[]> {
+  const jobsByName = new Map<string, PendingDiscoveryJob[]>();
+
+  for (const result of rawResults) {
+    const key = normalizeNameKey(result.company?.name);
+    if (!key || !result.jobs?.length) continue;
+
+    const jobs = result.jobs
+      .filter(job => job.title)
+      .map(job => ({
+        title: job.title!.trim(),
+        techTags: job.techTags ?? [],
+        source: job.source as DiscoveryJobData['source'] | undefined,
+        sourceUrl: job.sourceUrl,
+        postedAt: job.postedAt,
+      }));
+
+    if (!jobs.length) continue;
+    jobsByName.set(key, [...(jobsByName.get(key) ?? []), ...jobs]);
+  }
+
+  return jobsByName;
+}
+
+async function persistDiscoveryJobs(
+  companyId: string,
+  jobs: PendingDiscoveryJob[],
+  fallbackSource: DiscoveryJobData['source'],
+): Promise<void> {
+  if (!jobs.length) return;
+
+  await Promise.allSettled(
+    jobs
+      .filter(job => job.title.trim())
+      .map(job =>
+        jobRepository.upsert({
+          companyId,
+          title: job.title.trim(),
+          techTags: job.techTags ?? [],
+          source: (job.source ?? fallbackSource) as any,
+          sourceUrl: job.sourceUrl,
+          postedAt: job.postedAt,
+          isActive: true,
+        }).catch(err => logger.debug({ err, companyId, title: job.title }, '[discovery-tools] Job save failed')),
+      ),
+  );
 }
 
 function dedupeStrings(values: unknown[]): string[] {

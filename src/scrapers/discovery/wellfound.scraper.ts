@@ -16,10 +16,11 @@ export class WellfoundScraper implements Scraper {
   }
 
   async scrape(query: ScrapeQuery): Promise<RawResult[]> {
+    const location = normalizeJobBoardLocation(query.location);
     const runId     = generateRunId();
     const browserId = `wellfound-${runId}`;
     const results: RawResult[] = [];
-    const listingUrl = `https://wellfound.com/jobs?q=${encodeURIComponent(query.keywords)}&location=United+States`;
+    const listingUrl = `https://wellfound.com/jobs?q=${encodeURIComponent(query.keywords)}&location=${encodeURIComponent(location)}`;
     const diag = new ScrapeDiagnostics('wellfound', runId, listingUrl);
     let page: Page | undefined;
 
@@ -68,7 +69,8 @@ export class WellfoundScraper implements Scraper {
     diag: ScrapeDiagnostics,
   ): Promise<Array<{ name: string; slug: string; wellfoundUrl: string }>> {
     const q = encodeURIComponent(query.keywords);
-    const url = `https://wellfound.com/jobs?q=${q}&location=United+States`;
+    const location = encodeURIComponent(normalizeJobBoardLocation(query.location));
+    const url = `https://wellfound.com/jobs?q=${q}&location=${location}`;
 
     await diag.stage('navigate', async () => {
       await page.goto(url, { waitUntil: 'networkidle', timeout: 45000 });
@@ -212,7 +214,7 @@ export class WellfoundScraper implements Scraper {
       description:   data.description || undefined,
       hqCity:        locParts[0],
       hqState:       locParts[1],
-      hqCountry:     'US',
+      hqCountry:     'Unknown',
       employeeCount: parseEmployeeText(data.empText ?? ''),
       fundingStage:  mapStage(data.stage ?? ''),
     };
@@ -251,6 +253,11 @@ export class WellfoundScraper implements Scraper {
       scrapedAt: new Date(),
     };
   }
+}
+
+function normalizeJobBoardLocation(location?: string): string {
+  const preferred = location?.split(',').map(part => part.trim()).find(Boolean);
+  return preferred ?? 'Remote';
 }
 
 function parseEmployeeText(text: string): number | undefined {

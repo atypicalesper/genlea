@@ -53,7 +53,7 @@ export class WellfoundScraper implements Scraper {
     query: ScrapeQuery,
   ): Promise<Array<{ name: string; slug: string; wellfoundUrl: string }>> {
     const q = encodeURIComponent(query.keywords);
-    const url = `https://wellfound.com/jobs?q=${q}&location=United+States`;
+    const url = `https://wellfound.com/jobs?q=${q}&location=${encodeURIComponent(normalizeJobBoardLocation(query.location))}`;
 
     logger.debug({ url }, '[wellfound:hiring] Navigating to hiring section');
     await page.goto(url, { waitUntil: 'networkidle', timeout: 45000 });
@@ -175,7 +175,7 @@ export class WellfoundScraper implements Scraper {
       description:   data.description || undefined,
       hqCity:        locParts[0],
       hqState:       locParts[1],
-      hqCountry:     'US',
+      hqCountry:     'Unknown',
       employeeCount: parseEmployeeText(data.empText ?? ''),
       fundingStage:  mapStage(data.stage),
     };
@@ -207,6 +207,11 @@ export class WellfoundScraper implements Scraper {
 
     return { source: 'wellfound', company: rawCompany, contacts, jobs, scrapedAt: new Date() };
   }
+}
+
+function normalizeJobBoardLocation(location?: string): string {
+  const preferred = location?.split(',').map(part => part.trim()).find(Boolean);
+  return preferred ?? 'Remote';
 }
 
 function parseEmployeeText(text: string): number | undefined {

@@ -27,7 +27,7 @@ const USER_PROMPT_TEMPLATE = [
   'Use get_discovery_state first.',
   'Scrape the primary source before trying fallbacks.',
   'After each scrape_source, immediately call save_companies with the same source.',
-  'Target ICP: non-India companies, engineering hiring, not big MNCs, prefer Indian-origin employee signal.',
+  'Target ICP: non-India software companies in higher-paying markets, engineering hiring, can buy external engineering help, not big MNCs, prefer Indian-origin employee signal.',
   'Stop once the goal is met.',
 ].join('\n');
 
@@ -46,7 +46,7 @@ export async function runDiscoveryAgent(job: DiscoveryJobData): Promise<void> {
     USER_PROMPT_TEMPLATE,
     `source=${source}`,
     `keywords=${query.keywords}`,
-    `location=${query.location ?? 'United States'}`,
+    `location=${query.location ?? 'Remote / premium markets'}`,
     'goal=15 companies',
   ].join('\n');
 

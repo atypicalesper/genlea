@@ -12,6 +12,7 @@ import { makeTools } from './enrichment-tools.js';
 const SYSTEM_PROMPT = `You are a B2B lead enrichment agent for a software agency pitching software development services.
 
 GOAL: qualify companies only if they match this ICP:
+- funded or promising enough to buy external engineering help
 - not a big MNC or enterprise
 - not India-headquartered
 - actively hiring development or engineering roles
@@ -33,23 +34,25 @@ DISQUALIFY IMMEDIATELY if:
 RULES:
 - if a tool returns { available: false }, skip it
 - use playwright_scrape_url heavily on /team, /about, /careers, /engineering, /jobs, /contact
+- if get_company_state shows activeJobsCount=0, call check_company_hiring before disqualifying for no hiring signal
 - always save partial data
 
 SOURCE ORDER:
 1. enrich_github
 2. scrape_website_team
-3. enrich_explorium
-4. enrich_clay
+3. enrich_hunter
+4. check_company_hiring
 5. playwright_scrape_url
-6. enrich_clearbit
-7. enrich_hunter
-8. verify_contacts`;
+6. verify_contacts`;
 
 // Keep the user prompt small and structured so Anthropic can reuse the shared prefix.
 const USER_PROMPT_TEMPLATE = [
   'Enrich this company against the outreach ICP.',
   'Start with get_company_state, then follow the goal loop.',
-  'Verify non-India HQ, company size, and engineering hiring.',
+  'Verify non-India HQ, company size, funding or growth-stage signal, and engineering hiring.',
+  'Use Hunter as the only API enrichment source for contact and email discovery.',
+  'Use GitHub, website scraping, and Playwright only as non-API support for tech stack, hiring, and names.',
+  'If activeJobsCount is zero, call check_company_hiring before deciding there is no hiring signal.',
   'Gather decision-maker contacts and names for Indian-origin engineer analysis.',
   'Disqualify if big MNC, India-based, defunct, above 1000 employees, or not hiring engineers.',
   'Compute origin ratio and queue for scoring when ready.',
@@ -95,6 +98,7 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
     `domain=${domain}`,
     `name=${company.name}`,
     `employeeCount=${company.employeeCount ?? 'unknown'}`,
+    `fundingStage=${company.fundingStage ?? 'unknown'}`,
     `techStack=${JSON.stringify(company.techStack ?? [])}`,
     `status=${company.status}`,
   ].join('\n');
@@ -222,13 +226,10 @@ function buildStepSummary(tool: string, p: Record<string, unknown>): string {
       return `github: ${p['contributors'] ?? 0} contributors, tech: ${JSON.stringify(p['techStack'] ?? [])}`;
     case 'enrich_hunter':
       return `hunter: ${p['contacts'] ?? 0} contacts found`;
-    case 'enrich_clearbit':
-      return `clearbit: employees=${p['employeeCount'] ?? '?'}, location=${p['hqCountry'] ?? '?'}`;
-    case 'enrich_explorium':
-    case 'enrich_clay':
-      return `${tool}: ${p['contacts'] ?? 0} contacts`;
     case 'scrape_website_team':
       return `website-team: ${p['names'] ?? 0} names found`;
+    case 'check_company_hiring':
+      return `hiring-check: ${p['persistedJobs'] ?? 0} jobs persisted from ${JSON.stringify(p['checkedSources'] ?? [])}`;
     case 'playwright_scrape_url':
       return `playwright: ${p['contacts'] ?? 0} contacts, ${p['names'] ?? 0} names — url: ${p['url'] ?? '?'}`;
     case 'compute_origin_ratio':

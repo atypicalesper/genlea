@@ -7,6 +7,7 @@ import {
   deduplicateCompanies,
   companyRepository,
   contactRepository,
+  jobRepository,
   queueManager,
   normalizeDomain,
   getAvailableSources,
@@ -33,6 +34,7 @@ export function buildSystemPrompt(): string {
 
 Goal:
 - save at least 15 companies
+- prefer funded or clearly growth-stage software companies that can buy external engineering help
 - exclude India-headquartered companies
 - exclude big enterprises and companies above 1000 employees
 - prefer companies hiring engineering roles
@@ -73,6 +75,14 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
   // save_companies reads from here by source — the LLM never echoes company data back.
   const pendingBySource = new Map<string, Partial<Company & { hiringInStack?: boolean; source?: string }>[]>();
   let totalSaved = 0;
+
+  type PendingDiscoveryJob = {
+    title: string;
+    techTags?: string[];
+    source?: DiscoveryJobData['source'];
+    sourceUrl?: string;
+    postedAt?: Date;
+  };
 
   return [
 
@@ -129,6 +139,7 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
           const rawResults = await scraper.scrape({ keywords, location, limit });
           const { companies } = normalizer.processResults(rawResults);
           const deduped = deduplicateCompanies(companies);
+          const jobsByName = collectJobsByCompany(rawResults);
 
           const filtered = deduped.filter(c => {
             if (!c.name) return false;
@@ -140,7 +151,11 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
           });
 
           // Store in closure so save_companies can pick them up without re-passing through the LLM
-          pendingBySource.set(source, filtered.map(c => ({ ...c, source })));
+          pendingBySource.set(source, filtered.map(c => ({
+            ...c,
+            source,
+            _pendingJobs: jobsByName.get(normalizeNameKey(c.name)),
+          } as Partial<Company & { hiringInStack?: boolean; source?: string }>)));
 
           logger.info({ source, raw: rawResults.length, filtered: filtered.length }, '[discovery-tools] Scraped');
 
@@ -221,12 +236,14 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
               employeeCount: (co as any).employeeCount,
               fundingStage:  (co as any).fundingStage as any,
               techStack:     (co as any).techStack,
-              hqCountry:     (co as any).hqCountry ?? 'US',
+              hqCountry:     (co as any).hqCountry ?? 'Unknown',
               sources:       [source ?? job.source] as any,
               pipelineStatus,
             } as any);
 
             if (hiringInStack && domainResolved) {
+              await persistDiscoveryJobs(company._id!, ((co as any)._pendingJobs ?? []) as PendingDiscoveryJob[], source);
+
               // Pre-populate contacts from Hunter (non-blocking, best-effort)
               if (process.env['HUNTER_API_KEY']) {
                 hunterScraper.enrichDomain(domain).then(async result => {
@@ -277,4 +294,60 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
       },
     ),
   ];
+}
+
+function collectJobsByCompany(rawResults: any[]): Map<string, Array<{
+  title: string; techTags?: string[]; source?: DiscoveryJobData['source']; sourceUrl?: string; postedAt?: Date;
+}>> {
+  const jobsByName = new Map<string, Array<{
+    title: string; techTags?: string[]; source?: DiscoveryJobData['source']; sourceUrl?: string; postedAt?: Date;
+  }>>();
+
+  for (const result of rawResults) {
+    const key = normalizeNameKey(result.company?.name);
+    if (!key || !result.jobs?.length) continue;
+
+    const jobs = result.jobs
+      .filter((job: any) => job.title)
+      .map((job: any) => ({
+        title: job.title.trim(),
+        techTags: job.techTags ?? [],
+        source: job.source as DiscoveryJobData['source'] | undefined,
+        sourceUrl: job.sourceUrl,
+        postedAt: job.postedAt,
+      }));
+
+    if (!jobs.length) continue;
+    jobsByName.set(key, [...(jobsByName.get(key) ?? []), ...jobs]);
+  }
+
+  return jobsByName;
+}
+
+async function persistDiscoveryJobs(
+  companyId: string,
+  jobs: Array<{ title: string; techTags?: string[]; source?: DiscoveryJobData['source']; sourceUrl?: string; postedAt?: Date }>,
+  fallbackSource: DiscoveryJobData['source'],
+): Promise<void> {
+  if (!jobs.length) return;
+
+  await Promise.allSettled(
+    jobs
+      .filter(job => job.title.trim())
+      .map(job =>
+        jobRepository.upsert({
+          companyId,
+          title: job.title.trim(),
+          techTags: job.techTags ?? [],
+          source: job.source ?? fallbackSource,
+          sourceUrl: job.sourceUrl,
+          postedAt: job.postedAt,
+          isActive: true,
+        }).catch(err => logger.debug({ err, companyId, title: job.title }, '[discovery-tools] Job save failed')),
+      ),
+  );
+}
+
+function normalizeNameKey(name?: string): string {
+  return (name ?? '').trim().toLowerCase();
 }

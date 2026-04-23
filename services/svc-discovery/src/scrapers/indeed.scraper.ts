@@ -22,6 +22,7 @@ export class IndeedScraper implements Scraper {
   async scrape(query: ScrapeQuery): Promise<RawResult[]> {
     const browserId = `indeed-${generateRunId()}`;
     const results: RawResult[] = [];
+    const location = normalizeJobBoardLocation(query.location);
 
     logger.info({ keywords: query.keywords, limit: query.limit }, '[indeed] Starting scrape');
 
@@ -39,7 +40,7 @@ export class IndeedScraper implements Scraper {
         const rawCompany: Partial<RawCompany> = {
           name:      companyName,
           domain,
-          hqCountry: 'US',
+          hqCountry: 'Unknown',
         };
 
         results.push({
@@ -65,9 +66,9 @@ export class IndeedScraper implements Scraper {
     page: Page,
     query: ScrapeQuery
   ): Promise<Map<string, RawJob[]>> {
-    // Build URL — Indeed job search for US, sorted by date
     const q = encodeURIComponent(query.keywords);
-    const url = `https://www.indeed.com/jobs?q=${q}&l=United+States&sort=date&radius=0&fromage=14`;
+    const location = encodeURIComponent(normalizeJobBoardLocation(query.location));
+    const url = `https://www.indeed.com/jobs?q=${q}&l=${location}&sort=date&radius=0&fromage=14`;
 
     logger.debug({ url }, '[indeed:search] Navigating');
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -138,6 +139,11 @@ export class IndeedScraper implements Scraper {
     
     return jobGroups;
   }
+}
+
+function normalizeJobBoardLocation(location?: string): string {
+  const preferred = location?.split(',').map(part => part.trim()).find(Boolean);
+  return preferred ?? 'Remote';
 }
 
 function slugifyName(name: string): string {
