@@ -11,6 +11,7 @@
   "dependencies": {
     "@genlea/shared": "*",
     "@langchain/core": "^1.1.39",
+    "axios": "^1.7.2",
     "bullmq": "^5.7.0",
     "dotenv-flow": "^4.1.0",
     "ioredis": "^5.3.2",

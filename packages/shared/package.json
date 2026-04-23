@@ -7,5 +7,20 @@
   "exports": {
     ".": "./src/index.ts",
     "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.1.39",
+    "bullmq": "^5.7.0",
+    "groq-sdk": "^1.1.2",
+    "ioredis": "^5.3.2",
+    "mongodb": "^6.7.0",
+    "nodemailer": "^8.0.4",
+    "pino": "^9.2.0",
+    "playwright": "^1.44.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.0",
+    "@types/node": "^20.14.2"
   }
 }

@@ -12,6 +12,7 @@ RUN npm install --workspace=@genlea/shared --workspace=@genlea/svc-enrichment --
 
 COPY packages/shared/src  packages/shared/src
 COPY services/svc-enrichment/src services/svc-enrichment/src
+COPY services/svc-discovery/src  services/svc-discovery/src
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV CHROMIUM_PATH=/usr/bin/chromium-browser
