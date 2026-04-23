@@ -70,6 +70,12 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
     return;
   }
 
+  if (company.status === 'disqualified' && company.manuallyReviewed) {
+    logger.info({ companyId, domain }, '[enrichment.agent] Manually disqualified — skipping');
+    await companyRepository.setPipelineStatus(companyId, 'scored');
+    return;
+  }
+
   if (company.employeeCount && company.employeeCount > 1000) {
     await companyRepository.disqualify(companyId, 'Company is above the target size range for outbound pitching.');
     return;
@@ -198,7 +204,10 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
     const msg = err instanceof Error ? err.message : String(err);
     // Reset pipeline status so the company can be re-enriched on the next run
     // rather than being stuck at 'enriching' forever.
-    await companyRepository.setPipelineStatus(companyId, 'discovered').catch(() => {});
+    const latest = await companyRepository.findById(companyId).catch(() => null);
+    if (!(latest?.status === 'disqualified' && latest.manuallyReviewed)) {
+      await companyRepository.setPipelineStatus(companyId, 'discovered').catch(() => {});
+    }
     await scrapeLogRepository.complete(logId, {
       status: 'failed', companiesFound: 0, contactsFound: 0, jobsFound: 0,
       errors: [msg], durationMs: Date.now() - startedAt,

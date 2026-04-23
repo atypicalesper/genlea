@@ -453,6 +453,12 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
     tool(
       async () => {
+        const company = await companyRepository.findById(companyId);
+        if (company?.status === 'disqualified' && company.manuallyReviewed) {
+          await companyRepository.setPipelineStatus(companyId, 'scored');
+          return JSON.stringify({ queued: false, cancelled: true, reason: 'Company was manually disqualified' });
+        }
+
         await companyRepository.setLastEnrichedAt(companyId);
         await companyRepository.setPipelineStatus(companyId, 'scoring');
         await queueManager.addScoringJob({ runId, companyId });

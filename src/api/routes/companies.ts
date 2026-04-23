@@ -98,6 +98,25 @@ export async function companiesRoutes(app: FastifyInstance) {
     return reply.send({ success: true });
   });
 
+  // PATCH /api/companies/:id — edit lead metadata without touching pipeline status
+  app.patch<{ Params: { id: string }; Body: { name?: string } }>(
+    '/companies/:id',
+    async (req, reply) => {
+      const { id } = req.params;
+      const name = req.body.name?.trim();
+      if (!name || name.length < 2 || name.length > 200) {
+        return reply.status(400).send({ success: false, error: 'Name must be between 2 and 200 characters' });
+      }
+
+      const company = await companyRepository.findById(id);
+      if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
+
+      const updated = await companyRepository.upsert({ domain: company.domain, name });
+      logger.info({ id, domain: company.domain, name }, '[api:companies] Company renamed');
+      return reply.send({ success: true, data: updated });
+    }
+  );
+
   // PATCH /api/companies/:id/status — manually override lead status
   app.patch<{ Params: { id: string }; Body: { status: LeadStatus; reason?: string } }>(
     '/companies/:id/status',
@@ -118,8 +137,15 @@ export async function companiesRoutes(app: FastifyInstance) {
         disqualificationReason: status === 'disqualified' ? (reason ?? 'Manually disqualified') : '',
         manuallyReviewed: true,
       });
-      logger.info({ id, domain: company.domain, status }, '[api:companies] Status overridden');
-      return reply.send({ success: true, data: { status } });
+      const removedJobs = status === 'disqualified'
+        ? await queueManager.removeCompanyPipelineJobs(id)
+        : undefined;
+      if (status === 'disqualified') {
+        await companyRepository.setPipelineStatus(id, 'scored');
+      }
+
+      logger.info({ id, domain: company.domain, status, removedJobs }, '[api:companies] Status overridden');
+      return reply.send({ success: true, data: { status, removedJobs } });
     }
   );
 
@@ -128,6 +154,9 @@ export async function companiesRoutes(app: FastifyInstance) {
     const { id } = req.params;
     const company = await companyRepository.findById(id);
     if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
+    if (company.status === 'disqualified' && company.manuallyReviewed) {
+      return reply.status(409).send({ success: false, error: 'Lead is manually disqualified. Change status before re-enrichment.' });
+    }
 
     const runId = generateRunId();
     await queueManager.addEnrichmentJob({ runId, companyId: id, domain: company.domain, sources: ['github', 'hunter', 'clearbit'], force: true });
@@ -140,6 +169,9 @@ export async function companiesRoutes(app: FastifyInstance) {
     const { id } = req.params;
     const company = await companyRepository.findById(id);
     if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
+    if (company.status === 'disqualified' && company.manuallyReviewed) {
+      return reply.status(409).send({ success: false, error: 'Lead is manually disqualified. Change status before re-scoring.' });
+    }
 
     const runId = generateRunId();
     await queueManager.addScoringJob({ runId, companyId: id });

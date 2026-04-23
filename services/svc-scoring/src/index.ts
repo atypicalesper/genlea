@@ -31,6 +31,12 @@ async function processScoringJob(job: Job<ScoringJobData>): Promise<void> {
     return;
   }
 
+  if (company.status === 'disqualified' && company.manuallyReviewed) {
+    logger.info({ companyId, domain: company.domain }, '[scoring.worker] Manually disqualified — skipping');
+    await companyRepository.setPipelineStatus(companyId, 'scored');
+    return;
+  }
+
   logger.debug(
     { companyId, domain: company.domain, contacts: contacts.length, jobs: jobs.length },
     '[scoring.worker] Scoring inputs loaded'
