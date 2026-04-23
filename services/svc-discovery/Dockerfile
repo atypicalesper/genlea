@@ -1,4 +1,4 @@
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 WORKDIR /app
 
 # Install Playwright system deps
@@ -13,6 +13,9 @@ RUN npm install --workspace=@genlea/shared --workspace=@genlea/svc-discovery --i
 
 COPY packages/shared/src  packages/shared/src
 COPY services/svc-discovery/src services/svc-discovery/src
+
+RUN mkdir -p /app/services/svc-discovery/logs/sessions \
+    && chown -R pptruser:pptruser /app/services/svc-discovery/logs
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV CHROMIUM_PATH=/usr/bin/chromium-browser
