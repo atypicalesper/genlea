@@ -85,6 +85,12 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
     return;
   }
 
+  if (company.status === 'disqualified' && company.manuallyReviewed) {
+    log.info({ companyId, domain }, '[enrichment.agent] Manually disqualified — skipping');
+    await companyRepository.setPipelineStatus(companyId, 'scored');
+    return;
+  }
+
   if (company.employeeCount && company.employeeCount > 1000) {
     await companyRepository.disqualify(companyId, 'Company is above the target size range for outbound pitching.');
     return;

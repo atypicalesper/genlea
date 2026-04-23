@@ -2,7 +2,7 @@ import 'dotenv-flow/config';
 import { Job } from 'bullmq';
 import {
   connectMongo, createWorker, QUEUE_NAMES,
-  settingsRepository, logger,
+  companyRepository, settingsRepository, logger,
 } from '@genlea/shared';
 import type { EnrichmentJobData } from '@genlea/shared';
 import { runEnrichmentAgent } from './agents/enrichment.agent.js';
@@ -27,6 +27,13 @@ function cap(n: number): number {
 }
 
 async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> {
+  const company = await companyRepository.findById(job.data.companyId);
+  if (company?.status === 'disqualified' && company.manuallyReviewed) {
+    logger.info({ companyId: job.data.companyId, domain: job.data.domain }, '[enrichment.worker] Manually disqualified — skipping');
+    await companyRepository.setPipelineStatus(job.data.companyId, 'scored');
+    return;
+  }
+
   logger.info({ runId: job.data.runId, domain: job.data.domain }, '[enrichment.worker] Delegating to agent');
   await runEnrichmentAgent(job.data);
 }

@@ -35,7 +35,12 @@ export async function jobsRoutes(app: FastifyInstance) {
   // GET /api/jobs/active — what is currently being processed
   app.get('/jobs/active', async (_req, reply) => {
     const active = await queueManager.getActiveJobs();
-    return reply.send({ success: true, data: active });
+    const visible = await Promise.all(active.map(async job => {
+      if (!job.companyId) return job;
+      const company = await companyRepository.findById(job.companyId);
+      return company?.status === 'disqualified' && company.manuallyReviewed ? null : job;
+    }));
+    return reply.send({ success: true, data: visible.filter(Boolean) });
   });
 
   // GET /api/jobs/logs — recent scrape logs

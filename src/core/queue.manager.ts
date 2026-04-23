@@ -59,6 +59,39 @@ export class QueueManager {
     logger.debug({ runId: data.runId, companyId: data.companyId }, 'Scoring job queued');
   }
 
+  async removeCompanyPipelineJobs(companyId: string): Promise<{ enrichment: number; scoring: number }> {
+    const removableStates = ['waiting', 'delayed', 'prioritized', 'waiting-children', 'paused'] as const;
+
+    const removeMatching = async <T extends EnrichmentJobData | ScoringJobData>(
+      queue: Queue<T>,
+      queueName: 'enrichment' | 'scoring',
+    ): Promise<number> => {
+      const jobs = await queue.getJobs([...removableStates], 0, -1);
+      let removed = 0;
+
+      for (const job of jobs) {
+        if ((job.data as { companyId?: string }).companyId !== companyId) continue;
+
+        try {
+          await job.remove();
+          removed++;
+        } catch (err) {
+          logger.warn({ err, queue: queueName, jobId: job.id, companyId }, '[queue] Could not remove company job');
+        }
+      }
+
+      return removed;
+    };
+
+    const [enrichment, scoring] = await Promise.all([
+      removeMatching(enrichmentQueue, 'enrichment'),
+      removeMatching(scoringQueue, 'scoring'),
+    ]);
+
+    logger.info({ companyId, enrichment, scoring }, '[queue] Removed company pipeline jobs');
+    return { enrichment, scoring };
+  }
+
   async getQueueStats() {
     const [discoveryCounts, enrichmentCounts, scoringCounts] = await Promise.all([
       discoveryQueue.getJobCounts(),

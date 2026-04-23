@@ -5,6 +5,7 @@ import { EnrichmentJobData } from '../types/index.js';
 import { createWorker, QUEUE_NAMES } from '../core/queue.manager.js';
 import { connectMongo } from '../storage/mongo.client.js';
 import { settingsRepository } from '../storage/repositories/settings.repository.js';
+import { companyRepository } from '../storage/repositories/company.repository.js';
 import { runEnrichmentAgent } from '../agents/enrichment.agent.js';
 import { resolveProvider } from '../agents/llm.client.js';
 import { logger } from '../utils/logger.js';
@@ -21,6 +22,13 @@ function cap(n: number): number {
 }
 
 async function processEnrichmentJob(job: Job<EnrichmentJobData>): Promise<void> {
+  const company = await companyRepository.findById(job.data.companyId);
+  if (company?.status === 'disqualified' && company.manuallyReviewed) {
+    logger.info({ companyId: job.data.companyId, domain: job.data.domain }, '[enrichment.worker] Manually disqualified — skipping');
+    await companyRepository.setPipelineStatus(job.data.companyId, 'scored');
+    return;
+  }
+
   // The enrichment agent owns source selection and stopping conditions for each company.
   logger.info({ runId: job.data.runId, domain: job.data.domain }, '[enrichment.worker] Delegating to enrichment agent');
   await runEnrichmentAgent(job.data);
