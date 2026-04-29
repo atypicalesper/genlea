@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import { ObjectId } from 'mongodb';
 import {
   companyRepository,
   getCollection,
@@ -18,10 +19,12 @@ type LeadQuery = LeadFilter & {
   sortDir?: 'asc' | 'desc';
   qualified?: string;
   maxScore?: string;
+  outreachReady?: string;
 };
 
 function buildLeadsFilter(q: LeadQuery): Record<string, unknown> {
   const filter: Record<string, unknown> = {};
+  const andClauses: Record<string, unknown>[] = [];
 
   if (q.qualified === 'true') {
     filter['status'] = { $in: ['hot_verified', 'hot', 'warm'] };
@@ -48,12 +51,70 @@ function buildLeadsFilter(q: LeadQuery): Record<string, unknown> {
   }
   if (q.search) {
     const escaped = q.search.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    filter['$or'] = [
+    andClauses.push({
+      $or: [
       { name:   { $regex: escaped, $options: 'i' } },
       { domain: { $regex: escaped, $options: 'i' } },
-    ];
+      ],
+    });
   }
 
+  if (q.outreachReady === 'true') {
+    filter['status'] = { $nin: ['disqualified', 'pending'] };
+    filter['employeeCount'] = { ...(filter['employeeCount'] as Record<string, number> | undefined), $lte: 1000 };
+    filter['hqCountry'] = { $nin: ['India', 'Unknown', 'IN'] };
+    filter['openRoles.0'] = { $exists: true };
+    andClauses.push({
+      $or: [
+      { originRatio: { $gt: 0 } },
+      { originDevCount: { $gt: 0 } },
+      ],
+    });
+  }
+
+  if (andClauses.length > 0) {
+    filter['$and'] = andClauses;
+  }
+
+  return filter;
+}
+
+const OUTREACH_CONTACT_ROLE_FILTER = [
+  'CEO',
+  'Founder',
+  'Co-Founder',
+  'CTO',
+  'VP of Engineering',
+  'VP Engineering',
+  'Head of Engineering',
+  'Director of Engineering',
+  'Recruiter',
+  'Head of Talent',
+  'Talent Acquisition',
+  'Head of People',
+  'HR',
+  'Head of HR',
+  'VP of HR',
+];
+
+async function applyOutreachReadyContactFilter(filter: Record<string, unknown>, enabled?: string): Promise<Record<string, unknown>> {
+  if (enabled !== 'true') return filter;
+
+  const contactIds = await getCollection(COLLECTIONS.CONTACTS).distinct('companyId', {
+    forOriginRatio: { $ne: true },
+    role: { $in: OUTREACH_CONTACT_ROLE_FILTER },
+    $or: [
+      { email: { $exists: true, $ne: '' } },
+      { linkedinUrl: { $exists: true, $ne: '' } },
+    ],
+  });
+
+  const objectIds = contactIds.flatMap(id => {
+    if (typeof id !== 'string') return [];
+    try { return [new ObjectId(id)]; } catch { return []; }
+  });
+
+  filter['_id'] = objectIds.length > 0 ? { $in: objectIds } : { $in: [] };
   return filter;
 }
 
@@ -63,7 +124,7 @@ export async function leadsRoutes(app: FastifyInstance) {
     const { page = 1, limit = 50, sortBy = 'score', sortDir = 'desc' } = req.query;
     logger.info({ filters: req.query }, '[api:leads] GET /leads request');
 
-    const filter    = buildLeadsFilter(req.query);
+    const filter    = await applyOutreachReadyContactFilter(buildLeadsFilter(req.query), req.query.outreachReady);
     const sortField = VALID_SORT_FIELDS[sortBy] ?? 'score';
     const sortOrder = sortDir === 'asc' ? 1 : -1;
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 500);

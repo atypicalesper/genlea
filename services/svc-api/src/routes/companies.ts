@@ -81,29 +81,45 @@ export async function companiesRoutes(app: FastifyInstance) {
     return reply.send({ success: true });
   });
 
-  app.patch<{ Params: { id: string }; Body: { name?: string } }>(
+  app.patch<{ Params: { id: string }; Body: { name?: string; notes?: string } }>(
     '/companies/:id',
     async (req, reply) => {
       const { id } = req.params;
-      const name = req.body.name?.trim();
-      if (!name || name.length < 2 || name.length > 200) {
-        return reply.status(400).send({ success: false, error: 'Name must be between 2 and 200 characters' });
-      }
-
       const company = await companyRepository.findById(id);
       if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
 
-      const updated = await companyRepository.upsert({ domain: company.domain, name });
-      logger.info({ id, domain: company.domain, name }, '[api:companies] Company renamed');
+      const patch: { domain: string; name: string; notes?: string } = {
+        domain: company.domain,
+        name: company.name,
+      };
+
+      if (req.body.name !== undefined) {
+        const name = req.body.name.trim();
+        if (!name || name.length < 2 || name.length > 200) {
+          return reply.status(400).send({ success: false, error: 'Name must be between 2 and 200 characters' });
+        }
+        patch.name = name;
+      }
+
+      if (req.body.notes !== undefined) {
+        const notes = req.body.notes.trim();
+        if (notes.length > 2000) {
+          return reply.status(400).send({ success: false, error: 'Notes must be 2000 characters or fewer' });
+        }
+        patch.notes = notes;
+      }
+
+      const updated = await companyRepository.upsert(patch);
+      logger.info({ id, domain: company.domain, renamed: req.body.name !== undefined, notesUpdated: req.body.notes !== undefined }, '[api:companies] Company updated');
       return reply.send({ success: true, data: updated });
     }
   );
 
-  app.patch<{ Params: { id: string }; Body: { status: LeadStatus } }>(
+  app.patch<{ Params: { id: string }; Body: { status: LeadStatus; reason?: string } }>(
     '/companies/:id/status',
     async (req, reply) => {
       const { id } = req.params;
-      const { status } = req.body;
+      const { status, reason } = req.body;
       const validStatuses: LeadStatus[] = ['hot_verified', 'hot', 'warm', 'cold', 'disqualified', 'pending'];
       if (!validStatuses.includes(status)) {
         return reply.status(400).send({ success: false, error: 'Invalid status' });
@@ -111,7 +127,13 @@ export async function companiesRoutes(app: FastifyInstance) {
       const company = await companyRepository.findById(id);
       if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
 
-      await companyRepository.upsert({ domain: company.domain, name: company.name, status, manuallyReviewed: true });
+      await companyRepository.upsert({
+        domain: company.domain,
+        name: company.name,
+        status,
+        disqualificationReason: status === 'disqualified' ? (reason?.trim() || 'Manually disqualified') : '',
+        manuallyReviewed: true,
+      });
       const removedJobs = status === 'disqualified'
         ? await queueManager.removeCompanyPipelineJobs(id)
         : undefined;

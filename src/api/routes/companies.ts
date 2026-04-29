@@ -99,20 +99,36 @@ export async function companiesRoutes(app: FastifyInstance) {
   });
 
   // PATCH /api/companies/:id — edit lead metadata without touching pipeline status
-  app.patch<{ Params: { id: string }; Body: { name?: string } }>(
+  app.patch<{ Params: { id: string }; Body: { name?: string; notes?: string } }>(
     '/companies/:id',
     async (req, reply) => {
       const { id } = req.params;
-      const name = req.body.name?.trim();
-      if (!name || name.length < 2 || name.length > 200) {
-        return reply.status(400).send({ success: false, error: 'Name must be between 2 and 200 characters' });
-      }
-
       const company = await companyRepository.findById(id);
       if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
 
-      const updated = await companyRepository.upsert({ domain: company.domain, name });
-      logger.info({ id, domain: company.domain, name }, '[api:companies] Company renamed');
+      const patch: { domain: string; name: string; notes?: string } = {
+        domain: company.domain,
+        name: company.name,
+      };
+
+      if (req.body.name !== undefined) {
+        const name = req.body.name.trim();
+        if (!name || name.length < 2 || name.length > 200) {
+          return reply.status(400).send({ success: false, error: 'Name must be between 2 and 200 characters' });
+        }
+        patch.name = name;
+      }
+
+      if (req.body.notes !== undefined) {
+        const notes = req.body.notes.trim();
+        if (notes.length > 2000) {
+          return reply.status(400).send({ success: false, error: 'Notes must be 2000 characters or fewer' });
+        }
+        patch.notes = notes;
+      }
+
+      const updated = await companyRepository.upsert(patch);
+      logger.info({ id, domain: company.domain, renamed: req.body.name !== undefined, notesUpdated: req.body.notes !== undefined }, '[api:companies] Company updated');
       return reply.send({ success: true, data: updated });
     }
   );

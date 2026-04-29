@@ -172,6 +172,7 @@ export interface Company {
   sources: ScraperSource[];
   score: number;
   scoreBreakdown?: ScoreBreakdown;
+  notes?: string;
   disqualificationReason?: string;
   status: LeadStatus;
   pipelineStatus: PipelineStatus;
