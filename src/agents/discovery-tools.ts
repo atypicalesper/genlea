@@ -275,10 +275,11 @@ export function makeTools(job: DiscoveryJobData): StructuredToolInterface[] {
                 }
 
                 await queueManager.addEnrichmentJob({
-                  runId:     job.runId,
-                  companyId: company._id!,
-                  domain:    company.domain,
-                  sources:   ['github', 'hunter', 'clearbit'],
+                  runId:          job.runId,
+                  companyId:      company._id!,
+                  domain:         company.domain,
+                  sources:        ['github', 'hunter', 'clearbit'],
+                  correlationId:  job.correlationId,
                 });
                 return { outcome: 'saved', nameResolved, urlResolved };
               }

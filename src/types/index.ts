@@ -3,69 +3,16 @@
 // All shared types for scrapers, enrichment, scoring, and storage
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── Enums ─────────────────────────────────────────────────────────────────────
-
-export type ScraperSource =
-  | 'linkedin'
-  | 'sales_navigator'
-  | 'crunchbase'
-  | 'zoominfo'
-  | 'apollo'
-  | 'hunter'
-  | 'github'
-  | 'glassdoor'
-  | 'wellfound'
-  | 'clearbit'
-  | 'explorium'
-  | 'indeed'
-  | 'surelyremote'
-  | 'website'
-  | 'clay'
-  | 'greenhouse'
-  | 'lever'
-  | 'ashby'
-  | 'workable'
-  | 'agent';
-
-export type ContactRole =
-  | 'CEO' | 'Founder' | 'Co-Founder'
-  | 'CTO' | 'COO' | 'CPO' | 'CFO'
-  | 'VP of Engineering' | 'VP Engineering'
-  | 'VP of Product' | 'VP of Technology'
-  | 'Head of Engineering' | 'Director of Engineering'
-  | 'Head of Product' | 'Director of Product'
-  | 'Head of Technology' | 'Director of Technology'
-  | 'Engineering Manager'
-  | 'HR' | 'Head of HR' | 'VP of HR' | 'Head of People' | 'Recruiter' | 'Head of Talent' | 'Talent Acquisition'
-  | 'Unknown';
-
-export type FundingStage =
-  | 'Pre-seed'
-  | 'Seed'
-  | 'Series A'
-  | 'Series B'
-  | 'Series C'
-  | 'Series D+'
-  | 'Bootstrapped'
-  | 'Public'
-  | 'Acquired'
-  | 'Unknown';
-
-export type LeadStatus = 'hot_verified' | 'hot' | 'warm' | 'cold' | 'disqualified' | 'pending';
-
-export type PipelineStatus = 'discovered' | 'watchlist' | 'enriching' | 'enriched' | 'scoring' | 'scored';
-
-export type ScrapeJobStatus = 'queued' | 'processing' | 'success' | 'failed' | 'partial' | 'skipped';
-
-export type FailureMode =
-  | 'success'
-  | 'captcha'
-  | 'blocked'
-  | 'empty'
-  | 'network_error'
-  | 'selector_mismatch'
-  | 'timeout'
-  | 'unknown';
+// ── Enums — re-exported from the API contract (mirrored with frontend) ────────
+export type {
+  ScraperSource, ContactRole, FundingStage, LeadStatus, PipelineStatus,
+  ScrapeJobStatus, FailureMode,
+  PatchCompanyBody, PatchCompanyStatusBody, ScrapeRequestBody,
+} from '../shared-api-types.js';
+import type {
+  ScraperSource, ContactRole, FundingStage, LeadStatus, PipelineStatus,
+  ScrapeJobStatus, FailureMode,
+} from '../shared-api-types.js';
 
 // ── Scraper Interface ─────────────────────────────────────────────────────────
 
@@ -286,6 +233,8 @@ export interface DiscoveryJobData {
   runId: string;
   source: ScraperSource;
   query: ScrapeQuery;
+  /** Correlation ID — propagated end-to-end across services for tracing. */
+  correlationId?: string;
 }
 
 export interface EnrichmentJobData {
@@ -295,11 +244,13 @@ export interface EnrichmentJobData {
   sources: ScraperSource[];
   /** Skip the 24h cooldown — set when triggered manually via API */
   force?: boolean;
+  correlationId?: string;
 }
 
 export interface ScoringJobData {
   runId: string;
   companyId: string;
+  correlationId?: string;
 }
 
 // ── Proxy & Browser ───────────────────────────────────────────────────────────

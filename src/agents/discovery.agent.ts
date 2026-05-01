@@ -122,7 +122,7 @@ export async function runDiscoveryAgent(job: DiscoveryJobData): Promise<void> {
     await scrapeLogRepository.complete(logId, {
       status: 'failed', companiesFound: 0, contactsFound: 0, jobsFound: 0,
       errors: [msg], durationMs: Date.now() - startedAt,
-    }).catch(() => {});
+    }).catch(logErr => log.warn({ err: logErr, logId }, '[discovery.agent] Failed to write scrape log'));
     recordResult(source, 0);
     log.error({ err, runId, source }, '[discovery.agent] Failed');
     await alertAgentFailure({ agent: `discovery:${source}`, runId, error: err });

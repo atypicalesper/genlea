@@ -103,7 +103,9 @@ export class ScrapeDiagnostics {
     }
 
     if (summary.artifactBase) {
-      await writeFile(`${summary.artifactBase}.json`, JSON.stringify(summary, null, 2)).catch(() => {});
+      await writeFile(`${summary.artifactBase}.json`, JSON.stringify(summary, null, 2)).catch(err =>
+        logger.warn({ err, artifactBase: summary.artifactBase }, '[scrape-diagnostics] Failed to write summary JSON'),
+      );
     }
 
     const level = this.outcome === 'success' ? 'info' : 'warn';

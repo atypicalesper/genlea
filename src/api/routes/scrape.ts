@@ -1,22 +1,17 @@
 import { FastifyInstance } from 'fastify';
 import { queueManager } from '../../core/queue.manager.js';
 import { enqueueSeedRound } from '../../core/scheduler.js';
-import { ScrapeQuery, ScraperSource } from '../../types/index.js';
 import { generateRunId } from '../../utils/random.js';
 import { logger } from '../../utils/logger.js';
-
-const ALL_SOURCES: ScraperSource[] = [
-  'linkedin', 'crunchbase', 'apollo', 'wellfound',
-  'indeed', 'glassdoor', 'zoominfo', 'surelyremote',
-];
+import { scrapeBodySchema, parseBody } from '../schemas.js';
 
 export async function scrapeRoutes(app: FastifyInstance) {
 
-  // POST /api/seed — trigger all 26 seed queries immediately
-  app.post('/seed', async (_req, reply) => {
-    logger.info('[api:scrape] Manual seed triggered');
+  // POST /api/seed — trigger all seed queries immediately
+  app.post('/seed', async (req, reply) => {
+    logger.info({ correlationId: req.correlationId }, '[api:scrape] Manual seed triggered');
     const result = await enqueueSeedRound('manual').catch(err => {
-      logger.error({ err }, '[api:scrape] Seed failed');
+      logger.error({ err, correlationId: req.correlationId }, '[api:scrape] Seed failed');
       throw err;
     });
     return reply.status(202).send({
@@ -26,26 +21,20 @@ export async function scrapeRoutes(app: FastifyInstance) {
   });
 
   // POST /api/scrape — trigger a single scraper with custom query
-  app.post<{
-    Body: { source: ScraperSource; query: ScrapeQuery; limit?: number }
-  }>('/scrape', async (req, reply) => {
-    const { source, query, limit } = req.body;
-
-    if (!ALL_SOURCES.includes(source)) {
-      return reply.status(400).send({
-        success: false,
-        error: `Invalid source. Valid: ${ALL_SOURCES.join(', ')}`,
-      });
-    }
+  app.post('/scrape', async (req, reply) => {
+    const body = parseBody(scrapeBodySchema, req, reply);
+    if (!body) return;
+    const { source, query, limit } = body;
 
     const runId = generateRunId();
     await queueManager.addDiscoveryJob({
       runId,
       source,
-      query: { ...query, limit: limit ?? 25 },
+      query: { ...query, limit: limit ?? query.limit ?? 25 },
+      correlationId: req.correlationId,
     });
 
-    logger.info({ runId, source, keywords: query.keywords }, '[api:scrape] Discovery job queued');
+    logger.info({ runId, source, keywords: query.keywords, correlationId: req.correlationId }, '[api:scrape] Discovery job queued');
 
     return reply.status(202).send({
       success: true,

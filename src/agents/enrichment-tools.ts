@@ -29,7 +29,7 @@ import { logger }                      from '../utils/logger.js';
 import type { EnrichmentJobData, ContactRole } from '../types/index.js';
 
 export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
-  const { runId, companyId, domain } = job;
+  const { runId, companyId, domain, correlationId } = job;
   const hiringScrapers = {
     linkedin: linkedInScraper,
     wellfound: wellfoundScraper,
@@ -315,7 +315,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
           logger.warn({ url, domain, error: msg, cause, code }, '[enrichment-tools] playwright_scrape_url failed');
           return JSON.stringify({ error: msg, cause, code });
         } finally {
-          if (context) await context.close().catch(() => {});
+          if (context) await context.close().catch(err => logger.warn({ err, url, domain }, '[enrichment-tools] Browser context close failed'));
         }
       },
       {
@@ -461,7 +461,7 @@ export function makeTools(job: EnrichmentJobData): StructuredToolInterface[] {
 
         await companyRepository.setLastEnrichedAt(companyId);
         await companyRepository.setPipelineStatus(companyId, 'scoring');
-        await queueManager.addScoringJob({ runId, companyId });
+        await queueManager.addScoringJob({ runId, companyId, correlationId });
         return JSON.stringify({ queued: true });
       },
       {

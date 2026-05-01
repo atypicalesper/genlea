@@ -6,6 +6,10 @@ import { logger } from '../../utils/logger.js';
 
 type CompanyDoc = Omit<Company, '_id'> & { _id?: ObjectId };
 
+// Cap MongoDB cursor time so a slow/stalled query can't hold the connection pool.
+// Override per-call with options.maxTimeMS if you legitimately need more.
+const DEFAULT_MAX_TIME_MS = parseInt(process.env['MONGO_MAX_TIME_MS'] ?? '30000', 10);
+
 export const companyRepository = {
   /** Find a company by MongoDB _id */
   async findById(id: string): Promise<Company | null> {
@@ -27,7 +31,10 @@ export const companyRepository = {
     options: FindOptions = {}
   ): Promise<Company[]> {
     const col = getCollection<CompanyDoc>(COLLECTIONS.COMPANIES);
-    const docs = await col.find(filter, options).toArray();
+    // Cap server-side cursor time to avoid exhausting the MongoDB connection
+    // pool on a runaway query. Caller can override via options.maxTimeMS.
+    const maxTimeMS = options.maxTimeMS ?? DEFAULT_MAX_TIME_MS;
+    const docs = await col.find(filter, { ...options, maxTimeMS }).toArray();
     return docs.map(toCompany);
   },
 
@@ -42,7 +49,7 @@ export const companyRepository = {
     // Use caller-supplied threshold (from settingsRepository) — fall back to safe defaults
     const floor = minScore ?? (status === 'hot_verified' ? 80 : status === 'hot' ? 55 : 38);
     const docs = await col
-      .find({ status, score: { $gte: floor } })
+      .find({ status, score: { $gte: floor } }, { maxTimeMS: DEFAULT_MAX_TIME_MS })
       .sort({ score: -1 })
       .skip(skip)
       .limit(limit)
@@ -237,7 +244,7 @@ export const companyRepository = {
   },
 
   async count(filter: Filter<CompanyDoc> = {}): Promise<number> {
-    return getCollection<CompanyDoc>(COLLECTIONS.COMPANIES).countDocuments(filter);
+    return getCollection<CompanyDoc>(COLLECTIONS.COMPANIES).countDocuments(filter, { maxTimeMS: DEFAULT_MAX_TIME_MS });
   },
 
   async deleteOne(id: string): Promise<void> {

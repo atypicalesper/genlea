@@ -126,9 +126,9 @@ export class GlassdoorScraper implements Scraper {
       return [];
     }
 
-    // Dismiss sign-up modal if present
+    // Dismiss sign-up modal if present (best-effort — click may not match if modal absent)
     await page.locator('[alt="Close"], button[data-test="modal-close-btn"], .modal_closeButton').first()
-      .click().catch(() => {});
+      .click().catch(err => logger.debug({ err: err instanceof Error ? err.message : String(err) }, '[glassdoor] No sign-up modal to dismiss'));
     await browserManager.humanDelay(500, 1000);
 
     await diag.stage('scroll', () => browserManager.humanScroll(page, 4));
@@ -160,7 +160,7 @@ export class GlassdoorScraper implements Scraper {
       const hasMore = await moreBtn.isVisible().catch(() => false);
       if (!hasMore || listings.length >= limit) break;
 
-      await moreBtn.click().catch(() => {});
+      await moreBtn.click().catch(err => logger.debug({ err: err instanceof Error ? err.message : String(err) }, '[glassdoor] Load-more click failed — yielding partial results'));
       await browserManager.humanDelay(2000, 4000);
       attempts++;
     }

@@ -2,6 +2,8 @@ import dotenvFlow from 'dotenv-flow';
 dotenvFlow.config();
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
+import { randomUUID } from 'crypto';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter.js';
 import { FastifyAdapter } from '@bull-board/fastify';
@@ -64,6 +66,25 @@ async function bootstrap() {
 
   await server.register(cors, { origin: '*' });
 
+  // Rate limit — protect public endpoints from abuse / accidental floods
+  await server.register(rateLimit, {
+    global: true,
+    max: parseInt(process.env['RATE_LIMIT_MAX'] ?? '300', 10), // requests
+    timeWindow: parseInt(process.env['RATE_LIMIT_WINDOW_MS'] ?? '60000', 10), // per window
+    allowList: (req) => req.url === '/health' || req.url.startsWith('/queues'),
+    keyGenerator: (req) => req.ip,
+  });
+
+  // Correlation ID — generated per request, attached to logs and response header
+  server.addHook('onRequest', async (req, reply) => {
+    const incoming = req.headers['x-correlation-id'];
+    const correlationId = typeof incoming === 'string' && incoming.length <= 64
+      ? incoming
+      : randomUUID();
+    (req as { correlationId?: string }).correlationId = correlationId;
+    reply.header('x-correlation-id', correlationId);
+  });
+
   // ── Bull Board (/queues) ───────────────────────────────────────────────────
   const bullBoardAdapter = new FastifyAdapter();
   createBullBoard({
@@ -111,6 +132,11 @@ async function bootstrap() {
   logger.info('[api] Active discovery sources:');
   logAvailableSources();
 
+  // Start queue backpressure monitor — warns when queues exceed threshold
+  const backpressureInterval = queueManager.startBackpressureMonitor(
+    parseInt(process.env['QUEUE_BACKPRESSURE_INTERVAL_MS'] ?? '30000', 10),
+  );
+
   const port = parseInt(process.env['API_PORT'] ?? '4000');
   const host = process.env['API_HOST'] ?? '0.0.0.0';
 
@@ -121,6 +147,7 @@ async function bootstrap() {
   // Graceful shutdown — finish in-flight requests before exiting
   const shutdown = async (signal: string) => {
     logger.info({ signal }, '[api] Shutdown signal received — closing server');
+    clearInterval(backpressureInterval);
     await server.close();
     logger.info('[api] Server closed — exiting');
     process.exit(0);

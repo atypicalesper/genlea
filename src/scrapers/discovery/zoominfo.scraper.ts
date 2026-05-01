@@ -125,7 +125,7 @@ export class ZoomInfoScraper implements Scraper {
       if (loginBtn) await loginBtn.click();
 
       // Wait for dashboard
-      await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 20000 }).catch(() => {});
+      await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 20000 }).catch(err => logger.debug({ err: err instanceof Error ? err.message : String(err) }, '[zoominfo:login] Post-login navigation timed out — continuing'));
       await browserManager.humanDelay(2000, 4000);
 
       if (await browserManager.detectCaptcha(page)) {

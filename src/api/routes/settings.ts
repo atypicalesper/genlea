@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { settingsRepository } from '../../storage/repositories/settings.repository.js';
 import { logger } from '../../utils/logger.js';
+import { settingsBodySchema, parseBody } from '../schemas.js';
 
 export async function settingsRoutes(app: FastifyInstance) {
 
@@ -11,31 +12,19 @@ export async function settingsRoutes(app: FastifyInstance) {
   });
 
   // PATCH /api/settings
-  app.patch<{ Body: Record<string, unknown> }>('/settings', async (req, reply) => {
-    const numericFields = ['originRatioThreshold', 'originRatioMinSample', 'leadScoreHotVerifiedThreshold', 'leadScoreHotThreshold', 'leadScoreWarmThreshold', 'leadScoreColdThreshold', 'workerConcurrencyDiscovery', 'workerConcurrencyEnrichment', 'workerConcurrencyScoring', 'maxConcurrentBrowsers'];
-    const arrayFields   = ['targetTechTags', 'highValueIndustries'];
+  app.patch('/settings', async (req, reply) => {
+    const body = parseBody(settingsBodySchema, req, reply);
+    if (!body) return;
     const updates: Record<string, unknown> = {};
-
-    for (const key of numericFields) {
-      if (key in req.body) {
-        const val = Number(req.body[key]);
-        if (!isNaN(val)) updates[key] = val;
-      }
+    for (const [key, val] of Object.entries(body)) {
+      if (val === undefined) continue;
+      updates[key] = Array.isArray(val) ? val.map(v => v.trim()).filter(Boolean) : val;
     }
-    for (const key of arrayFields) {
-      if (key in req.body) {
-        const val = req.body[key];
-        if (Array.isArray(val) && val.every(v => typeof v === 'string')) {
-          updates[key] = val.map((v: string) => v.trim()).filter(Boolean);
-        }
-      }
-    }
-
     if (Object.keys(updates).length === 0) {
       return reply.status(400).send({ success: false, error: 'No valid fields provided' });
     }
     const settings = await settingsRepository.patch(updates as any);
-    logger.info({ updates }, '[api:settings] Settings updated');
+    logger.info({ updates, correlationId: req.correlationId }, '[api:settings] Settings updated');
     return reply.send({ success: true, data: settings });
   });
 }

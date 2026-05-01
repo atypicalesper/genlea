@@ -25,7 +25,7 @@ function cap(n: number): number {
 
 async function processDiscoveryJob(job: Job<DiscoveryJobData>): Promise<void> {
   // Keep worker logic thin so retries/restarts always execute the same agent entrypoint.
-  logger.info({ runId: job.data.runId, source: job.data.source }, '[discovery.worker] Delegating to discovery agent');
+  logger.info({ runId: job.data.runId, source: job.data.source, correlationId: job.data.correlationId }, '[discovery.worker] Delegating to discovery agent');
   await runDiscoveryAgent(job.data);
 }
 

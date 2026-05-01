@@ -4,6 +4,7 @@ import { companyRepository } from '../../storage/repositories/company.repository
 import { getCollection, COLLECTIONS } from '../../storage/mongo.client.js';
 import { LeadStatus, LeadFilter } from '../../types/index.js';
 import { logger } from '../../utils/logger.js';
+import { leadsQuerySchema, parseQuery } from '../schemas.js';
 
 const VALID_SORT_FIELDS: Record<string, string> = {
   score: 'score', originRatio: 'originRatio', employeeCount: 'employeeCount',
@@ -15,8 +16,11 @@ type LeadQuery = LeadFilter & {
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
   qualified?: string;
-  maxScore?: string;
+  maxScore?: string | number;
+  minScore?: string | number;
   outreachReady?: string;
+  page?: number;
+  limit?: number;
 };
 
 function shouldPushDisqualifiedToEnd(q: LeadQuery): boolean {
@@ -130,18 +134,26 @@ async function applyOutreachReadyContactFilter(filter: Record<string, unknown>, 
 export async function leadsRoutes(app: FastifyInstance) {
 
   // GET /api/leads — paginated, filterable, sortable list
-  app.get<{ Querystring: LeadQuery }>('/leads', async (req, reply) => {
-    const { page = 1, limit = 50, sortBy = 'score', sortDir = 'desc' } = req.query;
-    logger.info({ filters: req.query }, '[api:leads] GET /leads request');
+  app.get('/leads', async (req, reply) => {
+    const q = parseQuery(leadsQuerySchema, req, reply);
+    if (!q) return;
+    const { page = 1, limit = 50, sortBy = 'score', sortDir = 'desc' } = q;
+    const correlationId = req.correlationId;
+    logger.info({ filters: q, correlationId }, '[api:leads] GET /leads request');
 
-    const filter    = await applyOutreachReadyContactFilter(buildLeadsFilter(req.query), req.query.outreachReady);
+    const queryForFilter: LeadQuery = {
+      ...q,
+      minScore: q.minScore !== undefined ? String(q.minScore) : undefined,
+      maxScore: q.maxScore !== undefined ? String(q.maxScore) : undefined,
+    } as LeadQuery;
+    const filter    = await applyOutreachReadyContactFilter(buildLeadsFilter(queryForFilter), q.outreachReady);
     const sortField = VALID_SORT_FIELDS[sortBy] ?? 'score';
     const sortOrder = sortDir === 'asc' ? 1 : -1;
-    const safeLimit = Math.min(Number(limit), 500);
-    const skip      = (Number(page) - 1) * safeLimit;
+    const safeLimit = Math.min(limit, 500);
+    const skip      = (page - 1) * safeLimit;
 
     const [companies, total] = await Promise.all([
-      shouldPushDisqualifiedToEnd(req.query)
+      shouldPushDisqualifiedToEnd(queryForFilter)
         ? getCollection(COLLECTIONS.COMPANIES)
             .aggregate([
               { $match: filter },
@@ -163,11 +175,11 @@ export async function leadsRoutes(app: FastifyInstance) {
       companyRepository.count(filter),
     ]);
 
-    logger.info({ total, returned: companies.length }, '[api:leads] Responding');
+    logger.info({ total, returned: companies.length, correlationId }, '[api:leads] Responding');
     return reply.send({
       success: true,
       data: companies,
-      meta: { total, page: Number(page), limit: safeLimit, pages: Math.ceil(total / Math.max(safeLimit, 1)) },
+      meta: { total, page, limit: safeLimit, pages: Math.ceil(total / Math.max(safeLimit, 1)) },
     });
   });
 

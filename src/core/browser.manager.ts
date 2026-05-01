@@ -176,8 +176,12 @@ export class BrowserManager {
   async newPage(context: BrowserContext): Promise<Page> {
     const page = await context.newPage();
 
-    page.setDefaultTimeout(20_000);
-    page.setDefaultNavigationTimeout(30_000);
+    // Timeouts are env-tunable so we can dial up under flaky network conditions
+    // without redeploying. Defaults match the historical 20s/30s.
+    const defaultTimeout    = parseInt(process.env['PAGE_DEFAULT_TIMEOUT_MS']    ?? '20000', 10);
+    const navigationTimeout = parseInt(process.env['PAGE_NAVIGATION_TIMEOUT_MS'] ?? '30000', 10);
+    page.setDefaultTimeout(defaultTimeout);
+    page.setDefaultNavigationTimeout(navigationTimeout);
 
     // Block static assets — no value for scraping
     await page.route('**/*.{png,jpg,jpeg,gif,webp,svg,ico,mp4,webm,ogg,mp3,wav,woff,woff2,ttf,eot}', route => route.abort());
@@ -272,6 +276,51 @@ export class BrowserManager {
 
   get maxBrowserCount(): number {
     return this.maxConcurrent;
+  }
+
+  /**
+   * Pre-warm browser instances so the first scraper job in a worker doesn't pay
+   * the full launch cost. Best-effort — if launch fails (e.g. proxy down) we
+   * log and let the job-time launch path retry.
+   */
+  async warmup(count = 1): Promise<void> {
+    const target = Math.min(count, this.maxConcurrent);
+    logger.info({ target }, '[browser.manager] Warming up browser pool');
+    const launches = Array.from({ length: target }, (_, i) =>
+      this.launchBrowser(`warm-${i}`).catch(err =>
+        logger.warn({ err, index: i }, '[browser.manager] Warmup launch failed — will retry on demand'),
+      ),
+    );
+    await Promise.all(launches);
+  }
+
+  /**
+   * Periodic heartbeat: navigate each pooled browser to about:blank so we
+   * surface dead/zombie browser processes early instead of mid-scrape.
+   * Returns the interval handle so callers can clear it on shutdown.
+   */
+  startHeartbeat(intervalMs = 5 * 60_000): NodeJS.Timeout {
+    const tick = async () => {
+      for (const [id, browser] of this.browsers.entries()) {
+        try {
+          if (!browser.isConnected()) {
+            logger.warn({ browserId: id }, '[browser.manager] Browser is disconnected — closing');
+            await this.closeBrowser(id);
+            continue;
+          }
+          const ctx = await browser.newContext();
+          const page = await ctx.newPage();
+          await page.goto('about:blank', { timeout: 5_000 });
+          await ctx.close();
+        } catch (err) {
+          logger.warn({ err, browserId: id }, '[browser.manager] Heartbeat failed — closing browser');
+          await this.closeBrowser(id).catch(closeErr =>
+            logger.warn({ err: closeErr, browserId: id }, '[browser.manager] Forced close failed'),
+          );
+        }
+      }
+    };
+    return setInterval(tick, intervalMs);
   }
 }
 

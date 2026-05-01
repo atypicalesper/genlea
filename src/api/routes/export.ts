@@ -2,21 +2,21 @@ import { FastifyInstance } from 'fastify';
 import { stringify } from 'csv-stringify/sync';
 import { companyRepository } from '../../storage/repositories/company.repository.js';
 import { contactRepository } from '../../storage/repositories/contact.repository.js';
-import { LeadStatus } from '../../types/index.js';
 import { logger } from '../../utils/logger.js';
 import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
+import { exportCsvQuerySchema, parseQuery } from '../schemas.js';
 
 export async function exportRoutes(app: FastifyInstance) {
 
   // GET /api/export/csv?status=hot&minScore=65  (both optional — omit for all)
-  app.get<{ Querystring: { status?: LeadStatus; minScore?: string } }>(
-    '/export/csv',
-    async (req, reply) => {
-      const { status, minScore: minScoreStr } = req.query;
-      const minScore = minScoreStr ? parseInt(minScoreStr) : 0;
+  app.get('/export/csv', async (req, reply) => {
+      const q = parseQuery(exportCsvQuerySchema, req, reply);
+      if (!q) return;
+      const { status } = q;
+      const minScore = q.minScore ?? 0;
 
-      logger.info({ status, minScore }, '[api:export] CSV export requested');
+      logger.info({ status, minScore, correlationId: req.correlationId }, '[api:export] CSV export requested');
 
       const filter: Record<string, unknown> = {};
       if (status)   filter['status'] = status;
@@ -83,6 +83,5 @@ export async function exportRoutes(app: FastifyInstance) {
         .header('X-Total-Count', String(total))
         .header('X-Truncated',   String(total > EXPORT_LIMIT))
         .send(csv);
-    }
-  );
+  });
 }

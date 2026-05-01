@@ -74,7 +74,7 @@ const USER_PROMPT_TEMPLATE = [
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> {
-  const { runId, companyId, domain, force } = job;
+  const { runId, companyId, domain, force, correlationId } = job;
   const startedAt = Date.now();
 
   const company = await companyRepository.findById(companyId);
@@ -101,8 +101,8 @@ export async function runEnrichmentAgent(job: EnrichmentJobData): Promise<void> 
   if (!force && company.lastEnrichedAt) {
     const ageMs = Date.now() - new Date(company.lastEnrichedAt).getTime();
     if (ageMs < COOLDOWN_MS) {
-      log.info({ domain, ageHours: (ageMs / 3_600_000).toFixed(1) }, '[enrichment.agent] Cooldown — queuing scoring only');
-      await queueManager.addScoringJob({ runId, companyId });
+      log.info({ domain, ageHours: (ageMs / 3_600_000).toFixed(1), correlationId }, '[enrichment.agent] Cooldown — queuing scoring only');
+      await queueManager.addScoringJob({ runId, companyId, correlationId });
       return;
     }
   }

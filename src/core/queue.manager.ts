@@ -46,17 +46,17 @@ export const scoringQueue = new Queue<ScoringJobData>(QUEUE_NAMES.SCORING, {
 export class QueueManager {
   async addDiscoveryJob(data: DiscoveryJobData): Promise<void> {
     await discoveryQueue.add(`discovery:${data.source}:${data.runId}`, data);
-    logger.debug({ runId: data.runId, source: data.source }, 'Discovery job queued');
+    logger.debug({ runId: data.runId, source: data.source, correlationId: data.correlationId }, 'Discovery job queued');
   }
 
   async addEnrichmentJob(data: EnrichmentJobData): Promise<void> {
     await enrichmentQueue.add(`enrich:${data.domain}:${data.runId}`, data);
-    logger.debug({ runId: data.runId, domain: data.domain }, 'Enrichment job queued');
+    logger.debug({ runId: data.runId, domain: data.domain, correlationId: data.correlationId }, 'Enrichment job queued');
   }
 
   async addScoringJob(data: ScoringJobData): Promise<void> {
     await scoringQueue.add(`score:${data.companyId}:${data.runId}`, data);
-    logger.debug({ runId: data.runId, companyId: data.companyId }, 'Scoring job queued');
+    logger.debug({ runId: data.runId, companyId: data.companyId, correlationId: data.correlationId }, 'Scoring job queued');
   }
 
   async removeCompanyPipelineJobs(companyId: string): Promise<{ enrichment: number; scoring: number }> {
@@ -176,6 +176,33 @@ export class QueueManager {
       scoringQueue.close(),
     ]);
     logger.info('All queues closed');
+  }
+
+  /**
+   * Periodically log queue depth and warn when any queue exceeds the
+   * backpressure threshold. Returns the interval handle so callers can clear it.
+   */
+  startBackpressureMonitor(intervalMs = 30_000): NodeJS.Timeout {
+    const warnThreshold = parseInt(process.env['QUEUE_BACKPRESSURE_THRESHOLD'] ?? '5000', 10);
+    const tick = async () => {
+      try {
+        const stats = await this.getQueueStats();
+        for (const [name, counts] of Object.entries(stats)) {
+          const waiting = counts.waiting ?? 0;
+          const failed = counts.failed ?? 0;
+          if (waiting > warnThreshold) {
+            logger.warn({ queue: name, waiting, threshold: warnThreshold }, '[queue] Backpressure — queue exceeds threshold');
+          }
+          if (failed > warnThreshold / 5) {
+            logger.warn({ queue: name, failed }, '[queue] High failed-job count');
+          }
+        }
+      } catch (err) {
+        logger.warn({ err }, '[queue] Backpressure monitor tick failed');
+      }
+    };
+    void tick();
+    return setInterval(tick, intervalMs);
   }
 }
 

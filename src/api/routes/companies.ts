@@ -4,8 +4,18 @@ import { contactRepository } from '../../storage/repositories/contact.repository
 import { jobRepository } from '../../storage/repositories/job.repository.js';
 import { queueManager } from '../../core/queue.manager.js';
 import { generateRunId } from '../../utils/random.js';
-import type { Contact, LeadStatus } from '../../types/index.js';
+import type { Contact } from '../../types/index.js';
 import { logger } from '../../utils/logger.js';
+import {
+  objectIdParam,
+  domainParamSchema,
+  patchCompanyBodySchema,
+  patchCompanyStatusBodySchema,
+  contactsForCompaniesQuerySchema,
+  parseParams,
+  parseBody,
+  parseQuery,
+} from '../schemas.js';
 
 const CONTACT_ROLE_ORDER: Record<string, number> = {
   'CEO': 0, 'Founder': 1, 'Co-Founder': 2, 'CTO': 3,
@@ -24,9 +34,11 @@ function sortContactsByRole(contacts: Contact[]): Contact[] {
 export async function companiesRoutes(app: FastifyInstance) {
 
   // GET /api/companies/:id — full company profile with contacts + jobs
-  app.get<{ Params: { id: string } }>('/companies/:id', async (req, reply) => {
-    const { id } = req.params;
-    logger.info({ id }, '[api:companies] GET /companies/:id');
+  app.get('/companies/:id', async (req, reply) => {
+    const params = parseParams(objectIdParam, req, reply);
+    if (!params) return;
+    const { id } = params;
+    logger.info({ id, correlationId: req.correlationId }, '[api:companies] GET /companies/:id');
 
     const [company, contacts, jobs] = await Promise.all([
       companyRepository.findById(id),
@@ -70,9 +82,11 @@ export async function companiesRoutes(app: FastifyInstance) {
   });
 
   // GET /api/companies/domain/:domain — look up by domain instead of _id
-  app.get<{ Params: { domain: string } }>('/companies/domain/:domain', async (req, reply) => {
-    const { domain } = req.params;
-    logger.info({ domain }, '[api:companies] GET /companies/domain/:domain');
+  app.get('/companies/domain/:domain', async (req, reply) => {
+    const params = parseParams(domainParamSchema, req, reply);
+    if (!params) return;
+    const { domain } = params;
+    logger.info({ domain, correlationId: req.correlationId }, '[api:companies] GET /companies/domain/:domain');
 
     const company = await companyRepository.findByDomain(domain);
     if (!company) {
@@ -84,8 +98,10 @@ export async function companiesRoutes(app: FastifyInstance) {
   });
 
   // DELETE /api/companies/:id — remove company + its contacts + jobs
-  app.delete<{ Params: { id: string } }>('/companies/:id', async (req, reply) => {
-    const { id } = req.params;
+  app.delete('/companies/:id', async (req, reply) => {
+    const params = parseParams(objectIdParam, req, reply);
+    if (!params) return;
+    const { id } = params;
     const company = await companyRepository.findById(id);
     if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
 
@@ -99,75 +115,67 @@ export async function companiesRoutes(app: FastifyInstance) {
   });
 
   // PATCH /api/companies/:id — edit lead metadata without touching pipeline status
-  app.patch<{ Params: { id: string }; Body: { name?: string; notes?: string } }>(
-    '/companies/:id',
-    async (req, reply) => {
-      const { id } = req.params;
-      const company = await companyRepository.findById(id);
-      if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
+  app.patch('/companies/:id', async (req, reply) => {
+    const params = parseParams(objectIdParam, req, reply);
+    if (!params) return;
+    const body = parseBody(patchCompanyBodySchema, req, reply);
+    if (!body) return;
+    const { id } = params;
 
-      const patch: { domain: string; name: string; notes?: string } = {
-        domain: company.domain,
-        name: company.name,
-      };
+    const company = await companyRepository.findById(id);
+    if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
 
-      if (req.body.name !== undefined) {
-        const name = req.body.name.trim();
-        if (!name || name.length < 2 || name.length > 200) {
-          return reply.status(400).send({ success: false, error: 'Name must be between 2 and 200 characters' });
-        }
-        patch.name = name;
-      }
+    const patch: { domain: string; name: string; notes?: string } = {
+      domain: company.domain,
+      name: body.name ?? company.name,
+    };
+    if (body.notes !== undefined) patch.notes = body.notes.trim();
 
-      if (req.body.notes !== undefined) {
-        const notes = req.body.notes.trim();
-        if (notes.length > 2000) {
-          return reply.status(400).send({ success: false, error: 'Notes must be 2000 characters or fewer' });
-        }
-        patch.notes = notes;
-      }
-
-      const updated = await companyRepository.upsert(patch);
-      logger.info({ id, domain: company.domain, renamed: req.body.name !== undefined, notesUpdated: req.body.notes !== undefined }, '[api:companies] Company updated');
-      return reply.send({ success: true, data: updated });
-    }
-  );
+    const updated = await companyRepository.upsert(patch);
+    logger.info({
+      id, domain: company.domain,
+      renamed: body.name !== undefined,
+      notesUpdated: body.notes !== undefined,
+      correlationId: req.correlationId,
+    }, '[api:companies] Company updated');
+    return reply.send({ success: true, data: updated });
+  });
 
   // PATCH /api/companies/:id/status — manually override lead status
-  app.patch<{ Params: { id: string }; Body: { status: LeadStatus; reason?: string } }>(
-    '/companies/:id/status',
-    async (req, reply) => {
-      const { id } = req.params;
-      const { status, reason } = req.body;
-      const validStatuses: LeadStatus[] = ['hot_verified', 'hot', 'warm', 'cold', 'disqualified', 'pending'];
-      if (!validStatuses.includes(status)) {
-        return reply.status(400).send({ success: false, error: 'Invalid status' });
-      }
-      const company = await companyRepository.findById(id);
-      if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
+  app.patch('/companies/:id/status', async (req, reply) => {
+    const params = parseParams(objectIdParam, req, reply);
+    if (!params) return;
+    const body = parseBody(patchCompanyStatusBodySchema, req, reply);
+    if (!body) return;
+    const { id } = params;
+    const { status, reason } = body;
 
-      await companyRepository.upsert({
-        domain: company.domain,
-        name: company.name,
-        status,
-        disqualificationReason: status === 'disqualified' ? (reason ?? 'Manually disqualified') : '',
-        manuallyReviewed: true,
-      });
-      const removedJobs = status === 'disqualified'
-        ? await queueManager.removeCompanyPipelineJobs(id)
-        : undefined;
-      if (status === 'disqualified') {
-        await companyRepository.setPipelineStatus(id, 'scored');
-      }
+    const company = await companyRepository.findById(id);
+    if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
 
-      logger.info({ id, domain: company.domain, status, removedJobs }, '[api:companies] Status overridden');
-      return reply.send({ success: true, data: { status, removedJobs } });
+    await companyRepository.upsert({
+      domain: company.domain,
+      name: company.name,
+      status,
+      disqualificationReason: status === 'disqualified' ? (reason ?? 'Manually disqualified') : '',
+      manuallyReviewed: true,
+    });
+    const removedJobs = status === 'disqualified'
+      ? await queueManager.removeCompanyPipelineJobs(id)
+      : undefined;
+    if (status === 'disqualified') {
+      await companyRepository.setPipelineStatus(id, 'scored');
     }
-  );
+
+    logger.info({ id, domain: company.domain, status, removedJobs, correlationId: req.correlationId }, '[api:companies] Status overridden');
+    return reply.send({ success: true, data: { status, removedJobs } });
+  });
 
   // POST /api/companies/:id/enrich — re-queue enrichment for a company
-  app.post<{ Params: { id: string } }>('/companies/:id/enrich', async (req, reply) => {
-    const { id } = req.params;
+  app.post('/companies/:id/enrich', async (req, reply) => {
+    const params = parseParams(objectIdParam, req, reply);
+    if (!params) return;
+    const { id } = params;
     const company = await companyRepository.findById(id);
     if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
     if (company.status === 'disqualified' && company.manuallyReviewed) {
@@ -175,14 +183,16 @@ export async function companiesRoutes(app: FastifyInstance) {
     }
 
     const runId = generateRunId();
-    await queueManager.addEnrichmentJob({ runId, companyId: id, domain: company.domain, sources: ['github', 'hunter', 'clearbit'], force: true });
-    logger.info({ id, domain: company.domain, runId }, '[api:companies] Re-enrichment queued');
+    await queueManager.addEnrichmentJob({ runId, companyId: id, domain: company.domain, sources: ['github', 'hunter', 'clearbit'], force: true, correlationId: req.correlationId });
+    logger.info({ id, domain: company.domain, runId, correlationId: req.correlationId }, '[api:companies] Re-enrichment queued');
     return reply.status(202).send({ success: true, data: { runId } });
   });
 
   // POST /api/companies/:id/score — re-queue scoring for a company
-  app.post<{ Params: { id: string } }>('/companies/:id/score', async (req, reply) => {
-    const { id } = req.params;
+  app.post('/companies/:id/score', async (req, reply) => {
+    const params = parseParams(objectIdParam, req, reply);
+    if (!params) return;
+    const { id } = params;
     const company = await companyRepository.findById(id);
     if (!company) return reply.status(404).send({ success: false, error: 'Not found' });
     if (company.status === 'disqualified' && company.manuallyReviewed) {
@@ -190,15 +200,17 @@ export async function companiesRoutes(app: FastifyInstance) {
     }
 
     const runId = generateRunId();
-    await queueManager.addScoringJob({ runId, companyId: id });
-    logger.info({ id, domain: company.domain, runId }, '[api:companies] Re-scoring queued');
+    await queueManager.addScoringJob({ runId, companyId: id, correlationId: req.correlationId });
+    logger.info({ id, domain: company.domain, runId, correlationId: req.correlationId }, '[api:companies] Re-scoring queued');
     return reply.status(202).send({ success: true, data: { runId } });
   });
 
   // GET /api/contacts/for-companies?ids=id1,id2,... — batch fetch contacts for multiple companies
   app.get('/contacts/for-companies', async (req, reply) => {
-    const idsParam = String((req.query as { ids?: string }).ids || '');
-    const ids = idsParam.split(',').map(s => s.trim()).filter(Boolean);
+    const q = parseQuery(contactsForCompaniesQuerySchema, req, reply);
+    if (!q) return;
+    const idsParam = q.ids ?? '';
+    const ids = idsParam.split(',').map(s => s.trim()).filter(Boolean).slice(0, 500);
     if (!ids.length) return reply.send({ success: true, data: {} });
 
     const map = await contactRepository.findByCompanyIds(ids);
@@ -208,7 +220,7 @@ export async function companiesRoutes(app: FastifyInstance) {
   });
 
   // GET /api/companies — same as /leads but grouped — alias for convenience
-  app.get('/companies', async (req, reply) => {
+  app.get('/companies', async (_req, reply) => {
     return reply.redirect('/api/leads');
   });
 }
